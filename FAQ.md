@@ -82,6 +82,34 @@ This turns a vague warning into an actionable, evidence‑backed finding.
 
 ---
 
+## What does a finding look like?
+
+Every security finding in the report follows a consistent, developer‑friendly structure:
+
+1. **What was found**  
+   A factual description, e.g. *“Private RSA key recovered from process memory”*.
+
+2. **Risk level**  
+   **Critical / High / Medium / Low / Informational** — based on the sensitivity of the data and the context.
+
+3. **Why it matters**  
+   A short explanation of how this issue can be exploited. For example:  
+   *“An attacker who obtains a memory dump can extract the private key and impersonate the server.”*
+
+4. **Evidence**  
+   Concrete proofs: memory addresses, system call arguments, file paths, timestamps. Everything can be verified.
+
+5. **How to fix**  
+   Actionable guidance grounded in security best practices. For instance:  
+   *“Use OS‑protected key storage, minimise the plaintext key lifetime, or switch to hardware‑backed keys.”*
+
+6. **Confidence**  
+   How certain the engine is about the finding (e.g. **98%** for a hardcoded key, lower for inferred data flows).
+
+This way you don’t just get a list of problems — you get a **remediation roadmap** with all the supporting evidence.
+
+---
+
 ## Does RuntimeXRay replace IDA, Ghidra, or Frida?
 
 No. Those are interactive reverse‑engineering tools used by security researchers to manually understand binaries.  
