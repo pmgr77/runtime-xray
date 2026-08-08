@@ -53,22 +53,22 @@ concrete memory contents, system call arguments, actual network destinations, an
 Data lineage is the ability to trace **how a piece of sensitive information travels through the application**:
 
 config.json
-│
-▼
+    |
+    v
 parse_config()
-│
-▼
+    |
+    v
 encrypted_secret
-│
-▼
+    |
+    v
 decrypt()
-│
-▼
+    |
+    v
 plaintext_key (in memory, 4.7 sec)
-│
-├──► TLS setup
-└──► HTTP header → api.example.com
-
+    |
+    +---> TLS setup
+    |
+    +---> HTTP header -> api.example.com
 
 Instead of just saying “a password was found”, RuntimeXRay shows you:
 - **Where** the secret came from (file, environment, network)
