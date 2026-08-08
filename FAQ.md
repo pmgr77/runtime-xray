@@ -51,24 +51,25 @@ concrete memory contents, system call arguments, actual network destinations, an
 ## What is “data lineage” and why does it matter?
 
 Data lineage is the ability to trace **how a piece of sensitive information travels through the application**:
+```
 config.json
-|
-v
+    |
+    v
 parse_config()
-|
-v
+    |
+    v
 encrypted_secret
-|
-v
+    |
+    v
 decrypt()
-|
-v
+    |
+    v
 plaintext_key (in memory, 4.7 sec)
-|
-+---> TLS setup
-|
-+---> HTTP header -> api.example.com
-
+    |
+    +---> TLS setup
+    |
+    +---> HTTP header -> api.example.com
+```
 
 Instead of just saying “a password was found”, RuntimeXRay shows you:
 
