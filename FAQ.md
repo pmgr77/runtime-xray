@@ -30,6 +30,32 @@ The result is a **security posture scorecard** for your compiled code, not a mal
 
 ---
 
+## How does RuntimeXRay help in the age of AI‑generated (“vibe”) code?
+
+AI assistants now write thousands of lines of code in seconds. This boosts productivity, but it
+also creates a serious trust gap:
+
+- **Source review is not enough** – AI‑generated code may look correct yet introduce
+  hardcoded tokens, weak encryption, or unexpected network calls that only manifest at runtime.
+- **Hidden backdoors or logic bombs** are extremely difficult to spot by reading the source
+  alone, but they leave observable traces in the executed binary.
+- **Subtle security mistakes** (e.g., leaving a private key in memory for too long, disabling
+  certificate validation) often survive code review and static analysis.
+
+RuntimeXRay acts as a **post‑build security verifier** specifically designed for this
+challenge. You compile the AI‑written code, run the binary in a sandbox, and get an
+evidence‑based report that shows:
+
+- What secrets actually appear in memory and where they travel (data lineage).
+- Whether the binary respects modern hardening (NX, PIE, RELRO, stack canary).
+- If sensitive data reaches the network, a log file, or an unexpected process.
+- Which weak cryptographic primitives are in use, even if called indirectly.
+
+This gives you **confidence that the compiled artifact does not hide dangerous
+behaviour** — regardless of how (or by whom) the source was written.
+
+---
+
 ## If I have source code, can’t a strong AI just find all the issues?
 
 Source‑level AI is extremely valuable, but it **cannot observe what actually happens at runtime**.  
