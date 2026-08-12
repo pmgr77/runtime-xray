@@ -1,13 +1,9 @@
 /**
- * @file    main.cpp
- * @brief   Entry point for RuntimeXRay – analyzes binary files for security findings.
- *
- * Currently implements a minimal ELF detector that checks the first four bytes
- * (the ELF magic number). Later it will orchestrate static and dynamic analysis
- * pipelines and generate developer-friendly security reports.
+ * @file    elf_parser.hpp
+ * @brief   Declares the ELF parsing interface for RuntimeXRay.
  *
  * @author  Peter Magram
- * @date    2026-08-10
+ * @date    2026-08-12
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -26,21 +22,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "mapped_file.hpp"
-#include "elf_parser.hpp"
-#include <iostream>
+#ifndef RUNTIMEXRAY_ELF_PARSER_HPP
+#define RUNTIMEXRAY_ELF_PARSER_HPP
 
-int main(int argc, char* argv[])
-{
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <binary>\n";
-	return 1;
-    }
+#include <string>
 
-    try {
-        runtimexray::parse_elf(argv[1]);
-    } catch (const std::exception& e) {
-	    std::cerr << "Error: " << e.what() << '\n';
-	    return 1;
-    }
-}
+namespace runtimexray {
+
+/**
+ * @brief      Parse an ELF file and print basic information.
+ * @param path Path to the file.
+ */
+ void parse_elf(const std::string& path);
+
+} // namespace runtimexray
+
+#endif // RUNTIMEXRAY_ELF_PARSER_HPP
