@@ -29,13 +29,159 @@
 #include <cstddef>
 #include <cstring>
 #include <array>
+#include <cstdint>
+#include <endian.h>
 
 namespace runtimexray {
-    /// Simplified ELF header structures (64-bit, native endian for now)
-    struct Elf64_Ehdr {
-        unsigned char e_ident[16]; // Magic number and other info
-        // ... we will add more fields later
+
+    // Size of the ELF identification array (e_ident)
+    constexpr std::size_t ELF_IDENT_SIZE = 16;
+
+    // Printable desciptions for enum-s
+    constexpr std::string_view ELF32_CLASS_STR = "Elf32";
+    constexpr std::string_view ELF64_CLASS_STR = "Elf64";
+    constexpr std::string_view NONE_CLASS_STR = "None";
+
+    constexpr std::string_view L_ENDIAN_DATA_STR = "LittleEndian";
+    constexpr std::string_view B_ENDIAN_DATA_STR = "BigEndian";
+    constexpr std::string_view NONE_DATA_STR = "None";
+
+    constexpr std::string_view ELF_TYPE_REL_STR = "REL (Relocatable)";
+    constexpr std::string_view ELF_TYPE_EXEC_STR = "EXEC (Executable)";
+    constexpr std::string_view ELF_TYPE_DYN_STR = "DYN (Shared object/PIE)";
+    constexpr std::string_view ELF_TYPE_CORE_STR = "CORE (Core file)";
+    constexpr std::string_view ELF_TYPE_UNK_STR = "Unknown";
+
+    constexpr std::string_view ELF_MACHINE_X86_64_STR = "x86_64";
+    constexpr std::string_view ELF_MACHINE_ARM64_STR = "ARM64";
+    constexpr std::string_view ELF_MACHINE_UNK_STR = "Unknown";
+
+    // ELF identification indexes (from e_ident[])
+    enum ElfIdentIndex : std::size_t {
+        EI_MAG0     = 0,
+        EI_MAG1     = 1,
+        EI_MAG2     = 2,
+        EI_MAG3     = 3,
+        EI_CLASS    = 4, // 1 = 32-bit, 2 = 64-bit
+        EI_DATA     = 5, // 1 = little-endian, 2 = big-endian
+        EI_VERSION  = 6  // must be 1
     };
+
+    // ELF class values
+    enum class ElfClass : unsigned char {
+        None  = 0,
+        Elf32 = 1,
+        Elf64 = 2
+    };
+
+    // ELF data encoding values
+    enum class ElfData : unsigned char {
+        None            = 0,
+        LittleEndian    = 1,
+        BigEndian       = 2
+    };
+
+    // ELF file type values (partial)
+    enum class ElfType : uint16_t {
+        None    = 0,
+        Rel     = 1, // relocatable
+        Exec    = 2, // executable
+        Dyn     = 3, // shared object / PIE
+        Core    = 4  // core file
+    };
+
+    // Machine architectures (partial)
+    enum class ElfMachine : uint16_t {
+        None    = 0,
+        x86_64  = 62,
+        ARM64   = 183
+    };
+
+    // Helper conversion functions that validate
+    ElfClass to_elf_class(unsigned char byte) {
+        switch (byte) {
+            case 1: return ElfClass::Elf32;
+            case 2: return ElfClass::Elf64;
+            default: return ElfClass::None;
+        }
+    };
+
+    ElfData to_elf_data(unsigned char byte) {
+        switch (byte) {
+            case 1: return ElfData::LittleEndian;
+            case 2: return ElfData::BigEndian;
+            default: return ElfData::None;
+        }
+    }
+
+    const std::string_view& elf_class_to_string(const ElfClass& elf_class) {
+        switch(elf_class) {
+            case ElfClass::Elf32 : return ELF32_CLASS_STR;
+            case ElfClass::Elf64 : return ELF64_CLASS_STR;
+            default: return NONE_CLASS_STR;
+        }
+    }
+
+    const std::string_view& elf_data_to_string(const ElfData& elf_data) {
+        switch(elf_data) {
+            case ElfData::LittleEndian : return L_ENDIAN_DATA_STR;
+            case ElfData::BigEndian: return B_ENDIAN_DATA_STR;
+            default: return NONE_DATA_STR;
+        }
+    }
+
+    const std::string_view& elf_type_to_string(const ElfType& elf_type) {
+        switch (elf_type) {
+            case ElfType::Rel:  return ELF_TYPE_REL_STR;
+            case ElfType::Exec: return ELF_TYPE_EXEC_STR;
+            case ElfType::Dyn:  return ELF_TYPE_DYN_STR;
+            case ElfType::Core: return ELF_TYPE_CORE_STR;
+            default:            return ELF_TYPE_UNK_STR;
+        }
+    }
+
+    const std::string_view& elf_machine_to_string(const ElfMachine& elf_machine) {
+        switch (elf_machine) {
+            case ElfMachine::x86_64: return ELF_MACHINE_X86_64_STR;
+            case ElfMachine::ARM64:  return ELF_MACHINE_ARM64_STR;
+            default:                 return ELF_MACHINE_UNK_STR;
+        }
+    }
+
+    // Endian-aware readers from byte buffer.
+    // We always read from the start of the buffer at given offset.
+    uint16_t read_u16(const std::byte* data, std::size_t offset, ElfData endian) {
+        uint16_t val;
+        std::memcpy(&val, data + offset, sizeof(val));
+        if (endian == ElfData::LittleEndian) {
+            return le16toh(val);
+        } else if (endian == ElfData::BigEndian) {
+            return be16toh(val);
+        }
+        return val;
+    }
+
+    uint32_t read_u32(const std::byte* data, std::size_t offset, ElfData endian) {
+        uint32_t val;
+        std::memcpy(&val, data + offset, sizeof(val));
+        if (endian == ElfData::LittleEndian) {
+            return le32toh(val);
+        } else if (endian == ElfData::BigEndian) {
+            return be32toh(val);
+        }
+        return val;
+    }
+
+    uint64_t read_u64(const std::byte* data, std::size_t offset, ElfData endian) {
+        uint64_t val;
+        std::memcpy(&val, data + offset, sizeof(val));
+        if (endian == ElfData::LittleEndian) {
+            return le64toh(val);
+        } else if (endian == ElfData::BigEndian) {
+            return be64toh(val);
+        }
+        return val;
+    }
 
     /**
      * @brief Quick check: is this an ELF file?
@@ -64,13 +210,69 @@ namespace runtimexray {
 	        return;
         }
 
-	    if (!is_elf(mapped.data(), mapped.size())) {
+        const std::byte* data = mapped.data();
+        const std::size_t size = mapped.size();
+
+	    if (!is_elf(data, size)) {
 	        std::cout << path << " is not an ELF file.\n";
 	        return;
 	    }
 
-	    std::cout << path << " is an ELF file. Size: " << mapped.size() << " bytes\n";
-	    // Future: parse header, sections, etc.
+        // We know the first 16 bytes (e_ident) are present; check that
+        if (size < ELF_IDENT_SIZE) {
+            std::cerr << "Error: ELF file is too short " << size << " bytes (less than " << ELF_IDENT_SIZE << " bytes).\n";
+            return;
+        }
+
+        // Read the class and data encoding
+        const unsigned char elf_class_byte = static_cast<unsigned char>(data[EI_CLASS]);
+        const unsigned char elf_data_byte = static_cast<unsigned char>(data[EI_DATA]);
+
+        // Interpret
+        ElfClass elf_class = to_elf_class(elf_class_byte);
+        ElfData elf_data = to_elf_data(elf_data_byte);
+
+        // Print basic info
+        std::cout << path << " is an ELF file. Size: " << size << " bytes\n";
+        std::cout << "  Class: " << elf_class_to_string(elf_class) << '\n';
+        std::cout << "  Data Encoding: " << elf_data_to_string(elf_data) << '\n';
+        
+        // Continue only if we know class and endianness
+        if (elf_class == ElfClass::None || elf_data == ElfData::None) {
+            std::cerr << "Unsupported ELF class or data encoding.\n";
+            return;
+        }
+
+        // Offsets in ELF header (64-bit vs 32-bit)
+        // e_type: 2 bytes at offset 16
+        // e_machine: 2 bytes at offset 18
+        // e_version: 4 bytes at offset 20
+        // e_entry: 8 bytes (64-bit) or 4 bytes (32-bit) at offset 24
+        constexpr std::size_t offset_e_type = 16;
+        constexpr std::size_t offset_e_machine = 18;
+        constexpr std::size_t offset_e_version = 20;
+        constexpr std::size_t offset_e_entry = 24;
+	    
+        const uint16_t e_type = read_u16(data, offset_e_type, elf_data);
+        const uint16_t e_machine = read_u16(data, offset_e_machine, elf_data);
+        const uint32_t e_version = read_u32(data, offset_e_version, elf_data);
+
+        uint64_t e_entry = 0;
+        if (elf_class == ElfClass::Elf64) {
+            e_entry = read_u64(data, offset_e_entry, elf_data);
+        } else {
+            e_entry = read_u32(data, offset_e_entry, elf_data);
+        }
+
+        // Print type
+        std::cout << "  Type: " << elf_type_to_string(static_cast<ElfType>(e_type)) << '\n';
+
+        // Print machine
+        std::cout << "  Machine: " << elf_machine_to_string(static_cast<ElfMachine>(e_machine)) << '\n';
+
+        std::cout << "  Version: " << e_version << '\n';
+
+        std::cout << "  Entry point: 0x" << std::hex << e_entry << std::dec << '\n';
     }
 
 } // namespace runtimexray
