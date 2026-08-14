@@ -27,5 +27,7 @@
  */
 
 int main(void) {
-    return 0;
+    char buf[16];
+    buf[0] = 'A';
+    return buf[0] == 'A' ? 0 : 1;
 }

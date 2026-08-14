@@ -218,6 +218,33 @@ namespace runtimexray
     //   p_flags  (4 bytes) offset 24
     //   p_align  (4 bytes) offset 28
 
+    // Section header types
+    constexpr uint32_t SHT_SYMTAB = 2;
+    constexpr uint32_t SHT_DYNSYM = 11;
+    // Section header offsets for 64-bit and 32-bit
+    // 64-bit section header:
+    //   sh_name   (4 bytes) offset 0
+    //   sh_type   (4 bytes) offset 4
+    //   sh_flags  (8 bytes) offset 8
+    //   sh_addr   (8 bytes) offset 16
+    //   sh_offset (8 bytes) offset 24
+    //   sh_size   (8 bytes) offset 32
+    //   sh_link   (4 bytes) offset 40
+    //   sh_info   (4 bytes) offset 44
+    //   sh_addralign (8 bytes) offset 48
+    //   sh_entsize (8 bytes) offset 56
+    // 32-bit section header:
+    //   sh_name   (4 bytes) offset 0
+    //   sh_type   (4 bytes) offset 4
+    //   sh_flags  (4 bytes) offset 8
+    //   sh_addr   (4 bytes) offset 12
+    //   sh_offset (4 bytes) offset 16
+    //   sh_size   (4 bytes) offset 20
+    //   sh_link   (4 bytes) offset 24
+    //   sh_info   (4 bytes) offset 28
+    //   sh_addralign (4 bytes) offset 32
+    //   sh_entsize (4 bytes) offset 36
+
     // Endian-aware readers from byte buffer.
     // We always read from the start of the buffer at given offset.
     uint16_t read_u16(const std::byte *data, std::size_t offset, ElfData endian)
@@ -280,6 +307,83 @@ namespace runtimexray
             return false;
         }
         return std::memcmp(data, magic.data(), magic.size()) == 0;
+    }
+
+    bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
+    {
+        uint64_t e_shoff = 0;
+        uint16_t e_shentsize = 0;
+        uint16_t e_shnum = 0;
+
+        if (elf_class == ElfClass::Elf64) {
+            e_shoff = read_u64(data, 40, elf_data);
+            e_shentsize = read_u16(data, 58, elf_data);
+            e_shnum = read_u16(data, 60, elf_data);
+        } else {
+            e_shoff = read_u32(data, 32, elf_data);
+            e_shentsize = read_u16(data, 46, elf_data);
+            e_shnum = read_u16(data, 48, elf_data);
+        }
+
+        if (e_shnum == 0 || e_shentsize == 0) {
+            return false;
+        }
+
+        for (uint16_t i = 0; i < e_shnum; ++i) {
+            std::size_t sh_offset = static_cast<std::size_t>(e_shoff + i * e_shentsize);
+            uint32_t sh_type = read_u32(data, sh_offset + 4, elf_data);
+            if (sh_type != SHT_DYNSYM && sh_type != SHT_SYMTAB) {
+                continue;
+            }
+
+            // Read sh_link (associated string table section index)
+            uint32_t sh_link = 0;
+            uint64_t sh_size = 0;
+            uint64_t sh_offset_sym = 0;
+            if (elf_class == ElfClass::Elf64) {
+                sh_link = read_u32(data, sh_offset + 40, elf_data);
+                sh_size = read_u64(data, sh_offset + 32, elf_data);
+                sh_offset_sym = read_u64(data, sh_offset + 24, elf_data);
+            } else {
+                sh_link = read_u32(data, sh_offset + 24, elf_data);
+                sh_size = read_u32(data, sh_offset + 20, elf_data);
+                sh_offset_sym = read_u32(data, sh_offset + 16, elf_data);
+            }
+
+            // Now read the string table section
+            std::size_t str_sh_offset = static_cast<std::size_t>(e_shoff + sh_link * e_shentsize);
+            uint64_t str_offset = 0;
+            uint64_t str_size = 0;
+            if (elf_class == ElfClass::Elf64) {
+                str_offset = read_u64(data, str_sh_offset + 24, elf_data);
+                str_size = read_u64(data, str_sh_offset + 32, elf_data);
+            } else {
+                str_offset = read_u32(data, str_sh_offset + 16, elf_data);
+                str_size = read_u32(data, str_sh_offset + 20, elf_data);
+            }
+
+            // Iterate over symbols
+            const std::size_t sym_size = (elf_class == ElfClass::Elf64) ? 24 : 16;
+            const uint64_t num_syms = sh_size / sym_size;
+            for (uint64_t j = 0; j < num_syms; ++j) {
+                std::size_t sym_offset = static_cast<std::size_t>(sh_offset_sym + j * sym_size);
+                uint32_t st_name = read_u32(data, sym_offset, elf_data);
+                if (st_name == 0) {
+                    continue;
+                }
+                // st_name is an offset into the string table; check that it does not exceed its size
+                if (st_name > str_size) {
+                    continue;
+                }
+
+                const char *str = reinterpret_cast<const char*>(data + str_offset + st_name);
+                if (std::strcmp(str, "__stack_chk_fail") == 0) {
+                    return true;
+                }                
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -480,11 +584,14 @@ namespace runtimexray
             }
         }
 
+        bool canary_enabled = has_stack_canary(data, elf_class, elf_data);
+
         // Output security findings
         std::cout << "  Security checks:\n";
         std::cout << "    NX: " << (nx_enabled ? "Enabled" : "Disabled") << '\n';
         std::cout << "    PIE: " << (pie_enabled ? "Enabled" : "Disabled") << '\n';
         std::cout << "    RELRO: " << (relro_full ? "Full" : (relro_partial ? "Partial" : "Disabled")) << '\n';
+        std::cout << "    Canary: " << (canary_enabled ? "Enabled" : "Disabled") << '\n';
     }
 
 } // namespace runtimexray

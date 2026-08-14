@@ -26,6 +26,10 @@ add_security_test_binary(relro_full "" "-Wl,-z,relro" "-Wl,-z,now")
 add_security_test_binary(relro_partial "" "-Wl,-z,relro" "-Wl,-z,lazy")
 add_security_test_binary(relro_disabled "" "-Wl,-z,norelro")
 
+# Canary
+add_security_test_binary(canary_enabled   "-fstack-protector-strong" "")
+add_security_test_binary(canary_disabled  "-fno-stack-protector"     "")
+
 # Register tests
 add_test(NAME check_nx_enabled COMMAND xray $<TARGET_FILE:nx_enabled>)
 set_tests_properties(check_nx_enabled PROPERTIES PASS_REGULAR_EXPRESSION "NX: Enabled")
@@ -47,3 +51,9 @@ set_tests_properties(check_relro_partial PROPERTIES PASS_REGULAR_EXPRESSION "REL
 
 add_test(NAME check_relro_disabled COMMAND xray $<TARGET_FILE:relro_disabled>)
 set_tests_properties(check_relro_disabled PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Disabled")
+
+add_test(NAME check_canary_enabled COMMAND $<TARGET_FILE:xray> $<TARGET_FILE:canary_enabled>)
+set_tests_properties(check_canary_enabled PROPERTIES PASS_REGULAR_EXPRESSION "Canary: Enabled")
+
+add_test(NAME check_canary_disabled COMMAND $<TARGET_FILE:xray> $<TARGET_FILE:canary_disabled>)
+set_tests_properties(check_canary_disabled PROPERTIES PASS_REGULAR_EXPRESSION "Canary: Disabled")
