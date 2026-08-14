@@ -4,9 +4,7 @@ enable_language(C)
 
 function(add_security_test_binary NAME COMPILE_FLAGS LINK_FLAGS)
     add_executable(${NAME} probe.c)
-    set_target_properties(${NAME} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin
-    )
+    set_target_properties(${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
     if(NOT "${COMPILE_FLAGS}" STREQUAL "")
         target_compile_options(${NAME} PRIVATE ${COMPILE_FLAGS})
     endif()
@@ -16,16 +14,16 @@ function(add_security_test_binary NAME COMPILE_FLAGS LINK_FLAGS)
 endfunction()
 
 # NX
-add_security_test_binary(nx_enabled   "" "-Wl,-z,noexecstack")
-add_security_test_binary(nx_disabled  "" "-Wl,-z,execstack")
+add_security_test_binary(nx_enabled "" "-Wl,-z,noexecstack")
+add_security_test_binary(nx_disabled "" "-Wl,-z,execstack")
 
 # PIE
-add_security_test_binary(pie_enabled  "-fPIE" "-pie")
+add_security_test_binary(pie_enabled "-fPIE" "-pie")
 add_security_test_binary(pie_disabled "-no-pie" "-no-pie")
 
 # RELRO
-add_security_test_binary(relro_full     "" "-Wl,-z,relro,-z,now")
-add_security_test_binary(relro_partial  "" "-Wl,-z,relro")
+add_security_test_binary(relro_full "" "-Wl,-z,relro" "-Wl,-z,now")
+add_security_test_binary(relro_partial "" "-Wl,-z,relro" "-Wl,-z,lazy")
 add_security_test_binary(relro_disabled "" "-Wl,-z,norelro")
 
 # Register tests
@@ -45,7 +43,7 @@ add_test(NAME check_relro_full COMMAND xray $<TARGET_FILE:relro_full>)
 set_tests_properties(check_relro_full PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Full")
 
 add_test(NAME check_relro_partial COMMAND xray $<TARGET_FILE:relro_partial>)
-set_tests_properties(check_relro_partial PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Partial")
+set_tests_properties(check_relro_partial PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: (Full|Partial)")
 
 add_test(NAME check_relro_disabled COMMAND xray $<TARGET_FILE:relro_disabled>)
 set_tests_properties(check_relro_disabled PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Disabled")

@@ -32,7 +32,8 @@
 #include <cstdint>
 #include <endian.h>
 
-namespace runtimexray {
+namespace runtimexray
+{
 
     // Size of the ELF identification array (e_ident)
     constexpr std::size_t ELF_IDENT_SIZE = 16;
@@ -57,100 +58,137 @@ namespace runtimexray {
     constexpr std::string_view ELF_MACHINE_UNK_STR = "Unknown";
 
     // ELF identification indexes (from e_ident[])
-    enum ElfIdentIndex : std::size_t {
-        EI_MAG0     = 0,
-        EI_MAG1     = 1,
-        EI_MAG2     = 2,
-        EI_MAG3     = 3,
-        EI_CLASS    = 4, // 1 = 32-bit, 2 = 64-bit
-        EI_DATA     = 5, // 1 = little-endian, 2 = big-endian
-        EI_VERSION  = 6  // must be 1
+    enum ElfIdentIndex : std::size_t
+    {
+        EI_MAG0 = 0,
+        EI_MAG1 = 1,
+        EI_MAG2 = 2,
+        EI_MAG3 = 3,
+        EI_CLASS = 4,  // 1 = 32-bit, 2 = 64-bit
+        EI_DATA = 5,   // 1 = little-endian, 2 = big-endian
+        EI_VERSION = 6 // must be 1
     };
 
     // ELF class values
-    enum class ElfClass : unsigned char {
-        None  = 0,
+    enum class ElfClass : unsigned char
+    {
+        None = 0,
         Elf32 = 1,
         Elf64 = 2
     };
 
     // ELF data encoding values
-    enum class ElfData : unsigned char {
-        None            = 0,
-        LittleEndian    = 1,
-        BigEndian       = 2
+    enum class ElfData : unsigned char
+    {
+        None = 0,
+        LittleEndian = 1,
+        BigEndian = 2
     };
 
     // ELF file type values (partial)
-    enum class ElfType : uint16_t {
-        None    = 0,
-        Rel     = 1, // relocatable
-        Exec    = 2, // executable
-        Dyn     = 3, // shared object / PIE
-        Core    = 4  // core file
+    enum class ElfType : uint16_t
+    {
+        None = 0,
+        Rel = 1,  // relocatable
+        Exec = 2, // executable
+        Dyn = 3,  // shared object / PIE
+        Core = 4  // core file
     };
 
     // Machine architectures (partial)
-    enum class ElfMachine : uint16_t {
-        None    = 0,
-        x86_64  = 62,
-        ARM64   = 183
+    enum class ElfMachine : uint16_t
+    {
+        None = 0,
+        x86_64 = 62,
+        ARM64 = 183
     };
 
     // Helper conversion functions that validate
-    ElfClass to_elf_class(unsigned char byte) {
-        switch (byte) {
-            case 1: return ElfClass::Elf32;
-            case 2: return ElfClass::Elf64;
-            default: return ElfClass::None;
+    ElfClass to_elf_class(unsigned char byte)
+    {
+        switch (byte)
+        {
+        case 1:
+            return ElfClass::Elf32;
+        case 2:
+            return ElfClass::Elf64;
+        default:
+            return ElfClass::None;
         }
     };
 
-    ElfData to_elf_data(unsigned char byte) {
-        switch (byte) {
-            case 1: return ElfData::LittleEndian;
-            case 2: return ElfData::BigEndian;
-            default: return ElfData::None;
+    ElfData to_elf_data(unsigned char byte)
+    {
+        switch (byte)
+        {
+        case 1:
+            return ElfData::LittleEndian;
+        case 2:
+            return ElfData::BigEndian;
+        default:
+            return ElfData::None;
         }
     }
 
-    const std::string_view& elf_class_to_string(const ElfClass& elf_class) {
-        switch(elf_class) {
-            case ElfClass::Elf32 : return ELF32_CLASS_STR;
-            case ElfClass::Elf64 : return ELF64_CLASS_STR;
-            default: return NONE_CLASS_STR;
+    const std::string_view &elf_class_to_string(const ElfClass &elf_class)
+    {
+        switch (elf_class)
+        {
+        case ElfClass::Elf32:
+            return ELF32_CLASS_STR;
+        case ElfClass::Elf64:
+            return ELF64_CLASS_STR;
+        default:
+            return NONE_CLASS_STR;
         }
     }
 
-    const std::string_view& elf_data_to_string(const ElfData& elf_data) {
-        switch(elf_data) {
-            case ElfData::LittleEndian : return L_ENDIAN_DATA_STR;
-            case ElfData::BigEndian: return B_ENDIAN_DATA_STR;
-            default: return NONE_DATA_STR;
+    const std::string_view &elf_data_to_string(const ElfData &elf_data)
+    {
+        switch (elf_data)
+        {
+        case ElfData::LittleEndian:
+            return L_ENDIAN_DATA_STR;
+        case ElfData::BigEndian:
+            return B_ENDIAN_DATA_STR;
+        default:
+            return NONE_DATA_STR;
         }
     }
 
-    const std::string_view& elf_type_to_string(const ElfType& elf_type) {
-        switch (elf_type) {
-            case ElfType::Rel:  return ELF_TYPE_REL_STR;
-            case ElfType::Exec: return ELF_TYPE_EXEC_STR;
-            case ElfType::Dyn:  return ELF_TYPE_DYN_STR;
-            case ElfType::Core: return ELF_TYPE_CORE_STR;
-            default:            return ELF_TYPE_UNK_STR;
+    const std::string_view &elf_type_to_string(const ElfType &elf_type)
+    {
+        switch (elf_type)
+        {
+        case ElfType::Rel:
+            return ELF_TYPE_REL_STR;
+        case ElfType::Exec:
+            return ELF_TYPE_EXEC_STR;
+        case ElfType::Dyn:
+            return ELF_TYPE_DYN_STR;
+        case ElfType::Core:
+            return ELF_TYPE_CORE_STR;
+        default:
+            return ELF_TYPE_UNK_STR;
         }
     }
 
-    const std::string_view& elf_machine_to_string(const ElfMachine& elf_machine) {
-        switch (elf_machine) {
-            case ElfMachine::x86_64: return ELF_MACHINE_X86_64_STR;
-            case ElfMachine::ARM64:  return ELF_MACHINE_ARM64_STR;
-            default:                 return ELF_MACHINE_UNK_STR;
+    const std::string_view &elf_machine_to_string(const ElfMachine &elf_machine)
+    {
+        switch (elf_machine)
+        {
+        case ElfMachine::x86_64:
+            return ELF_MACHINE_X86_64_STR;
+        case ElfMachine::ARM64:
+            return ELF_MACHINE_ARM64_STR;
+        default:
+            return ELF_MACHINE_UNK_STR;
         }
     }
 
     // Additional constants for program header types
-    constexpr uint32_t PT_LOAD      = 1;
-    constexpr uint32_t PT_DYNAMIC   = 2;
+    constexpr uint32_t PT_LOAD = 1;
+    constexpr uint32_t PT_DYNAMIC = 2;
     constexpr uint32_t PT_GNU_STACK = 0x6474e551;
     constexpr uint32_t PT_GNU_RELRO = 0x6474e552;
 
@@ -182,34 +220,46 @@ namespace runtimexray {
 
     // Endian-aware readers from byte buffer.
     // We always read from the start of the buffer at given offset.
-    uint16_t read_u16(const std::byte* data, std::size_t offset, ElfData endian) {
+    uint16_t read_u16(const std::byte *data, std::size_t offset, ElfData endian)
+    {
         uint16_t val;
         std::memcpy(&val, data + offset, sizeof(val));
-        if (endian == ElfData::LittleEndian) {
+        if (endian == ElfData::LittleEndian)
+        {
             return le16toh(val);
-        } else if (endian == ElfData::BigEndian) {
+        }
+        else if (endian == ElfData::BigEndian)
+        {
             return be16toh(val);
         }
         return val;
     }
 
-    uint32_t read_u32(const std::byte* data, std::size_t offset, ElfData endian) {
+    uint32_t read_u32(const std::byte *data, std::size_t offset, ElfData endian)
+    {
         uint32_t val;
         std::memcpy(&val, data + offset, sizeof(val));
-        if (endian == ElfData::LittleEndian) {
+        if (endian == ElfData::LittleEndian)
+        {
             return le32toh(val);
-        } else if (endian == ElfData::BigEndian) {
+        }
+        else if (endian == ElfData::BigEndian)
+        {
             return be32toh(val);
         }
         return val;
     }
 
-    uint64_t read_u64(const std::byte* data, std::size_t offset, ElfData endian) {
+    uint64_t read_u64(const std::byte *data, std::size_t offset, ElfData endian)
+    {
         uint64_t val;
         std::memcpy(&val, data + offset, sizeof(val));
-        if (endian == ElfData::LittleEndian) {
+        if (endian == ElfData::LittleEndian)
+        {
             return le64toh(val);
-        } else if (endian == ElfData::BigEndian) {
+        }
+        else if (endian == ElfData::BigEndian)
+        {
             return be64toh(val);
         }
         return val;
@@ -221,11 +271,12 @@ namespace runtimexray {
      * @param size Size of the file in bytes.
      * @return true if the file starts with the ELF magic bytes.
      */
-    bool is_elf(const std::byte* data, std::size_t size) {
+    bool is_elf(const std::byte *data, std::size_t size)
+    {
         constexpr std::array<std::byte, 4> magic = {
-            std::byte{0x7F}, std::byte{'E'}, std::byte{'L'}, std::byte{'F'}
-        };
-        if (size < magic.size()) {
+            std::byte{0x7F}, std::byte{'E'}, std::byte{'L'}, std::byte{'F'}};
+        if (size < magic.size())
+        {
             return false;
         }
         return std::memcmp(data, magic.data(), magic.size()) == 0;
@@ -235,23 +286,27 @@ namespace runtimexray {
      * @brief Parse an ELF file and print basic information.
      * @param path Path to the file.
      */
-    void parse_elf(const std::string& path) {
+    void parse_elf(const std::string &path)
+    {
         MappedFile mapped(path);
-        if (!mapped.is_valid()) {
-            std::cerr << "Failed to map file " << path <<'\n';
-	        return;
+        if (!mapped.is_valid())
+        {
+            std::cerr << "Failed to map file " << path << '\n';
+            return;
         }
 
-        const std::byte* data = mapped.data();
+        const std::byte *data = mapped.data();
         const std::size_t size = mapped.size();
 
-	    if (!is_elf(data, size)) {
-	        std::cout << path << " is not an ELF file.\n";
-	        return;
-	    }
+        if (!is_elf(data, size))
+        {
+            std::cout << path << " is not an ELF file.\n";
+            return;
+        }
 
         // We know the first 16 bytes (e_ident) are present; check that
-        if (size < ELF_IDENT_SIZE) {
+        if (size < ELF_IDENT_SIZE)
+        {
             std::cerr << "Error: ELF file is too short " << size << " bytes (less than " << ELF_IDENT_SIZE << " bytes).\n";
             return;
         }
@@ -268,9 +323,10 @@ namespace runtimexray {
         std::cout << path << " is an ELF file. Size: " << size << " bytes\n";
         std::cout << "  Class: " << elf_class_to_string(elf_class) << '\n';
         std::cout << "  Data Encoding: " << elf_data_to_string(elf_data) << '\n';
-        
+
         // Continue only if we know class and endianness
-        if (elf_class == ElfClass::None || elf_data == ElfData::None) {
+        if (elf_class == ElfClass::None || elf_data == ElfData::None)
+        {
             std::cerr << "Unsupported ELF class or data encoding.\n";
             return;
         }
@@ -284,15 +340,18 @@ namespace runtimexray {
         constexpr std::size_t offset_e_machine = 18;
         constexpr std::size_t offset_e_version = 20;
         constexpr std::size_t offset_e_entry = 24;
-	    
+
         const uint16_t e_type = read_u16(data, offset_e_type, elf_data);
         const uint16_t e_machine = read_u16(data, offset_e_machine, elf_data);
         const uint32_t e_version = read_u32(data, offset_e_version, elf_data);
 
         uint64_t e_entry = 0;
-        if (elf_class == ElfClass::Elf64) {
+        if (elf_class == ElfClass::Elf64)
+        {
             e_entry = read_u64(data, offset_e_entry, elf_data);
-        } else {
+        }
+        else
+        {
             e_entry = read_u32(data, offset_e_entry, elf_data);
         }
 
@@ -318,11 +377,14 @@ namespace runtimexray {
         constexpr std::size_t offset_x32_phentsize = 42;
         constexpr std::size_t offset_x32_phnum = 44;
 
-        if (elf_class == ElfClass::Elf64) {
+        if (elf_class == ElfClass::Elf64)
+        {
             e_phoff = read_u64(data, offset_x64_e_phoff, elf_data);
             e_phentsize = read_u16(data, offset_x64_e_phentsize, elf_data);
             e_phnum = read_u16(data, offset_x64_e_phnum, elf_data);
-        } else {
+        }
+        else
+        {
             e_phoff = read_u32(data, offset_x32_e_phoff, elf_data);
             e_phentsize = read_u16(data, offset_x32_phentsize, elf_data);
             e_phnum = read_u16(data, offset_x32_phnum, elf_data);
@@ -334,21 +396,30 @@ namespace runtimexray {
         bool relro_full = false;
         bool relro_partial = false;
 
+        uint64_t dynamic_offset = 0;
+        uint64_t dynamic_size = 0;
+
         // If program header table is present
-        if (e_phnum > 0 && e_phentsize > 0) {
+        if (e_phnum > 0 && e_phentsize > 0)
+        {
             // Loop over program headers
-            for (uint16_t i =0; i < e_phnum; ++i) {
+            for (uint16_t i = 0; i < e_phnum; ++i)
+            {
                 std::size_t ph_offset = static_cast<std::size_t>(e_phoff + i * e_phentsize);
                 // Read p_type (first 4 bytes of program header)
                 uint32_t p_type = read_u32(data, ph_offset, elf_data);
 
                 // For NX: check PT_GNU_STACK
-                if (p_type == PT_GNU_STACK) {
+                if (p_type == PT_GNU_STACK)
+                {
                     // Read p_flags (offset depends on 32/64-bit)
                     uint32_t p_flags = 0;
-                    if (elf_class == ElfClass::Elf64) {
+                    if (elf_class == ElfClass::Elf64)
+                    {
                         p_flags = read_u32(data, ph_offset + 4, elf_data);
-                    } else {
+                    }
+                    else
+                    {
                         p_flags = read_u32(data, ph_offset + 24, elf_data);
                     }
                     // If PF_X is not set, NX is enabled
@@ -356,18 +427,59 @@ namespace runtimexray {
                 }
 
                 // For RELRO: check PT_GNU_RELRO
-                if (p_type == PT_GNU_RELRO) {
+                if (p_type == PT_GNU_RELRO)
+                {
                     relro_partial = true; // at least partial RELRO is present
                     // Full RELRO requires DT_BIND_NOW in dynamic section, we won't check now,
                     // but we can later scan PT_DYNAMIC for that flag.
                 }
-                // Full RELRO detection: we need to scan dynamic section for DT_BIND_NOW.
-                // For now, we'll assume if PT_GNU_RELRO is present, it's partial unless
-                // we find DT_BIND_NOW, which we'll skip for simplicity in this step.
-                // (The user can add this later.)
+
+                // Full RELRO detection: we need to scan dynamic section for DT_BIND_NOW
+                if (p_type == PT_DYNAMIC)
+                {
+                    if (elf_class == ElfClass::Elf64)
+                    {
+                        dynamic_offset = read_u64(data, ph_offset + 8, elf_data);
+                        dynamic_size = read_u64(data, ph_offset + 32, elf_data); // p_filesz
+                    }
+                    else
+                    {
+                        dynamic_offset = read_u32(data, ph_offset + 4, elf_data);
+                        dynamic_size = read_u32(data, ph_offset + 16, elf_data); // p_filesz
+                    }
+                }
             }
         }
-        
+
+        // Check for full RELRO (DT_BIND_NOW or DT_FLAGS/DF_BIND_NOW)
+        constexpr uint64_t DT_BIND_NOW = 24;
+        constexpr uint64_t DT_FLAGS = 30;
+        constexpr uint64_t DF_BIND_NOW = 0x8;
+
+        if (relro_partial && dynamic_offset > 0 && dynamic_size > 0)
+        {
+            const std::size_t entry_size = (elf_class == ElfClass::Elf64) ? 16 : 8;
+            const uint64_t num_entries = dynamic_size / entry_size;
+            for (uint64_t j = 0; j < num_entries; ++j)
+            {
+                std::size_t off = static_cast<std::size_t>(dynamic_offset + j * entry_size);
+                uint64_t d_tag = 0;
+                uint64_t d_val = 0;
+                if (elf_class == ElfClass::Elf64) {
+                    d_tag = read_u64(data, off, elf_data);
+                    d_val = read_u64(data, off + 8, elf_data);
+                } else {
+                    d_tag = read_u32(data, off, elf_data);
+                    d_val = read_u32(data, off + 4, elf_data);
+                }
+
+                if (d_tag == DT_BIND_NOW || (d_tag == DT_FLAGS && (d_val & DF_BIND_NOW))) {
+                    relro_full = true;
+                    break;
+                }
+            }
+        }
+
         // Output security findings
         std::cout << "  Security checks:\n";
         std::cout << "    NX: " << (nx_enabled ? "Enabled" : "Disabled") << '\n';
