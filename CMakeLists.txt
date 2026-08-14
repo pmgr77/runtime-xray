@@ -9,6 +9,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
 endif()
 
+enable_testing()
+
 add_executable(xray
     src/main.cpp
     src/mapped_file.cpp
@@ -16,3 +18,5 @@ add_executable(xray
 )
 
 target_include_directories(xray PRIVATE include)
+
+add_subdirectory(tests/security_checks)

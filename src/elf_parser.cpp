@@ -148,6 +148,38 @@ namespace runtimexray {
         }
     }
 
+    // Additional constants for program header types
+    constexpr uint32_t PT_LOAD      = 1;
+    constexpr uint32_t PT_DYNAMIC   = 2;
+    constexpr uint32_t PT_GNU_STACK = 0x6474e551;
+    constexpr uint32_t PT_GNU_RELRO = 0x6474e552;
+
+    // Flags for segment permissions
+    constexpr uint32_t PF_X = 1;
+    constexpr uint32_t PF_W = 2;
+    constexpr uint32_t PF_R = 4;
+
+    // Program header offsets for 64-bit and 32-bit ELF
+    // (these are the same in both, but sizes differ)
+    // 64-bit program header:
+    //   p_type   (4 bytes) offset 0
+    //   p_flags  (4 bytes) offset 4
+    //   p_offset (8 bytes) offset 8
+    //   p_vaddr  (8 bytes) offset 16
+    //   p_paddr  (8 bytes) offset 24
+    //   p_filesz (8 bytes) offset 32
+    //   p_memsz  (8 bytes) offset 40
+    //   p_align  (8 bytes) offset 48
+    // 32-bit program header:
+    //   p_type   (4 bytes) offset 0
+    //   p_offset (4 bytes) offset 4
+    //   p_vaddr  (4 bytes) offset 8
+    //   p_paddr  (4 bytes) offset 12
+    //   p_filesz (4 bytes) offset 16
+    //   p_memsz  (4 bytes) offset 20
+    //   p_flags  (4 bytes) offset 24
+    //   p_align  (4 bytes) offset 28
+
     // Endian-aware readers from byte buffer.
     // We always read from the start of the buffer at given offset.
     uint16_t read_u16(const std::byte* data, std::size_t offset, ElfData endian) {
@@ -266,13 +298,81 @@ namespace runtimexray {
 
         // Print type
         std::cout << "  Type: " << elf_type_to_string(static_cast<ElfType>(e_type)) << '\n';
-
         // Print machine
         std::cout << "  Machine: " << elf_machine_to_string(static_cast<ElfMachine>(e_machine)) << '\n';
-
         std::cout << "  Version: " << e_version << '\n';
-
         std::cout << "  Entry point: 0x" << std::hex << e_entry << std::dec << '\n';
+
+        // Now read program headers
+        // First, get phoff, phentsize, phnum
+        uint64_t e_phoff = 0;
+        uint16_t e_phentsize = 0;
+        uint16_t e_phnum = 0;
+
+        // 64-bit offsets: e_phoff is at 32, e_phentsize at 54, e_phnum at 56
+        constexpr std::size_t offset_x64_e_phoff = 32;
+        constexpr std::size_t offset_x64_e_phentsize = 54;
+        constexpr std::size_t offset_x64_e_phnum = 56;
+        // 32-bit offsets: e_phoff at 28, e_phentsize at 42, e_phnum at 44
+        constexpr std::size_t offset_x32_e_phoff = 28;
+        constexpr std::size_t offset_x32_phentsize = 42;
+        constexpr std::size_t offset_x32_phnum = 44;
+
+        if (elf_class == ElfClass::Elf64) {
+            e_phoff = read_u64(data, offset_x64_e_phoff, elf_data);
+            e_phentsize = read_u16(data, offset_x64_e_phentsize, elf_data);
+            e_phnum = read_u16(data, offset_x64_e_phnum, elf_data);
+        } else {
+            e_phoff = read_u32(data, offset_x32_e_phoff, elf_data);
+            e_phentsize = read_u16(data, offset_x32_phentsize, elf_data);
+            e_phnum = read_u16(data, offset_x32_phnum, elf_data);
+        }
+
+        // Flags for checks
+        bool nx_enabled = false;
+        bool pie_enabled = (e_type == 3); // ET_DYN = 3 means PIE or shared object
+        bool relro_full = false;
+        bool relro_partial = false;
+
+        // If program header table is present
+        if (e_phnum > 0 && e_phentsize > 0) {
+            // Loop over program headers
+            for (uint16_t i =0; i < e_phnum; ++i) {
+                std::size_t ph_offset = static_cast<std::size_t>(e_phoff + i * e_phentsize);
+                // Read p_type (first 4 bytes of program header)
+                uint32_t p_type = read_u32(data, ph_offset, elf_data);
+
+                // For NX: check PT_GNU_STACK
+                if (p_type == PT_GNU_STACK) {
+                    // Read p_flags (offset depends on 32/64-bit)
+                    uint32_t p_flags = 0;
+                    if (elf_class == ElfClass::Elf64) {
+                        p_flags = read_u32(data, ph_offset + 4, elf_data);
+                    } else {
+                        p_flags = read_u32(data, ph_offset + 24, elf_data);
+                    }
+                    // If PF_X is not set, NX is enabled
+                    nx_enabled = !(p_flags & PF_X);
+                }
+
+                // For RELRO: check PT_GNU_RELRO
+                if (p_type == PT_GNU_RELRO) {
+                    relro_partial = true; // at least partial RELRO is present
+                    // Full RELRO requires DT_BIND_NOW in dynamic section, we won't check now,
+                    // but we can later scan PT_DYNAMIC for that flag.
+                }
+                // Full RELRO detection: we need to scan dynamic section for DT_BIND_NOW.
+                // For now, we'll assume if PT_GNU_RELRO is present, it's partial unless
+                // we find DT_BIND_NOW, which we'll skip for simplicity in this step.
+                // (The user can add this later.)
+            }
+        }
+        
+        // Output security findings
+        std::cout << "  Security checks:\n";
+        std::cout << "    NX: " << (nx_enabled ? "Enabled" : "Disabled") << '\n';
+        std::cout << "    PIE: " << (pie_enabled ? "Enabled" : "Disabled") << '\n';
+        std::cout << "    RELRO: " << (relro_full ? "Full" : (relro_partial ? "Partial" : "Disabled")) << '\n';
     }
 
 } // namespace runtimexray

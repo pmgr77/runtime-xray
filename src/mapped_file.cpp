@@ -54,7 +54,7 @@ namespace runtimexray {
         ::close(fd); // fd can be closed after mmap
 
         if (ptr == MAP_FAILED) {
-            throw std::runtime_error("mmap failed for " + path + std::strerror(errno));
+            throw std::runtime_error("mmap failed for [" + path + "] with message: " + std::strerror(errno));
         }
 
         m_data = static_cast<const std::byte*>(ptr);
