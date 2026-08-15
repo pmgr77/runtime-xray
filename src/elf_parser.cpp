@@ -27,6 +27,7 @@
 #include "mapped_file.hpp"
 #include "finding.hpp"
 #include <iostream>
+#include <ostream>
 #include <cstddef>
 #include <cstring>
 #include <array>
@@ -523,50 +524,55 @@ namespace runtimexray
         FindingList findings;
         using Details = HardeningFindingDetails;
 
-        if (!info.nx_enabled) {
-            findings.emplace_back(
-                FindingSeverity::High,
-                "NX (No Execute) is disabled",
-                "PT_GNU_STACK segment has PF_X flag set, making stack executable.",
-                Details{"NX", "Disabled"}
-            );
-        }
+        // NX
+        findings.emplace_back(
+            info.nx_enabled ? FindingSeverity::Info : FindingSeverity::High,
+            info.nx_enabled ? "NX (No Execute) enabled" : "NX (No Execute) is disabled",
+            info.nx_enabled ? "Stack is non-executable (PT_GNU_STACK segment without PF_X)." :
+                              "Stack is executable (PT_GNU_STACK segment has PF_X set).",
+            Details{"NX", info.nx_enabled ? "Enabled" : "Disabled"}
+        );
 
-        if (!info.pie_enabled) {
-            findings.emplace_back(
-                FindingSeverity::Medium,
-                "PIE (Position-Independent Executable) is disabled",
-                "ELF type is ET_EXEC, so the binary is not position-independent.",
-                Details{"PIE", "Disabled"}
-            );
-        }
+        // PIE
+        findings.emplace_back(
+            info.pie_enabled ? FindingSeverity::Info : FindingSeverity::Medium,
+            info.pie_enabled ? "PIE (Position-Independent Executable) is enabled" : "PIE (Position-Independent Executable) is disabled",
+            info.pie_enabled ? "Binary is position-independent (ET_DYN)." :
+                               "ELF type is ET_EXEC, so the binary is not position-independent.",
+            Details{"PIE", info.pie_enabled ? "Enabled": "Disabled"}
+        );
 
-        if (!info.relro_partial) {
-            findings.emplace_back(
-                FindingSeverity::Medium,
-                "RELRO is disabled",
-                "No PT_GNU_RELRO segment found.",
-                Details{"RELRO", "Disabled"}
-            );
-        } else if (!info.relro_full) {
-            findings.emplace_back(
-                FindingSeverity::Low,
-                "RELRO is partial",
-                "PT_GNU_RELRO is present but DT_BIND_NOW not found.",
-                Details{"RELRO", "Partial"}
-            );
-        }
+        // RELRO
+        std::string relro_status = info.relro_full ? "Full" : (info.relro_partial ? "Partial" : "Disabled");
+        FindingSeverity relro_severity = info.relro_full ? FindingSeverity::Info : (info.relro_partial ? FindingSeverity::Low : FindingSeverity::Medium);
+        findings.emplace_back(
+            relro_severity,
+            "RELRO is " + relro_status,
+            info.relro_full ? 
+                "Full RELRO (PT_GNU_RELRO and DT_BIND_NOW)." : 
+                (info.relro_partial ? 
+                    "Partial RELRO (PT_GNU_RELRO without DT_BIND_NOW)." : "No RELRO (PT_GNU_RELRO not found)."),
+            Details{"RELRO", relro_status}
+        );
 
-        if (!info.canary_enabled) {
-            findings.emplace_back(
-                FindingSeverity::High,
-                "Stack canary is disabled",
-                "Symbol __stack_chk_fail not found in symbol tables.",
-                Details{"Canary", "Disabled"}
-            );
-        }
+        // Canary
+        findings.emplace_back(
+            info.canary_enabled ? FindingSeverity::Info : FindingSeverity::High,
+            info.canary_enabled ? "Stack canary is enabled" : "Stack canary is disabled",
+            info.canary_enabled ? "Symbol __stack_chk_fail found in symbol tables." : "Symbol __stack_chk_fail not found in symbol tables.",
+            Details{"Canary", info.canary_enabled ? "Enabled" : "Disabled"}
+        );
 
         return findings;
+    }
+
+    void report_findings(const FindingList& findings, std::ostream& out) 
+    {
+        for (const Finding& f : findings) {
+            // We know the details are HardeningFindingDetails for now
+            const auto& details = std::get<HardeningFindingDetails>(f.details);
+            out << details.feature << ": " << details.status << '\n';
+        }
     }
 
     /**
@@ -654,17 +660,8 @@ namespace runtimexray
 
         // Output security findings
         std::cout << "  Security checks:\n";
-        std::cout << "    NX: " << (sec_info.nx_enabled ? "Enabled" : "Disabled") << '\n';
-        std::cout << "    PIE: " << (sec_info.pie_enabled ? "Enabled" : "Disabled") << '\n';
-        std::cout << "    RELRO: " << (sec_info.relro_full ? "Full" : (sec_info.relro_partial ? "Partial" : "Disabled")) << '\n';
-        std::cout << "    Canary: " << (sec_info.canary_enabled ? "Enabled" : "Disabled") << '\n';
-
-        // For future use:
         FindingList findings = make_findings(sec_info);
-        for (const Finding& f : findings) {
-            const auto& details = std::get<HardeningFindingDetails>(f.details);
-            //std::cout << "    " << details.feature << ": " << details.status << '\n'; 
-        }
+        report_findings(findings, std::cout);
     }
 
 } // namespace runtimexray
