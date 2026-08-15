@@ -1,0 +1,84 @@
+/**
+ * @file    finding.hpp
+ * @brief   Defines the data structures for security findings in RuntimeXRay.
+ *
+ * @author  Peter Magram
+ * @date    2026-08-15
+ * @copyright Copyright 2026 Peter Magram.
+ * @license Apache-2.0 (see LICENSE file in the repository root)
+ */
+
+// Copyright 2026 Peter Magram
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+#ifndef RUNTIMEXRAY_FINDING_HPP
+#define RUNTIMEXRAY_FINDING_HPP
+
+#include <string>
+#include <variant>
+#include <vector>
+
+namespace runtimexray {
+
+/**
+* @brief Severity level of a security finding.
+*/
+enum class FindingSeverity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info
+};
+
+/**
+ * @brief Details specific to a binary hardening finding (NX, PIE, RELRO, Canary).
+ */
+struct HardeningFindingDetails {
+    std::string feature; /**< Name of the hardening feature, e.g., "NX", "PIE", "RELRO", "Canary". */
+    std::string status; /**< Current status, e.g., "Disabled", "Enabled", "Partial", "Full". */
+};
+
+/**
+ * @brief Represents a single security finding.
+ *
+ * Contains common metadata (severity, description, evidence) and specific details
+ * stored in a std::variant. Additional detail types can be added later.
+ */
+class Finding {
+public:
+    FindingSeverity severity;
+    std::string description;
+    std::string evidence;
+
+    /** Specific details; currently only HardeningFindingDetails is supported. */
+    std::variant<HardeningFindingDetails> details;
+
+    /**
+     * @brief Constructs a Finding.
+     * @param sev Severity level.
+     * @param desc Human-readable description of the finding.
+     * @param ev Evidence supporting the finding.
+     * @param det Specific details (variant).
+     */
+    Finding(FindingSeverity sev, std::string desc, std::string ev, std::variant<HardeningFindingDetails> det)
+    : severity(sev), description(std::move(desc)), evidence(std::move(ev)), details(std::move(det)) 
+    {}
+};
+    
+    /** Container for all findings from a single analysis. */
+    using FindingList = std::vector<Finding>;
+
+} // namespace runtimexray
+
+#endif // RUNTIMEXRAY_FINDING_HPP

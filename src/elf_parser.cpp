@@ -25,6 +25,7 @@
 
 #include "elf_parser.hpp"
 #include "mapped_file.hpp"
+#include "finding.hpp"
 #include <iostream>
 #include <cstddef>
 #include <cstring>
@@ -518,6 +519,56 @@ namespace runtimexray
         return info;
     }
 
+    FindingList make_findings(const ElfSecurityInfo& info) {
+        FindingList findings;
+        using Details = HardeningFindingDetails;
+
+        if (!info.nx_enabled) {
+            findings.emplace_back(
+                FindingSeverity::High,
+                "NX (No Execute) is disabled",
+                "PT_GNU_STACK segment has PF_X flag set, making stack executable.",
+                Details{"NX", "Disabled"}
+            );
+        }
+
+        if (!info.pie_enabled) {
+            findings.emplace_back(
+                FindingSeverity::Medium,
+                "PIE (Position-Independent Executable) is disabled",
+                "ELF type is ET_EXEC, so the binary is not position-independent.",
+                Details{"PIE", "Disabled"}
+            );
+        }
+
+        if (!info.relro_partial) {
+            findings.emplace_back(
+                FindingSeverity::Medium,
+                "RELRO is disabled",
+                "No PT_GNU_RELRO segment found.",
+                Details{"RELRO", "Disabled"}
+            );
+        } else if (!info.relro_full) {
+            findings.emplace_back(
+                FindingSeverity::Low,
+                "RELRO is partial",
+                "PT_GNU_RELRO is present but DT_BIND_NOW not found.",
+                Details{"RELRO", "Partial"}
+            );
+        }
+
+        if (!info.canary_enabled) {
+            findings.emplace_back(
+                FindingSeverity::High,
+                "Stack canary is disabled",
+                "Symbol __stack_chk_fail not found in symbol tables.",
+                Details{"Canary", "Disabled"}
+            );
+        }
+
+        return findings;
+    }
+
     /**
      * @brief Parse an ELF file and print basic information.
      * @param path Path to the file.
@@ -607,6 +658,13 @@ namespace runtimexray
         std::cout << "    PIE: " << (sec_info.pie_enabled ? "Enabled" : "Disabled") << '\n';
         std::cout << "    RELRO: " << (sec_info.relro_full ? "Full" : (sec_info.relro_partial ? "Partial" : "Disabled")) << '\n';
         std::cout << "    Canary: " << (sec_info.canary_enabled ? "Enabled" : "Disabled") << '\n';
+
+        // For future use:
+        FindingList findings = make_findings(sec_info);
+        for (const Finding& f : findings) {
+            const auto& details = std::get<HardeningFindingDetails>(f.details);
+            //std::cout << "    " << details.feature << ": " << details.status << '\n'; 
+        }
     }
 
 } // namespace runtimexray
