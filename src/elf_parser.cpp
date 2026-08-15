@@ -309,6 +309,14 @@ namespace runtimexray
         return std::memcmp(data, magic.data(), magic.size()) == 0;
     }
 
+    struct ElfSecurityInfo {
+        bool nx_enabled = false;
+        bool pie_enabled = false;
+        bool relro_full = false;
+        bool relro_partial = false;
+        bool canary_enabled = false;
+    };
+
     bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
     {
         uint64_t e_shoff = 0;
@@ -372,7 +380,7 @@ namespace runtimexray
                     continue;
                 }
                 // st_name is an offset into the string table; check that it does not exceed its size
-                if (st_name > str_size) {
+                if (st_name >= str_size) {
                     continue;
                 }
 
@@ -384,6 +392,130 @@ namespace runtimexray
         }
 
         return false;
+    }
+
+    ElfSecurityInfo check_security_features(const std::byte* data, ElfClass elf_class, ElfData elf_data, uint16_t e_type)
+    {
+        ElfSecurityInfo info;
+
+        // PIE check: if ELF type is ET_DYN (3), PIE is enabled (or it's a shared library)
+        info.pie_enabled = (e_type == 3);
+
+        // Read program header table offsets
+        // First, get phoff, phentsize, phnum
+        uint64_t e_phoff = 0;
+        uint16_t e_phentsize = 0;
+        uint16_t e_phnum = 0;
+
+        // 64-bit offsets: e_phoff is at 32, e_phentsize at 54, e_phnum at 56
+        constexpr std::size_t offset_x64_e_phoff = 32;
+        constexpr std::size_t offset_x64_e_phentsize = 54;
+        constexpr std::size_t offset_x64_e_phnum = 56;
+        // 32-bit offsets: e_phoff at 28, e_phentsize at 42, e_phnum at 44
+        constexpr std::size_t offset_x32_e_phoff = 28;
+        constexpr std::size_t offset_x32_phentsize = 42;
+        constexpr std::size_t offset_x32_phnum = 44;
+
+        if (elf_class == ElfClass::Elf64)
+        {
+            e_phoff = read_u64(data, offset_x64_e_phoff, elf_data);
+            e_phentsize = read_u16(data, offset_x64_e_phentsize, elf_data);
+            e_phnum = read_u16(data, offset_x64_e_phnum, elf_data);
+        }
+        else
+        {
+            e_phoff = read_u32(data, offset_x32_e_phoff, elf_data);
+            e_phentsize = read_u16(data, offset_x32_phentsize, elf_data);
+            e_phnum = read_u16(data, offset_x32_phnum, elf_data);
+        }
+
+        uint64_t dynamic_offset = 0;
+        uint64_t dynamic_size = 0;
+
+        // If program header table is present
+        if (e_phnum > 0 && e_phentsize > 0)
+        {
+            // Loop over program headers
+            for (uint16_t i = 0; i < e_phnum; ++i)
+            {
+                std::size_t ph_offset = static_cast<std::size_t>(e_phoff + i * e_phentsize);
+                // Read p_type (first 4 bytes of program header)
+                uint32_t p_type = read_u32(data, ph_offset, elf_data);
+
+                // For NX: check PT_GNU_STACK
+                if (p_type == PT_GNU_STACK)
+                {
+                    // Read p_flags (offset depends on 32/64-bit)
+                    uint32_t p_flags = 0;
+                    if (elf_class == ElfClass::Elf64)
+                    {
+                        p_flags = read_u32(data, ph_offset + 4, elf_data);
+                    }
+                    else
+                    {
+                        p_flags = read_u32(data, ph_offset + 24, elf_data);
+                    }
+                    // If PF_X is not set, NX is enabled
+                    info.nx_enabled = !(p_flags & PF_X);
+                }
+
+                // For RELRO: check PT_GNU_RELRO
+                if (p_type == PT_GNU_RELRO)
+                {
+                    info.relro_partial = true; // at least partial RELRO is present
+                    // Full RELRO requires DT_BIND_NOW in dynamic section, we won't check now,
+                    // but we can later scan PT_DYNAMIC for that flag.
+                }
+
+                // Full RELRO detection: we need to scan dynamic section for DT_BIND_NOW
+                if (p_type == PT_DYNAMIC)
+                {
+                    if (elf_class == ElfClass::Elf64)
+                    {
+                        dynamic_offset = read_u64(data, ph_offset + 8, elf_data);
+                        dynamic_size = read_u64(data, ph_offset + 32, elf_data); // p_filesz
+                    }
+                    else
+                    {
+                        dynamic_offset = read_u32(data, ph_offset + 4, elf_data);
+                        dynamic_size = read_u32(data, ph_offset + 16, elf_data); // p_filesz
+                    }
+                }
+            }
+        }
+
+        // Check for full RELRO (DT_BIND_NOW or DT_FLAGS/DF_BIND_NOW)
+        constexpr uint64_t DT_BIND_NOW = 24;
+        constexpr uint64_t DT_FLAGS = 30;
+        constexpr uint64_t DF_BIND_NOW = 0x8;
+
+        if (info.relro_partial && dynamic_offset > 0 && dynamic_size > 0)
+        {
+            const std::size_t entry_size = (elf_class == ElfClass::Elf64) ? 16 : 8;
+            const uint64_t num_entries = dynamic_size / entry_size;
+            for (uint64_t j = 0; j < num_entries; ++j)
+            {
+                std::size_t off = static_cast<std::size_t>(dynamic_offset + j * entry_size);
+                uint64_t d_tag = 0;
+                uint64_t d_val = 0;
+                if (elf_class == ElfClass::Elf64) {
+                    d_tag = read_u64(data, off, elf_data);
+                    d_val = read_u64(data, off + 8, elf_data);
+                } else {
+                    d_tag = read_u32(data, off, elf_data);
+                    d_val = read_u32(data, off + 4, elf_data);
+                }
+
+                if (d_tag == DT_BIND_NOW || (d_tag == DT_FLAGS && (d_val & DF_BIND_NOW))) {
+                    info.relro_full = true;
+                    break;
+                }
+            }
+        }
+
+        info.canary_enabled = has_stack_canary(data, elf_class, elf_data);
+
+        return info;
     }
 
     /**
@@ -467,131 +599,14 @@ namespace runtimexray
         std::cout << "  Entry point: 0x" << std::hex << e_entry << std::dec << '\n';
 
         // Now read program headers
-        // First, get phoff, phentsize, phnum
-        uint64_t e_phoff = 0;
-        uint16_t e_phentsize = 0;
-        uint16_t e_phnum = 0;
-
-        // 64-bit offsets: e_phoff is at 32, e_phentsize at 54, e_phnum at 56
-        constexpr std::size_t offset_x64_e_phoff = 32;
-        constexpr std::size_t offset_x64_e_phentsize = 54;
-        constexpr std::size_t offset_x64_e_phnum = 56;
-        // 32-bit offsets: e_phoff at 28, e_phentsize at 42, e_phnum at 44
-        constexpr std::size_t offset_x32_e_phoff = 28;
-        constexpr std::size_t offset_x32_phentsize = 42;
-        constexpr std::size_t offset_x32_phnum = 44;
-
-        if (elf_class == ElfClass::Elf64)
-        {
-            e_phoff = read_u64(data, offset_x64_e_phoff, elf_data);
-            e_phentsize = read_u16(data, offset_x64_e_phentsize, elf_data);
-            e_phnum = read_u16(data, offset_x64_e_phnum, elf_data);
-        }
-        else
-        {
-            e_phoff = read_u32(data, offset_x32_e_phoff, elf_data);
-            e_phentsize = read_u16(data, offset_x32_phentsize, elf_data);
-            e_phnum = read_u16(data, offset_x32_phnum, elf_data);
-        }
-
-        // Flags for checks
-        bool nx_enabled = false;
-        bool pie_enabled = (e_type == 3); // ET_DYN = 3 means PIE or shared object
-        bool relro_full = false;
-        bool relro_partial = false;
-
-        uint64_t dynamic_offset = 0;
-        uint64_t dynamic_size = 0;
-
-        // If program header table is present
-        if (e_phnum > 0 && e_phentsize > 0)
-        {
-            // Loop over program headers
-            for (uint16_t i = 0; i < e_phnum; ++i)
-            {
-                std::size_t ph_offset = static_cast<std::size_t>(e_phoff + i * e_phentsize);
-                // Read p_type (first 4 bytes of program header)
-                uint32_t p_type = read_u32(data, ph_offset, elf_data);
-
-                // For NX: check PT_GNU_STACK
-                if (p_type == PT_GNU_STACK)
-                {
-                    // Read p_flags (offset depends on 32/64-bit)
-                    uint32_t p_flags = 0;
-                    if (elf_class == ElfClass::Elf64)
-                    {
-                        p_flags = read_u32(data, ph_offset + 4, elf_data);
-                    }
-                    else
-                    {
-                        p_flags = read_u32(data, ph_offset + 24, elf_data);
-                    }
-                    // If PF_X is not set, NX is enabled
-                    nx_enabled = !(p_flags & PF_X);
-                }
-
-                // For RELRO: check PT_GNU_RELRO
-                if (p_type == PT_GNU_RELRO)
-                {
-                    relro_partial = true; // at least partial RELRO is present
-                    // Full RELRO requires DT_BIND_NOW in dynamic section, we won't check now,
-                    // but we can later scan PT_DYNAMIC for that flag.
-                }
-
-                // Full RELRO detection: we need to scan dynamic section for DT_BIND_NOW
-                if (p_type == PT_DYNAMIC)
-                {
-                    if (elf_class == ElfClass::Elf64)
-                    {
-                        dynamic_offset = read_u64(data, ph_offset + 8, elf_data);
-                        dynamic_size = read_u64(data, ph_offset + 32, elf_data); // p_filesz
-                    }
-                    else
-                    {
-                        dynamic_offset = read_u32(data, ph_offset + 4, elf_data);
-                        dynamic_size = read_u32(data, ph_offset + 16, elf_data); // p_filesz
-                    }
-                }
-            }
-        }
-
-        // Check for full RELRO (DT_BIND_NOW or DT_FLAGS/DF_BIND_NOW)
-        constexpr uint64_t DT_BIND_NOW = 24;
-        constexpr uint64_t DT_FLAGS = 30;
-        constexpr uint64_t DF_BIND_NOW = 0x8;
-
-        if (relro_partial && dynamic_offset > 0 && dynamic_size > 0)
-        {
-            const std::size_t entry_size = (elf_class == ElfClass::Elf64) ? 16 : 8;
-            const uint64_t num_entries = dynamic_size / entry_size;
-            for (uint64_t j = 0; j < num_entries; ++j)
-            {
-                std::size_t off = static_cast<std::size_t>(dynamic_offset + j * entry_size);
-                uint64_t d_tag = 0;
-                uint64_t d_val = 0;
-                if (elf_class == ElfClass::Elf64) {
-                    d_tag = read_u64(data, off, elf_data);
-                    d_val = read_u64(data, off + 8, elf_data);
-                } else {
-                    d_tag = read_u32(data, off, elf_data);
-                    d_val = read_u32(data, off + 4, elf_data);
-                }
-
-                if (d_tag == DT_BIND_NOW || (d_tag == DT_FLAGS && (d_val & DF_BIND_NOW))) {
-                    relro_full = true;
-                    break;
-                }
-            }
-        }
-
-        bool canary_enabled = has_stack_canary(data, elf_class, elf_data);
+        ElfSecurityInfo sec_info = check_security_features(data, elf_class, elf_data, e_type);
 
         // Output security findings
         std::cout << "  Security checks:\n";
-        std::cout << "    NX: " << (nx_enabled ? "Enabled" : "Disabled") << '\n';
-        std::cout << "    PIE: " << (pie_enabled ? "Enabled" : "Disabled") << '\n';
-        std::cout << "    RELRO: " << (relro_full ? "Full" : (relro_partial ? "Partial" : "Disabled")) << '\n';
-        std::cout << "    Canary: " << (canary_enabled ? "Enabled" : "Disabled") << '\n';
+        std::cout << "    NX: " << (sec_info.nx_enabled ? "Enabled" : "Disabled") << '\n';
+        std::cout << "    PIE: " << (sec_info.pie_enabled ? "Enabled" : "Disabled") << '\n';
+        std::cout << "    RELRO: " << (sec_info.relro_full ? "Full" : (sec_info.relro_partial ? "Partial" : "Disabled")) << '\n';
+        std::cout << "    Canary: " << (sec_info.canary_enabled ? "Enabled" : "Disabled") << '\n';
     }
 
 } // namespace runtimexray
