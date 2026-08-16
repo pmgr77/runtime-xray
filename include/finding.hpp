@@ -49,6 +49,15 @@ struct HardeningFindingDetails {
     std::string status; /**< Current status, e.g., "Disabled", "Enabled", "Partial", "Full". */
 };
 
+struct DangerousApiFindingDetails {
+    std::string api;
+    std::string reason;
+    std::string recommendation;
+};
+
+// Variant type for all possible finding details
+using DetailsVariant = std::variant<HardeningFindingDetails, DangerousApiFindingDetails>;
+
 /**
  * @brief Represents a single security finding.
  *
@@ -60,9 +69,7 @@ public:
     FindingSeverity severity;
     std::string description;
     std::string evidence;
-
-    /** Specific details; currently only HardeningFindingDetails is supported. */
-    std::variant<HardeningFindingDetails> details;
+    DetailsVariant details;
 
     /**
      * @brief Constructs a Finding.
@@ -71,7 +78,7 @@ public:
      * @param ev Evidence supporting the finding.
      * @param det Specific details (variant).
      */
-    Finding(FindingSeverity sev, std::string desc, std::string ev, std::variant<HardeningFindingDetails> det)
+    Finding(FindingSeverity sev, std::string desc, std::string ev, DetailsVariant det)
     : severity(sev), description(std::move(desc)), evidence(std::move(ev)), details(std::move(det)) 
     {}
 };

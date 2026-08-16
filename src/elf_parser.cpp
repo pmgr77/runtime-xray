@@ -34,6 +34,8 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <optional>
+#include <type_traits>
 #include <endian.h>
 
 namespace runtimexray
@@ -398,6 +400,75 @@ namespace runtimexray
         return symbols;
     }
 
+    struct ApiRiskInfo {
+        FindingSeverity severity;
+        std::string description;
+        std::string recommendation;
+    };
+
+    std::optional<ApiRiskInfo> get_api_risk(const std::string& name) {
+        if (name == "strcpy" || name == "strcat" || name == "sprintf" || name == "vsprintf" || name == "gets") {
+            return ApiRiskInfo{
+                FindingSeverity::High,
+                "Unsafe string function that does not check bounds",
+                "Use strncpy, snprintf, or std::string"
+            };
+        }
+        if (name == "system" || name == "popen") {
+            return ApiRiskInfo{
+                FindingSeverity::High,
+                "Potential command injection if input is not sanitized",
+                "Avoid shell interpretation; use exec* with argument arrays"
+            };
+        }
+        if (name == "mktemp" || name == "tmpnam") {
+            return ApiRiskInfo{
+                FindingSeverity::Medium,
+                "Predictable temporary file names may lead to symlink attacks",
+                "Use mkstemp or tmpfile"
+            };
+        }
+        if (name == "rand" || name == "random") {
+            return ApiRiskInfo{
+                FindingSeverity::Medium,
+                "Weak predictable random number generator",
+                "Use getrandom() or /dev/urandom for security-sensitive randomness"
+            };
+        }
+        if (name == "MD5_Init" || name == "MD5_Update" || name == "MD5_Final" || name == "SHA1_Init") {
+            return ApiRiskInfo{
+                FindingSeverity::High,
+                "Weak cryptographic hash function (collisions)",
+                "Use SHA-256 or stronger hash algorithms"
+            };
+        }
+        if (name == "DES_set_key" || name == "RC4_set_key") {
+            return ApiRiskInfo{
+                FindingSeverity::High,
+                "Weak encryption algorithm",
+                "Use AES or modern ciphers"
+            };
+        }
+        return std::nullopt;
+    }
+
+    FindingList detect_dangerous_apis(const std::vector<std::string>& symbols)
+    {
+        FindingList findings;
+        for (const auto& sym: symbols) {
+            auto risk = get_api_risk(sym);
+            if (risk) {
+                findings.emplace_back(
+                    risk->severity,
+                    "Dangerous/obsolete API used: " + sym,
+                    "Imported symbol matches known dangerous API list.",
+                    DangerousApiFindingDetails{sym, risk->description, risk->recommendation}
+                );
+            }
+        }
+        return findings;
+    }
+
     bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
     {
         auto symbols = get_symbol_names(data, elf_class, elf_data);
@@ -582,9 +653,16 @@ namespace runtimexray
     void report_findings(const FindingList& findings, std::ostream& out) 
     {
         for (const Finding& f : findings) {
-            // We know the details are HardeningFindingDetails for now
-            const auto& details = std::get<HardeningFindingDetails>(f.details);
-            out << details.feature << ": " << details.status << '\n';
+            std::visit([&](const auto& details) {
+                using T = std::decay_t<decltype(details)>;
+                if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
+                    out << "    " << details.feature << ": " << details.status << '\n';
+                } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
+                    out << "    Dangerous API: " << details.api
+                        << " (reason: " << details.reason
+                        << ", recommendation: " << details.recommendation << ")\n";
+                }
+            }, f.details);           
         }
     }
 
@@ -671,10 +749,17 @@ namespace runtimexray
         // Now read program headers
         ElfSecurityInfo sec_info = check_security_features(data, elf_class, elf_data, e_type);
 
-        // Output security findings
-        std::cout << "  Security checks:\n";
-        FindingList findings = make_findings(sec_info);
-        report_findings(findings, std::cout);
-    }
+        // Hardening checks
+        FindingList hardening_findings = make_findings(sec_info);
+        std::cout << ">  Hardening checks:\n";
+        report_findings(hardening_findings, std::cout);
 
+        // Dangerous API detection
+        auto symbols = get_symbol_names(data, elf_class, elf_data);
+        FindingList api_findings = detect_dangerous_apis(symbols);
+        if (!api_findings.empty()) {
+            std::cout << ">  Dangerous API usage:\n";
+            report_findings(api_findings, std::cout);
+        }
+    }
 } // namespace runtimexray
