@@ -8,6 +8,7 @@ This document describes the static security checks currently performed by Runtim
 - [RELRO (RELocation Read-Only)](#relro-relocation-read-only)
 - [Stack Canary](#stack-canary)
 - [Dangerous API Detection](#dangerous-api-detection)
+- [Real-world Examples](#real-world-examples)
 
 ---
 
@@ -126,6 +127,39 @@ Dangerous API usage:
 - **Unsafe conversions**: `atoi`, `atol`, `atoll`
 
 *This list is maintained in `src/elf_parser.cpp` and will be expanded over time.*
+
+---
+
+## Real-world Examples
+
+### `/usr/bin/wget`
+Despite full hardening (NX, PIE, Full RELRO, Canary), `wget` imports weak cryptographic algorithms and predictable random functions, which could be dangerous in certain contexts.
+
+```
+Dangerous API: DES_set_key (reason: Weak encryption algorithm (known attacks), recommendation: Use AES-GCM or ChaCha20-Poly1305, cwe: CWE-327)
+Dangerous API: DES_ecb_encrypt (reason: Weak encryption algorithm (known attacks), recommendation: Use AES-GCM or ChaCha20-Poly1305, cwe: CWE-327)
+Dangerous API: random (reason: Weak predictable random number generator, recommendation: Use getrandom(), /dev/urandom, or std::random_device, cwe: CWE-338)
+Dangerous API: sprintf (reason: Unsafe string function that does not check bounds or format, recommendation: Use snprintf or std::string, cwe: CWE-119)
+```
+
+### `/usr/bin/openssl`
+The OpenSSL command-line tool, a mature cryptographic utility, still uses `strcpy`, highlighting that even well-maintained software can contain legacy unsafe functions.
+
+```
+Dangerous API: strcpy (reason: Unsafe string function that does not check bounds or format, recommendation: Use strncpy, snprintf, or std::string, cwe: CWE-119)
+```
+
+### `/usr/bin/redis-server` and `/usr/bin/redis-cli`
+
+Redis is a widely used in-memory data store. Although the binaries are fully hardened (NX, PIE, Full RELRO, Canary), they rely on weak random number generators (`rand`, `random`, `srand`) and unsafe string functions (`strcpy`, `strcat`). This is particularly relevant because Redis is often targeted when exposed to untrusted networks.
+
+```
+Dangerous API: rand (reason: Weak predictable random number generator, recommendation: Use getrandom() or /dev/urandom, cwe: CWE-338)
+Dangerous API: strcpy (reason: Unsafe string function that does not check bounds, recommendation: Use strncpy or std::string, cwe: CWE-119)
+Dangerous API: strcat (reason: Unsafe string function that does not check bounds, recommendation: Use strncat or std::string, cwe: CWE-119)
+```
+
+These examples illustrate that even modern, well-protected services can include legacy APIs that deserve attention during security reviews.
 
 ---
 
