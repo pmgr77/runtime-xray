@@ -404,51 +404,149 @@ namespace runtimexray
         FindingSeverity severity;
         std::string description;
         std::string recommendation;
+        std::string cwe_id;
     };
 
+    // Strip version suffix from a symbol name (e.g., "strcpy@GLIBC_2.2.5" -> "strcpy")
+    std::string strip_symbol_version(const std::string& name)
+    {
+        auto pos = name.find('@');
+        if (pos != std::string::npos) {
+            return name.substr(0, pos);
+        }
+        return name;
+    }
     std::optional<ApiRiskInfo> get_api_risk(const std::string& name) {
-        if (name == "strcpy" || name == "strcat" || name == "sprintf" || name == "vsprintf" || name == "gets") {
+        // Unsafe string functions (buffer overflow)
+        if (name == "strcpy" || name == "strcat" || name == "sprintf" || name == "vsprintf" ||
+            name == "gets" || name == "scanf" || name == "sscanf") {
             return ApiRiskInfo{
                 FindingSeverity::High,
-                "Unsafe string function that does not check bounds",
-                "Use strncpy, snprintf, or std::string"
+                "Unsafe string function that does not check bounds or format",
+                "Use strncpy, snprintf, fgets, or modern C++ std::string",
+                "CWE-119"
             };
         }
+        if (name == "strncpy" || name == "strncat") {
+            return ApiRiskInfo{
+                FindingSeverity::Medium,
+                "Potentially unsafe if null-termination is not ensured",
+                "Use explicit length checks or std::string",
+                "CWE-120"
+            };
+        }
+        
+        // Command execution (command injection)
         if (name == "system" || name == "popen") {
             return ApiRiskInfo{
                 FindingSeverity::High,
                 "Potential command injection if input is not sanitized",
-                "Avoid shell interpretation; use exec* with argument arrays"
+                "Avoid shell interpretation; use exec* with argument arrays",
+                "CWE-78"
             };
         }
-        if (name == "mktemp" || name == "tmpnam") {
+
+        // Insecure temporary file creation
+        if (name == "mktemp" || name == "tmpnam" || name == "tempnam") {
             return ApiRiskInfo{
                 FindingSeverity::Medium,
                 "Predictable temporary file names may lead to symlink attacks",
-                "Use mkstemp or tmpfile"
+                "Use mkstemp or tmpfile",
+                "CWE-377"
             };
         }
-        if (name == "rand" || name == "random") {
+
+        // Weak random number generation
+        if (name == "rand" || name == "random" || name == "srand") {
             return ApiRiskInfo{
                 FindingSeverity::Medium,
                 "Weak predictable random number generator",
-                "Use getrandom() or /dev/urandom for security-sensitive randomness"
+                "Use getrandom(), /dev/urandom, or std::random_device for security-sensitive randomness",
+                "CWE-338"
             };
         }
-        if (name == "MD5_Init" || name == "MD5_Update" || name == "MD5_Final" || name == "SHA1_Init") {
+
+        // Weak cryptographic hash functions
+        if (name.find("MD5_") == 0 || name.find("SHA1_") == 0) {
             return ApiRiskInfo{
                 FindingSeverity::High,
                 "Weak cryptographic hash function (collisions)",
-                "Use SHA-256 or stronger hash algorithms"
+                "Use SHA-256 or stronger hash algorithms",
+                "CWE-327"
             };
         }
-        if (name == "DES_set_key" || name == "RC4_set_key") {
+
+        // Weak encryption algorithms
+        if (name.find("DES_") == 0 || name.find("RC4") == 0) {
             return ApiRiskInfo{
                 FindingSeverity::High,
-                "Weak encryption algorithm",
-                "Use AES or modern ciphers"
+                "Weak encryption algorithm (known attacks)",
+                "Use AES-GCM or ChaCha20-Poly1305 (modern ciphers)",
+                "CWE-327"
             };
         }
+        
+        // Insecure TLS protocol versions (deprecated functions)
+        if (name == "SSLv3_client_method" || name == "SSLv3_server_method" ||
+            name == "TLSv1_client_method" || name == "TLSv1_server_method" ||
+            name == "TLSv1_1_client_method" || name == "TLSv1_1_server_method") {
+            return ApiRiskInfo{
+                FindingSeverity::High,
+                "Insecure TLS protocol version (deprecated)",
+                "Use TLS 1.2 or TLS 1.3",
+                "CWE-326"
+            };
+        }
+
+        // Memory functions (with caveats)
+        if (name == "memcpy" || name == "memmove" || name == "memset") {
+            return ApiRiskInfo{
+                FindingSeverity::Low,
+                "Memory function often misused (size calculation errors)",
+                "Verify size arguments; use safer abstractions where possible",
+                "CWE-805"
+            };
+        }
+
+        // Alloca (stack allocation)
+        if (name == "alloca") {
+            return ApiRiskInfo{
+                FindingSeverity::Medium,
+                "Non-standard stack allocation can lead to stack overflow",
+                "Use dynamic allocation or fixed-size arrays",
+                "CWE-770"
+            };
+        }
+
+        // getopt / getopt_long (input parsing)
+        if (name == "getopt" || name == "getopt_long") {
+            return ApiRiskInfo{
+                FindingSeverity::Info,
+                "Argument parsing (not inherently dangerous, but misused can cause issues)",
+                "Validate inputs and handle errors",
+                "CWE-20"};
+        }
+
+        // atoi / atol / atoll (string to integer)
+        if (name == "atoi" || name == "atol" || name == "atoll") {
+            return ApiRiskInfo{
+                FindingSeverity::Low,
+                "Conversion functions without error checking",
+                "Use strtol/strtoul with end pointer validation",
+                "CWE-190"
+            };
+        }
+
+        // strtok (non-reentrant, modifies input)
+        if (name == "strtok") {
+            return ApiRiskInfo{
+                FindingSeverity::Low,
+                "Modifies input string and not thread-safe",
+                "Use strtok_r or std::string tokenization",
+                "CWE-366"
+            };
+        }        
+        
         return std::nullopt;
     }
 
@@ -456,13 +554,14 @@ namespace runtimexray
     {
         FindingList findings;
         for (const auto& sym: symbols) {
-            auto risk = get_api_risk(sym);
+            std::string base = strip_symbol_version(sym);
+            auto risk = get_api_risk(base);
             if (risk) {
                 findings.emplace_back(
                     risk->severity,
-                    "Dangerous/obsolete API used: " + sym,
+                    "Dangerous/obsolete API used: " + base,
                     "Imported symbol matches known dangerous API list.",
-                    DangerousApiFindingDetails{sym, risk->description, risk->recommendation}
+                    DangerousApiFindingDetails{base, risk->description, risk->recommendation, risk->cwe_id}
                 );
             }
         }
@@ -660,7 +759,8 @@ namespace runtimexray
                 } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
                     out << "    Dangerous API: " << details.api
                         << " (reason: " << details.reason
-                        << ", recommendation: " << details.recommendation << ")\n";
+                        << ", recommendation: " << details.recommendation
+                        << ", cwe: " << details.cwe_id << ")\n";
                 }
             }, f.details);           
         }

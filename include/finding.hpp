@@ -53,6 +53,7 @@ struct DangerousApiFindingDetails {
     std::string api;
     std::string reason;
     std::string recommendation;
+    std::string cwe_id; // Common Weakness Enumeration identifier
 };
 
 // Variant type for all possible finding details
