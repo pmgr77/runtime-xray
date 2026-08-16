@@ -7,6 +7,7 @@ This document describes the static security checks currently performed by Runtim
 - [PIE (Position-Independent Executable)](#pie-position-independent-executable)
 - [RELRO (RELocation Read-Only)](#relro-relocation-read-only)
 - [Stack Canary](#stack-canary)
+- [Dangerous API Detection](#dangerous-api-detection)
 
 ---
 
@@ -83,4 +84,49 @@ Canary: Enabled
 
 ---
 
-*Last updated: 2026-08-15*
+## Dangerous API Detection
+
+### What it is
+RuntimeXRay scans the dynamic and static symbol tables of an ELF binary for imported functions known to be dangerous or obsolete. For each match, it generates a finding with a severity level, a reason for the danger, a recommended safer alternative, and a CWE reference.
+
+### Why it matters
+Even well-written programs can unintentionally call insecure functions (e.g., `strcpy`, `system`, `MD5_Init`). These functions are often abused in real-world attacks:
+- Buffer overflow via `strcpy` / `sprintf`
+- Command injection via `system` / `popen`
+- Weak cryptography via `MD5` / `DES`
+- Predictable randomness via `rand`
+- Insecure temporary files via `mktemp`
+
+Detecting these symbols at the binary level helps developers identify risky code paths without needing source access.
+
+### How we detect it
+We parse the ELF section headers to locate symbol tables (`.dynsym` or `.symtab`). We iterate through the symbols, strip any version suffix (e.g., `strcpy@GLIBC_2.2.5`), and compare the base name against a curated list of dangerous APIs. Each entry has:
+- Severity
+- Description
+- Recommendation
+- CWE identifier
+
+### Example output
+```
+Dangerous API usage:
+  Dangerous API: strcpy (reason: Unsafe string function that does not check bounds, recommendation: Use strncpy, snprintf, or std::string, cwe: CWE-119)
+```
+
+### Current API categories
+- **Unsafe string functions**: `strcpy`, `strcat`, `sprintf`, `vsprintf`, `gets`, `scanf`, `sscanf`, `strncpy`, `strncat`, `strtok`
+- **Command execution**: `system`, `popen`
+- **Insecure temporary files**: `mktemp`, `tmpnam`, `tempnam`
+- **Weak randomness**: `rand`, `random`, `srand`
+- **Weak cryptographic hashes**: `MD5_*`, `SHA1_*`
+- **Weak encryption**: `DES_*`, `RC4*`
+- **Deprecated TLS protocols**: `SSLv3_*`, `TLSv1_*`, `TLSv1_1_*`
+- **Memory functions (with caveats)**: `memcpy`, `memmove`, `memset`
+- **Non-standard stack allocation**: `alloca`
+- **Input parsing**: `getopt`, `getopt_long`
+- **Unsafe conversions**: `atoi`, `atol`, `atoll`
+
+*This list is maintained in `src/elf_parser.cpp` and will be expanded over time.*
+
+---
+
+*Last updated: 2026-08-16*
