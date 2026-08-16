@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <algorithm>
 #include <endian.h>
 
 namespace runtimexray
@@ -298,6 +299,21 @@ namespace runtimexray
         return val;
     }
 
+    bool should_show_finding(const Finding& f, FindingSeverity min_severity) {
+        // Lower numeric value = more severe (Critical=0, High=1, Medium=2, Low=3, Info=4)
+        return static_cast<int>(f.severity) <= static_cast<int>(min_severity);
+    }
+
+    void filter_findings(FindingList& findings, FindingSeverity min_severity)
+    {
+        findings.erase(
+            std::remove_if(findings.begin(), findings.end(),
+                            [min_severity](const Finding& f) {
+                                return !should_show_finding(f, min_severity);
+                            }),
+            findings.end());
+    }
+
     /**
      * @brief Quick check: is this an ELF file?
      * @param data Pointer to the beginning of the mapped file.
@@ -416,6 +432,7 @@ namespace runtimexray
         }
         return name;
     }
+
     std::optional<ApiRiskInfo> get_api_risk(const std::string& name) {
         // Unsafe string functions (buffer overflow)
         if (name == "strcpy" || name == "strcat" || name == "sprintf" || name == "vsprintf" ||
@@ -770,7 +787,7 @@ namespace runtimexray
      * @brief Parse an ELF file and print basic information.
      * @param path Path to the file.
      */
-    void parse_elf(const std::string &path)
+    void parse_elf(const std::string &path, FindingSeverity min_severity)
     {
         MappedFile mapped(path);
         if (!mapped.is_valid())
@@ -851,12 +868,18 @@ namespace runtimexray
 
         // Hardening checks
         FindingList hardening_findings = make_findings(sec_info);
+        filter_findings(hardening_findings, min_severity);
         std::cout << ">  Hardening checks:\n";
-        report_findings(hardening_findings, std::cout);
-
+        if (hardening_findings.empty()) {
+            std::cout << "    No findings at this severity level.\n";
+        } else {
+            report_findings(hardening_findings, std::cout);
+        }
+        
         // Dangerous API detection
         auto symbols = get_symbol_names(data, elf_class, elf_data);
         FindingList api_findings = detect_dangerous_apis(symbols);
+        filter_findings(api_findings, min_severity);
         if (!api_findings.empty()) {
             std::cout << ">  Dangerous API usage:\n";
             report_findings(api_findings, std::cout);

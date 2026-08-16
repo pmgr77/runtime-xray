@@ -25,6 +25,7 @@
 #ifndef RUNTIMEXRAY_ELF_PARSER_HPP
 #define RUNTIMEXRAY_ELF_PARSER_HPP
 
+#include "finding.hpp"   // for FindingSeverity
 #include <string>
 
 namespace runtimexray {
@@ -33,7 +34,7 @@ namespace runtimexray {
  * @brief      Parse an ELF file and print basic information.
  * @param path Path to the file.
  */
- void parse_elf(const std::string& path);
+ void parse_elf(const std::string& path, FindingSeverity min_severity = FindingSeverity::Medium);
 
 } // namespace runtimexray
 

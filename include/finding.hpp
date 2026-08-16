@@ -34,11 +34,11 @@ namespace runtimexray {
 * @brief Severity level of a security finding.
 */
 enum class FindingSeverity {
-    Critical,
-    High,
-    Medium,
-    Low,
-    Info
+    Critical = 0,
+    High = 1,
+    Medium = 2,
+    Low = 3,
+    Info = 4
 };
 
 /**

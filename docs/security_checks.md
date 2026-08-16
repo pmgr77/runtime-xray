@@ -85,6 +85,14 @@ Canary: Enabled
 
 ---
 
+### Output filtering
+
+By default, RuntimeXRay shows findings with severity **Medium and higher** (Critical, High, Medium). Use:
+- `--min-severity=High` to show only High and Critical.
+- `--min-severity=Info` or `--verbose` to show all findings including Low/Info.
+
+---
+
 ## Dangerous API Detection
 
 ### What it is
