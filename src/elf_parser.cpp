@@ -31,6 +31,8 @@
 #include <cstddef>
 #include <cstring>
 #include <array>
+#include <vector>
+#include <string>
 #include <cstdint>
 #include <endian.h>
 
@@ -319,8 +321,10 @@ namespace runtimexray
         bool canary_enabled = false;
     };
 
-    bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
+    std::vector<std::string> get_symbol_names(const std::byte* data, ElfClass elf_class, ElfData elf_data)
     {
+        std::vector<std::string> symbols;
+
         uint64_t e_shoff = 0;
         uint16_t e_shentsize = 0;
         uint16_t e_shnum = 0;
@@ -336,7 +340,7 @@ namespace runtimexray
         }
 
         if (e_shnum == 0 || e_shentsize == 0) {
-            return false;
+            return symbols;
         }
 
         for (uint16_t i = 0; i < e_shnum; ++i) {
@@ -387,12 +391,21 @@ namespace runtimexray
                 }
 
                 const char *str = reinterpret_cast<const char*>(data + str_offset + st_name);
-                if (std::strcmp(str, "__stack_chk_fail") == 0) {
-                    return true;
-                }                
+                symbols.emplace_back(str);
             }
         }
 
+        return symbols;
+    }
+
+    bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
+    {
+        auto symbols = get_symbol_names(data, elf_class, elf_data);
+        for (const auto& name: symbols) {
+            if (name == "__stack_chk_fail") {
+                return true;
+            }
+        }
         return false;
     }
 
