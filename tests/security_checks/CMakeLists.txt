@@ -32,7 +32,7 @@ add_security_test_binary(relro_partial "" "-Wl,-z,relro" "-Wl,-z,lazy")
 add_security_test_binary(relro_disabled "" "-Wl,-z,norelro")
 
 # Canary
-add_security_test_binary(canary_enabled   "-fstack-protector-strong" "")
+add_security_test_binary(canary_enabled   "-fstack-protector-all" "")
 add_security_test_binary(canary_disabled  "-fno-stack-protector"     "")
 
 # ---------------------------------------------------------------------------
