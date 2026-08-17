@@ -562,7 +562,24 @@ namespace runtimexray
                 "Use strtok_r or std::string tokenization",
                 "CWE-366"
             };
-        }        
+        }
+        // Network functions (obsolete, thread-unsafe)
+        if (name == "gethostbyname" || name == "gethostbyaddr") {
+            return ApiRiskInfo{
+                FindingSeverity::Medium,
+                "Obsolete and not thread-safe; returns static data.",
+                "Use getaddrinfo()/getnameinfo().",
+                "CWE-362"
+            };
+        }
+        if (name == "inet_ntoa") {
+            return ApiRiskInfo{
+                FindingSeverity::Low,
+                "Not thread-safe, uses static buffer.",
+                "Use inet_ntop().",
+                "CWE-362"
+            };
+        }
         
         return std::nullopt;
     }
