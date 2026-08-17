@@ -59,7 +59,9 @@ void reference_dangerous_apis(void) {
 
     // Network functions
     struct hostent* he = gethostbyname("localhost");
-    if (he == NULL) return 1; // use thre result
+    if (he == NULL) {
+        return;
+    }
     char* ip = inet_ntoa(*(struct in_addr*)he->h_addr);
 
     // Privilege functions
