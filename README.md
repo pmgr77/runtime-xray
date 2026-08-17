@@ -308,6 +308,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a contribution.
 
 ---
 
+## Security
+
+If you discover a security vulnerability in RuntimeXRay, please **do not open a public issue**.
+
+Instead, report it responsibly to:
+
+- **security@runtimexray.com** – for vulnerabilities in RuntimeXRay itself
+- **hello@runtimexray.com** – for general security questions or non-urgent inquiries
+
+We follow coordinated disclosure and will respond as quickly as possible. For more details, see [SECURITY.md](SECURITY.md).
+
+---
+
 ## License
 
 RuntimeXRay is licensed under the **Apache License 2.0**.
