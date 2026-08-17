@@ -37,6 +37,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__aarch64__)
+#include <sys/uio.h>      // for struct iovec
+#include <elf.h>          // for NT_PRSTATUS
+#include <asm/ptrace.h>   // for struct user_pt_regs
+#endif
+
 namespace runtimexray {
 
     // ---------------------------------------------------------------------------
