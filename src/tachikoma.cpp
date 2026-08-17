@@ -22,6 +22,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "tachikoma.hpp"
 
 #include <cerrno>
@@ -35,8 +39,75 @@
 
 namespace runtimexray {
 
-    Tachikoma::Tachikoma(const std::string& program, const std::vector<std::string>& args)
-    {
+    // ---------------------------------------------------------------------------
+    // Architecture-specific register reading
+    // ---------------------------------------------------------------------------
+
+    #if defined(__x86_64__)
+
+    struct Registers {
+        unsigned long long syscall_number;
+        unsigned long long args[6];
+        long long return_value;
+    };
+
+    Registers read_registers(pid_t pid) {
+        struct user_regs_struct regs;
+        if (ptrace(PTRACE_GETREGS, pid, nullptr, &regs) == -1) {
+            throw std::runtime_error(std::string("PTRACE_GETREGS failed: ") + std::strerror(errno));
+        }
+
+        Registers out;
+        out.syscall_number = regs.orig_rax;
+        out.args[0] = regs.rdi;
+        out.args[1] = regs.rsi;
+        out.args[2] = regs.rdx;
+        out.args[3] = regs.r10;
+        out.args[4] = regs.r8;
+        out.args[5] = regs.r9;
+        out.return_value = static_cast<long long>(regs.rax);
+        return out;
+    }
+
+    #elif defined(__aarch64__)
+
+    struct Registers {
+        unsigned long long syscall_number;
+        unsigned long long args[6];
+        long long return_value;
+    };
+
+    Registers read_registers(pid_t pid) {
+        struct iovec iov;
+        struct user_pt_regs regs;   // ARM64 user registers
+        iov.iov_base = &regs;
+        iov.iov_len = sizeof(regs);
+
+        if (ptrace(PTRACE_GETREGSET, pid, reinterpret_cast<void*>(NT_PRSTATUS), &iov) == -1) {
+            throw std::runtime_error(std::string("PTRACE_GETREGSET failed: ") + std::strerror(errno));
+        }
+
+        Registers out;
+        out.syscall_number = regs.regs[8];   // x8 holds syscall number on ARM64
+        out.args[0] = regs.regs[0];
+        out.args[1] = regs.regs[1];
+        out.args[2] = regs.regs[2];
+        out.args[3] = regs.regs[3];
+        out.args[4] = regs.regs[4];
+        out.args[5] = regs.regs[5];
+        out.return_value = static_cast<long long>(regs.regs[0]);
+        return out;
+    }
+
+    #else
+    #error "Unsupported architecture for Tachikoma (only x86_64 and ARM64 are supported)"
+    #endif
+
+    // ---------------------------------------------------------------------------
+    // Tachikoma implementation (constructor, destructor, move, run)
+    // ---------------------------------------------------------------------------
+
+    Tachikoma::Tachikoma(const std::string& program, const std::vector<std::string>& args) {
         if (program.empty()) {
             throw std::runtime_error("Tachikoma: program path is empty");
         }
@@ -47,12 +118,12 @@ namespace runtimexray {
         }
 
         if (child_pid_ == 0) {
-            // Child
+            // Child process
             if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
                 _exit(1);
             }
 
-            std::vector<char *> argv_ptrs;
+            std::vector<char*> argv_ptrs;
             argv_ptrs.reserve(args.size() + 1);
             for (const auto& a : args) {
                 argv_ptrs.push_back(const_cast<char*>(a.c_str()));
@@ -69,24 +140,22 @@ namespace runtimexray {
                 running_ = false;
                 throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
             }
-            if (ptrace(PTRACE_SYSCALL, child_pid_, nullptr, 0) == -1) {
+            if (ptrace(PTRACE_SYSCALL, child_pid_, nullptr, nullptr) == -1) {
                 running_ = false;
                 throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: ") + std::strerror(errno));
             }
         }
     }
 
-    Tachikoma::~Tachikoma()
-    {
+    Tachikoma::~Tachikoma() {
         if (child_pid_ > 0 && running_) {
             kill(child_pid_, SIGKILL);
             waitpid(child_pid_, nullptr, 0);
         }
     }
 
-    Tachikoma::Tachikoma(Tachikoma&& other) noexcept 
-        : child_pid_(other.child_pid_), running_(other.running_)
-    {
+    Tachikoma::Tachikoma(Tachikoma&& other) noexcept
+        : child_pid_(other.child_pid_), running_(other.running_) {
         other.child_pid_ = -1;
         other.running_ = false;
     }
@@ -105,14 +174,13 @@ namespace runtimexray {
         return *this;
     }
 
-    int Tachikoma::run(const SyscallCallback& cb)
-    {
+    int Tachikoma::run(const SyscallCallback& cb) {
         if (!running_) {
             throw std::runtime_error("Tachikoma: not running");
         }
 
         int status;
-        int in_syscall = false; // false = entry, true = exit
+        bool in_syscall = false; // false = entry, true = exit
 
         while (running_) {
             if (waitpid(child_pid_, &status, 0) == -1) {
@@ -127,22 +195,18 @@ namespace runtimexray {
 
             if (WIFSTOPPED(status)) {
                 // Read registers to get syscall number and ar
-                struct user_regs_struct regs;
-                if (ptrace(PTRACE_GETREGS, child_pid_, nullptr, &regs) == -1) {
-                    running_ = false;
-                    throw std::runtime_error(std::string("PTRACE_GETREGS failed: ") + std::strerror(errno));
-                }
+                Registers regs = read_registers(child_pid_);
 
                 SyscallEvent ev;
                 ev.pid = child_pid_;
-                ev.syscall_number = regs.orig_rax; // x86_64
-                ev.arg0 = regs.rdi;
-                ev.arg1 = regs.rsi;
-                ev.arg2 = regs.rdx;
-                ev.arg3 = regs.r10;
-                ev.arg4 = regs.r8;
-                ev.arg5 = regs.r9;
-                
+                ev.syscall_number = regs.syscall_number;
+                ev.arg0 = regs.args[0];
+                ev.arg1 = regs.args[1];
+                ev.arg2 = regs.args[2];
+                ev.arg3 = regs.args[3];
+                ev.arg4 = regs.args[4];
+                ev.arg5 = regs.args[5];
+
                 if (!in_syscall) {
                     // Syscall entry
                     ev.is_entry = true;
@@ -152,7 +216,7 @@ namespace runtimexray {
                 } else {
                     // Syscall exit
                     ev.is_entry = false;
-                    ev.return_value = static_cast<long long>(regs.rax);
+                    ev.return_value = regs.return_value;
                     cb(ev);
                     in_syscall = false;
                 }
@@ -166,4 +230,5 @@ namespace runtimexray {
         }
         return 0;
     }
+
 } // namespace runtimexray
