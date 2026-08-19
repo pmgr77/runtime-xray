@@ -25,6 +25,7 @@ It focuses on technical milestones and is subject to change.
 - **CI/CD integration**: GitHub Actions and GitLab CI templates to run RuntimeXRay automatically.
 - **Extensible analyzer architecture**: Plugins for new checks and formats (PE, Mach‑O).
 - **AI explanations**: Optional integration with LLMs (e.g., DeepSeek) to produce human-readable evidence summaries.
+- **Counter-measures against evasive binaries**: Improve dynamic analysis resilience to anti-debugging and anti-tracing techniques (e.g., `PTRACE_SEIZE`, eBPF, LD_PRELOAD, detection of anti-tracing behavior). Initial support may include detecting and reporting anti‑tracing behavior in target binaries.
 
 ## 📈 Long-Term Vision
 
