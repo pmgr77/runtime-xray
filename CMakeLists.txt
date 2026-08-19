@@ -23,6 +23,7 @@ add_subdirectory(tests/security_checks)
 add_executable(xray-trace
     src/main_trace.cpp
     src/tachikoma.cpp
+    src/syscall_names.cpp
 )
 target_include_directories(xray-trace PRIVATE include)
 target_compile_options(xray-trace PRIVATE -Wall -Wextra)

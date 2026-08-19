@@ -23,6 +23,7 @@
 // limitations under the License.
 
 #include "tachikoma.hpp"
+#include "syscall_names.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -44,10 +45,12 @@ int main(int argc, char* argv[])
         runtimexray::Tachikoma tracer(program, args);
         tracer.run([](const runtimexray::SyscallEvent& ev) {
             if (ev.is_entry) {
-                std::cout << "syscall " << ev.syscall_number
+                std::cout << "syscall " << ev.syscall_number << ": "
+                          << runtimexray::syscall_name(static_cast<long>(ev.syscall_number)) 
                           << " entry (pid=" << ev.pid << ")\n";
             } else {
-                std::cout << "syscall " << ev.syscall_number
+                std::cout << "syscall " << ev.syscall_number << ": "
+                          << runtimexray::syscall_name(static_cast<long>(ev.syscall_number))
                           << " exit (pid=" << ev.pid << ") = " << ev.return_value << "\n";
             }
         });
