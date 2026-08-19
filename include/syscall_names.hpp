@@ -46,6 +46,8 @@ inline const char* syscall_name(long num)
 #endif    
 }
 
+bool is_interesting_syscall(long num);
+
 } // namespace RuntimeXray
 
 #endif // RUNTIMEXRAY_SYSCALL_NAMES_HPP

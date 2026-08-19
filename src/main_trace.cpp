@@ -30,27 +30,51 @@
 
 int main(int argc, char* argv[])
 {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <program> [args...]\n";
+    bool verbose = false;
+    std::vector<std::string> args;
+
+    // process args
+    int i = 1;
+    for (; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--verbose") {
+            verbose = true;
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: " << argv[0] << " [--verbose] <program> [args...]\n";
+            return 0;
+        } else {
+            break; // first non-optional argument is program name
+        }
+    }
+
+    if (i >= argc) {
+        std::cerr << "Error: no program specified.\n";
+        std::cout << "Usage: " << argv[0] << " [--verbose] <program> [args...]\n";
         return 1;
     }
 
-    std::string program = argv[1];
-    std::vector<std::string> args;
-    for (int i = 1; i < argc; ++i) {
+    std::string program = argv[i];
+    // Collect args for traced process: program name and other args
+    args.push_back(program);
+    for (++i; i < argc; ++i) {
         args.emplace_back(argv[i]);
     }
 
     try {
         runtimexray::Tachikoma tracer(program, args);
-        tracer.run([](const runtimexray::SyscallEvent& ev) {
+        tracer.run([verbose](const runtimexray::SyscallEvent& ev) {
+            if (!verbose && !runtimexray::is_interesting_syscall(static_cast<long>(ev.syscall_number))) {
+                return; // skip 
+            }
+
+            const char *syscall_name = runtimexray::syscall_name(static_cast<long>(ev.syscall_number));
             if (ev.is_entry) {
                 std::cout << "syscall " << ev.syscall_number << ": "
-                          << runtimexray::syscall_name(static_cast<long>(ev.syscall_number)) 
+                          << syscall_name
                           << " entry (pid=" << ev.pid << ")\n";
             } else {
                 std::cout << "syscall " << ev.syscall_number << ": "
-                          << runtimexray::syscall_name(static_cast<long>(ev.syscall_number))
+                          << syscall_name
                           << " exit (pid=" << ev.pid << ") = " << ev.return_value << "\n";
             }
         });

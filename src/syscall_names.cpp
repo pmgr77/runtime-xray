@@ -659,4 +659,152 @@ const char* syscall_name_arm64(long num) {
     }
 }
 
+// Возвращает true, если syscall интересен для анализа (файлы, сеть, процессы, память, привилегии)
+bool is_interesting_syscall_x86_64(long num) {
+    switch (num) {
+        // File operations
+        case 2:   // open
+        case 257: // openat
+        case 0:   // read
+        case 1:   // write
+        case 3:   // close
+        case 82:  // rename
+        case 83:  // mkdir
+        case 84:  // rmdir
+        case 85:  // creat
+        case 86:  // link
+        case 87:  // unlink
+        case 88:  // symlink
+        case 89:  // readlink
+        case 90:  // chmod
+        case 91:  // fchmod
+        case 92:  // chown
+        case 93:  // fchown
+        case 94:  // lchown
+        case 4:   // stat
+        case 5:   // fstat
+        case 6:   // lstat
+        case 262: // newfstatat
+        case 21:  // access
+        // Processes
+        case 59:  // execve
+        case 322: // execveat
+        case 57:  // fork
+        case 56:  // clone
+        case 60:  // exit
+        case 231: // exit_group
+        case 62:  // kill
+        case 234: // tgkill
+        // Networking
+        case 41:  // socket
+        case 42:  // connect
+        case 49:  // bind
+        case 50:  // listen
+        case 43:  // accept
+        case 288: // accept4
+        case 44:  // sendto
+        case 45:  // recvfrom
+        case 46:  // sendmsg
+        case 47:  // recvmsg
+        case 54:  // setsockopt
+        case 55:  // getsockopt
+        case 48:  // shutdown
+        // Memory
+        case 9:   // mmap
+        case 10:  // mprotect
+        case 11:  // munmap
+        case 12:  // brk
+        case 25:  // mremap
+        // Privileges
+        case 105: // setuid
+        case 106: // setgid
+        case 113: // setreuid
+        case 114: // setregid
+        case 117: // setresuid
+        case 119: // setresgid
+        case 161: // chroot
+        case 157: // prctl
+        case 317: // seccomp
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool is_interesting_syscall_arm64(long num) {
+    switch (num) {
+        // FIle operations
+        case 56:  // openat
+        case 63:  // read
+        case 64:  // write
+        case 57:  // close
+        case 38:  // renameat
+        case 34:  // mkdirat
+        case 35:  // unlinkat
+        case 36:  // symlinkat
+        case 37:  // linkat
+        case 78:  // readlinkat
+        case 52:  // fchmod
+        case 53:  // fchmodat
+        case 54:  // fchownat
+        case 55:  // fchown
+        case 79:  // newfstatat
+        case 80:  // fstat
+        case 48:  // faccessat
+        // Processes
+        case 221: // execve
+        case 266: // execveat
+        case 220: // clone
+        case 93:  // exit
+        case 94:  // exit_group
+        case 129: // kill
+        case 131: // tgkill
+        // Networking
+        case 198: // socket
+        case 203: // connect
+        case 200: // bind
+        case 201: // listen
+        case 202: // accept
+        case 242: // accept4
+        case 206: // sendto
+        case 207: // recvfrom
+        case 211: // sendmsg
+        case 212: // recvmsg
+        case 208: // setsockopt
+        case 209: // getsockopt
+        case 210: // shutdown
+        // Memory
+        case 222: // mmap
+        case 226: // mprotect
+        case 215: // munmap
+        case 214: // brk
+        case 216: // mremap
+        // Privileges
+        case 146: // setuid
+        case 144: // setgid
+        case 145: // setreuid
+        case 143: // setregid
+        case 147: // setresuid
+        case 149: // setresgid
+        case 51:  // chroot
+        case 167: // prctl
+        case 262: // seccomp
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Архитектурно-зависимая обёртка
+bool is_interesting_syscall(long num) {
+#if defined(__x86_64__)
+    return is_interesting_syscall_x86_64(num);
+#elif defined(__aarch64__)
+    return is_interesting_syscall_arm64(num);
+#else
+    (void)num;
+    return false;
+#endif
+}
+
 } // namespace runtimexray
