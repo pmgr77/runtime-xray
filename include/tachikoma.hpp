@@ -77,6 +77,13 @@ public:
     */
     std::string read_string(uint64_t address, size_t max_len = 256) const;
 
+    /**
+     * @brief Reads arbitrary bytes from the traced process memory.
+     * @param address Virtual address in the traced process.
+     * @param size Number of bytes to read.
+     * @return Vector of bytes (empty on error).
+     */
+    std::vector<std::byte> read_memory(uint64_t address, size_t size) const;
      /**
      * @brief Runs the trace loop, invoking callback for each syscall.
      * @param cb Callback receiving SyscallEvent.
@@ -86,9 +93,16 @@ public:
 
     bool is_running() const noexcept { return running_; }
 
+    /**
+     * @brief Returns the path where the child's stdout/stderr is saved.
+     */
+    const std::string& child_output_path() const noexcept { return child_output_path_; }
+
+
 private:
     pid_t child_pid_ = -1;
     bool running_ = false;
+    std::string child_output_path_;
 };
 } // namespace runtimexray
 

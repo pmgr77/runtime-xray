@@ -37,6 +37,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/uio.h>   // for process_vm_readv and struct iovec
+#include <fcntl.h>
 
 #if defined(__aarch64__)
 #include <sys/uio.h>      // for struct iovec
@@ -125,6 +126,16 @@ namespace runtimexray {
         }
 
         if (child_pid_ == 0) {
+            // Generate a unique output file name based on child's PID
+            child_output_path_ = "/tmp/runtimexray_child_" + std::to_string(getpid()) + ".log";
+
+            int fd = open(child_output_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd >= 0) {
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+                close(fd);
+            }
+
             // Child process
             if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
                 _exit(1);
@@ -142,6 +153,7 @@ namespace runtimexray {
         } else {
             // Parent
             running_ = true;
+            child_output_path_ = "/tmp/runtimexray_child_" + std::to_string(child_pid_) + ".log";
             int status;
             if (waitpid(child_pid_, &status, 0) == -1) {
                 running_ = false;
@@ -216,6 +228,28 @@ namespace runtimexray {
             total_read += static_cast<size_t>(n);
         }
         return result;
+    }
+
+    std::vector<std::byte> Tachikoma::read_memory(uint64_t address, size_t size) const {
+        std::vector<std::byte> buffer(size);
+        if (address == 0) {
+            return {};
+        }
+
+        struct iovec local;
+        local.iov_base = buffer.data();
+        local.iov_len = size;
+
+        struct iovec remote;
+        remote.iov_base = reinterpret_cast<void*>(static_cast<uintptr_t>(address));
+        remote.iov_len = size;
+
+        ssize_t n = process_vm_readv(child_pid_, &local, 1, &remote, 1, 0);
+        if (n < 0) {
+            return {};
+        }
+        buffer.resize(static_cast<size_t>(n));
+        return buffer;
     }
 
     int Tachikoma::run(const SyscallCallback& cb) {
