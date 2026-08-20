@@ -62,20 +62,49 @@ int main(int argc, char* argv[])
 
     try {
         runtimexray::Tachikoma tracer(program, args);
-        tracer.run([verbose](const runtimexray::SyscallEvent& ev) {
-            if (!verbose && !runtimexray::is_interesting_syscall(static_cast<long>(ev.syscall_number))) {
+        tracer.run([&tracer, verbose](const runtimexray::SyscallEvent& ev) {
+            const long num = static_cast<long>(ev.syscall_number);
+
+            if (!verbose && !runtimexray::is_interesting_syscall(num)) {
                 return; // skip 
             }
 
             const char *syscall_name = runtimexray::syscall_name(static_cast<long>(ev.syscall_number));
+            std::string extra;
+
+// Read path for open/openat
+#if defined(__x86_64__)
+            const long open_num = 2;
+            const long openat_num = 257;
+#elif defined(__aarch64__)
+            const long open_num = 56;   // в ARM64 openat
+            const long openat_num = 56; // open нет, только openat
+#endif
+
             if (ev.is_entry) {
+                if (num == open_num || num == openat_num) {
+                    uint64_t path_addr = 0;
+                    if (num == open_num) {
+                        // x86_64 open: path = arg0
+                        path_addr = ev.arg0;
+                    } else {
+                        // openat: path = arg1
+                        path_addr = ev.arg1;
+                    }
+                    std::string path = tracer.read_string(path_addr);
+                    if (!path.empty()) {
+                        extra = " path=\"" + path + "\"";
+                    }
+                }
                 std::cout << "syscall " << ev.syscall_number << ": "
                           << syscall_name
-                          << " entry (pid=" << ev.pid << ")\n";
+                          << " entry (pid=" << ev.pid << ") " 
+                          << extra << '\n';
             } else {
                 std::cout << "syscall " << ev.syscall_number << ": "
                           << syscall_name
-                          << " exit (pid=" << ev.pid << ") = " << ev.return_value << "\n";
+                          << " exit (pid=" << ev.pid << ") = " 
+                          << ev.return_value << '\n';
             }
         });
 

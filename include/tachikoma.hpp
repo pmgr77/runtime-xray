@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <cstdint>
 
 namespace runtimexray {
 
@@ -67,6 +68,14 @@ public:
     Tachikoma& operator=(Tachikoma&& other) noexcept;
     Tachikoma(const Tachikoma&) = delete;
     Tachikoma operator=(const Tachikoma&) = delete;
+
+    /**
+    * @brief Reads a null-terminated string from the traced process memory.
+    * @param address Virtual address of the string in the traced process.
+    * @param max_len Maximum number of bytes to read.
+    * @return String contents (without the null terminator).
+    */
+    std::string read_string(uint64_t address, size_t max_len = 256) const;
 
      /**
      * @brief Runs the trace loop, invoking callback for each syscall.

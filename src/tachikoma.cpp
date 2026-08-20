@@ -36,6 +36,7 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/uio.h>   // for process_vm_readv and struct iovec
 
 #if defined(__aarch64__)
 #include <sys/uio.h>      // for struct iovec
@@ -178,6 +179,43 @@ namespace runtimexray {
             other.running_ = false;
         }
         return *this;
+    }
+
+    std::string Tachikoma::read_string(uint64_t address, size_t max_len) const {
+        if (address == 0 || max_len == 0) {
+            return {};
+        }
+
+        std::string result;
+        char buffer[256] = { 0 };
+        size_t total_read = 0;
+
+        while (total_read < max_len) {
+            struct iovec local;
+            local.iov_base = buffer;
+            local.iov_len = sizeof(buffer);
+
+            struct iovec remote;
+            remote.iov_base = reinterpret_cast<void*>(static_cast<uintptr_t>(address + total_read));
+            remote.iov_len = sizeof(buffer);
+
+            ssize_t n = process_vm_readv(child_pid_, &local, 1, &remote, 1, 0);
+            if (n <= 0) {
+                break; // error or no more data
+            }
+            for (ssize_t i = 0; i < n; ++i) {
+                char c = buffer[i];
+                if (c == '\0') {
+                    return result;
+                }
+                result.push_back(c);
+                if (result.size() >= max_len) {
+                    return result;
+                }
+            }
+            total_read += static_cast<size_t>(n);
+        }
+        return result;
     }
 
     int Tachikoma::run(const SyscallCallback& cb) {
