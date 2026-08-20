@@ -25,6 +25,7 @@
 #include "tachikoma.hpp"
 #include "syscall_names.hpp"
 #include "finding.hpp"
+#include "dynamic_analysis.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -38,78 +39,6 @@
 
 namespace {
     
-    // sensitive keywords (passwords, secrets, tokens)
-    static const std::vector<std::string> sensitive_keywords = {
-        "password", "passwd", "pwd", "pass", "pswd",
-        "password_hash", "password_salt", "password_encrypted",
-        "hashed_password", "secret", "api_key", "token", "credentials"
-    };
-
-    struct ParsedSockaddr {
-        std::string ip;
-        uint16_t port = 0;
-        bool valid = false;
-    };
-
-    ParsedSockaddr format_sockaddr(const std::vector<std::byte>& data)
-    {
-        ParsedSockaddr out;
-        if (data.size() < sizeof(sa_family_t)) {
-            return out;
-        }
-        sa_family_t family = *reinterpret_cast<const sa_family_t*>(data.data());
-
-        char ip_str[INET6_ADDRSTRLEN] = { 0 };
-
-        if (family == AF_INET) {
-            if (data.size() < sizeof(sockaddr_in)) {
-                return out;
-            }
-            const sockaddr_in* addr = reinterpret_cast<const sockaddr_in*>(data.data());
-            inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
-            out.ip = ip_str;
-            out.port = ntohs(addr->sin_port);
-            out.valid = true;
-        } else if (family == AF_INET6) {
-            if (data.size() < sizeof(sockaddr_in6)) {
-                return out;
-            }
-            const sockaddr_in6* addr = reinterpret_cast<const sockaddr_in6*>(data.data());
-            inet_ntop(AF_INET6, &addr->sin6_addr, ip_str, sizeof(ip_str));
-            out.ip = ip_str;
-            out.port = ntohs(addr->sin6_port);
-            out.valid = true;
-        }
-        return out;
-    }
-
-    std::string sanitize_data(const std::vector<std::byte>& data, size_t max_len = 128) 
-    {
-        std::string out;
-        out.reserve(std::min(data.size(), max_len));
-        for (size_t i = 0; i < data.size() && i < max_len; ++i) {
-            unsigned char c = static_cast<unsigned char>(data[i]);
-            if (c >= 0x20 && c <= 0x7E) {
-                out.push_back(static_cast<char>(std::tolower(static_cast<int>(c))));
-            } else {
-                out.push_back('.');
-            }
-        }
-        if (data.size() > max_len) {
-            out += "...";
-        }
-        return out;
-    }
-
-    bool contains_sensitive_keyword(const std::string& text) {
-        for (const auto& kw : sensitive_keywords) {
-            if (text.find(kw) != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
         runtimexray::FindingList results;
         std::ifstream infile(file_path);
@@ -122,7 +51,7 @@ namespace {
         const int max_findings_per_file = 5; // limit amount not to overload
 
         while (std::getline(infile, line) && line_count < max_findings_per_file) {
-            if (contains_sensitive_keyword(line)) {
+            if (runtimexray::contains_sensitive_keyword(line)) {
                 // Cut the line for snippet
                 std::string snippet = line.substr(0, 200);
                 if (line.size() > 200) {
@@ -193,24 +122,21 @@ int main(int argc, char* argv[])
                     std::string path = tracer.read_string(path_addr);
                     if (!path.empty()) {
                         extra = " path=\"" + path + "\"";
-                    }
-                    if (path.find("/etc/shadow") != std::string::npos ||
-                        path.find("/root/") != std::string::npos ||
-                        path.find(".ssh/id_rsa") != std::string::npos ||
-                        path.find(".aws/credentials") != std::string::npos) {
-                        findings.emplace_back(
-                            runtimexray::FindingSeverity::High,
-                            "Sensitive file access",
-                            "Process attempted to open: " + path,
-                            runtimexray::SensitiveFileAccessDetails{path, "Known sensitive path"}
-                        );
+                        if (runtimexray::is_sensitive_path(path)) {
+                            findings.emplace_back(
+                                runtimexray::FindingSeverity::High,
+                                "Sensitive file access",
+                                "Process attempted to open: " + path,
+                                runtimexray::SensitiveFileAccessDetails{path, "Known sensitive path"}
+                            );
+                        }
                     }
                 } else if (std::strcmp(syscall_name, "connect") == 0) {
                     uint64_t sockaddr_ptr = ev.arg1;
                     uint64_t addrlen = ev.arg2;
                     if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
                         auto bytes = tracer.read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
-                        auto parsed = format_sockaddr(bytes);
+                        auto parsed = runtimexray::parse_sockaddr(bytes);
                         if (parsed.valid) {
                             extra = " addr=" + parsed.ip + ":" + std::to_string(parsed.port);
                             // check for suspicious ports
@@ -231,7 +157,7 @@ int main(int argc, char* argv[])
                     uint64_t addrlen = ev.arg5;
                     if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
                         auto bytes = tracer.read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
-                        auto parsed = format_sockaddr(bytes);
+                        auto parsed = runtimexray::parse_sockaddr(bytes);
                         if (parsed.valid) {
                             extra = " dest addr=" + parsed.ip + ":" + std::to_string(parsed.port);
                             // check for suspicious ports
@@ -253,10 +179,10 @@ int main(int argc, char* argv[])
                     if (buf_ptr > 0 && count > 0 && count <= 4096) {
                         auto bytes = tracer.read_memory(buf_ptr, static_cast<size_t>(count));
                         if (!bytes.empty()) {
-                            std::string data_str = sanitize_data(bytes);
+                            std::string data_str = runtimexray::sanitize_data(bytes);
                             extra = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
                             // Search for secrets
-                            if (contains_sensitive_keyword(data_str)) {
+                            if (runtimexray::contains_sensitive_keyword(data_str)) {
                                 findings.emplace_back(
                                     runtimexray::FindingSeverity::High,
                                     "Sensitive data written",

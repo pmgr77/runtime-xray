@@ -1,0 +1,110 @@
+/**
+ * @file    dynamic_analysis.cpp
+ * @brief   Implements helper functions for dynamic analysis.
+ *
+ * @author  Peter Magram
+ * @date    2026-08-20
+ * @copyright Copyright 2026 Peter Magram.
+ * @license Apache-2.0 (see LICENSE file in the repository root)
+ */
+
+// Copyright 2026 Peter Magram
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "dynamic_analysis.hpp"
+
+#include <algorithm>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <cstring>
+
+namespace runtimexray {
+
+    std::string sanitize_data(const std::vector<std::byte>& data, size_t max_len) {
+        std::string out;
+        out.reserve(std::min(data.size(), max_len));
+        for (size_t i = 0; i < data.size() && i < max_len; ++i) {
+            unsigned char c = static_cast<unsigned char>(data[i]);
+            if (c >= 0x20 && c <= 0x7E) {
+                out.push_back(static_cast<char>(std::tolower(static_cast<int>(c))));
+            } else {
+                out.push_back('.');
+            }
+        }
+        if (data.size() > max_len) {
+            out += "...";
+        }
+        return out;
+    }
+
+    bool is_sensitive_path(const std::string& path) {
+        static const std::vector<std::string> sensitive_substrings = {
+            "/etc/shadow", "/etc/passwd", "/etc/sudoers",
+            "/root/", "/home/*/.ssh", "/home/*/.aws", "/home/*/.gnupg",
+            ".ssh/id_rsa", ".ssh/id_dsa", ".aws/credentials", ".gnupg/secring.gpg",
+            "id_rsa", "id_dsa", "credentials", "secret", "token", "password"
+        };
+        for (const auto& sub : sensitive_substrings) {
+            if (path.find(sub) != std::string::npos) return true;
+        }
+        return false;
+    }
+
+    bool contains_sensitive_keyword(const std::string& text) {
+        static const std::vector<std::string> keywords = {
+            "password", "passwd", "pwd", "pass", "pswd",
+            "password_hash", "password_salt", "password_encrypted",
+            "hashed_password", "secret", "api_key", "token", "credentials"
+        };
+        for (const auto& kw : keywords) {
+            if (text.find(kw) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    ParsedSockaddr parse_sockaddr(const std::vector<std::byte>& data) {
+        ParsedSockaddr out;
+        if (data.size() < sizeof(sa_family_t)) {
+            return out;
+        }
+
+        sa_family_t family = *reinterpret_cast<const sa_family_t*>(data.data());
+        if (family == AF_INET) {
+            if (data.size() < sizeof(sockaddr_in)) {
+                return out;
+            }
+            const sockaddr_in* addr = reinterpret_cast<const sockaddr_in*>(data.data());
+            char ip_str[INET_ADDRSTRLEN] = {0};
+            inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
+            out.ip = ip_str;
+            out.port = ntohs(addr->sin_port);
+            out.valid = true;
+        } else if (family == AF_INET6) {
+            if (data.size() < sizeof(sockaddr_in6)) {
+                return out;
+            }
+            const sockaddr_in6* addr = reinterpret_cast<const sockaddr_in6*>(data.data());
+            char ip_str[INET6_ADDRSTRLEN] = {0};
+            inet_ntop(AF_INET6, &addr->sin6_addr, ip_str, sizeof(ip_str));
+            out.ip = ip_str;
+            out.port = ntohs(addr->sin6_port);
+            out.valid = true;
+        }
+        return out;
+    }
+
+} // namespace runtimexray
