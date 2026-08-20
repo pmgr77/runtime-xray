@@ -27,6 +27,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <cstdint>
 
 namespace runtimexray {
 
@@ -56,8 +57,32 @@ struct DangerousApiFindingDetails {
     std::string cwe_id; // Common Weakness Enumeration identifier
 };
 
+// ----- Dynamic analysis findings -----
+
+struct SensitiveFileAccessDetails {
+    std::string path;
+    std::string reason;
+};
+
+struct NetworkConnectionDetails {
+    std::string remote_addr;
+    uint16_t port;
+    std::string reason;
+};
+
+struct SensitiveDataWriteDetails {
+    std::string data_snippet;
+    std::string reason;
+};
+
 // Variant type for all possible finding details
-using DetailsVariant = std::variant<HardeningFindingDetails, DangerousApiFindingDetails>;
+using DetailsVariant = std::variant<
+    HardeningFindingDetails,
+    DangerousApiFindingDetails,
+    SensitiveFileAccessDetails,
+    NetworkConnectionDetails,
+    SensitiveDataWriteDetails
+>;
 
 /**
  * @brief Represents a single security finding.
