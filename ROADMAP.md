@@ -12,25 +12,41 @@ It focuses on technical milestones and is subject to change.
   - RELRO (Partial/Full) via `PT_GNU_RELRO` and `DT_BIND_NOW`/`DT_FLAGS`
   - Stack Canary via `__stack_chk_fail` symbol presence
 - **Memory-mapped file wrapper** (`MappedFile`) with RAII and move semantics.
-- **Regression tests** for the above checks using CTest and specially compiled probe binaries.
-- **Documentation**: `docs/security_checks.md` explains each check.
+- **Dangerous API detection** via imported symbols, with CWE references, severity levels, and recommendations.
+- **Severity filtering** for findings (`--min-severity`, `--verbose`).
+- **Early dynamic analysis** (`xray-trace`):
+  - `ptrace`-based tracing on x86_64 and ARM64
+  - syscall name mapping and filtering of interesting events
+  - file path reading for `open`/`openat`
+  - network address parsing for `connect`/`sendto`
+  - `write` buffer reading (first 4 KB)
+  - child stdout/stderr capture and scanning for sensitive keywords
+  - dynamic findings: sensitive file access, suspicious network connections, sensitive data writes
+- **Comprehensive CTest suite**: 24 tests covering static checks, dynamic helpers, and integration tests.
+- **CI/CD**: GitHub Actions workflows for build and test on x86_64 and ARM64.
+- **Documentation**: `docs/security_checks.md` explains each check; README includes quick start and architecture.
 
 ## 🚀 Upcoming Features
 
-- **Dangerous API detection**: Identify obsolete or insecure functions (weak crypto, unsafe libc functions) via symbol tables.
-- **Dynamic analysis**: Use `ptrace`, `/proc` memory scanning, and syscall interception to observe runtime behavior.
-- **Data lineage**: Track sensitive data from source through transformations to sinks.
-- **Secret detection**: Find hardcoded keys, credentials, and other secrets in binaries and memory.
+- **Full dynamic analysis**:
+  - Complete process memory scanning / sensitive-data discovery
+  - Data lineage: track sensitive data from source through transformations to sinks
+  - Network-boundary detection
+  - Correlation of static and runtime evidence into a unified report
+- **Secret detection**: Find hardcoded keys, credentials, and other secrets in binaries and runtime memory.
 - **Reporting**: Generate JSON and HTML reports, not just console output.
-- **CI/CD integration**: GitHub Actions and GitLab CI templates to run RuntimeXRay automatically.
-- **Extensible analyzer architecture**: Plugins for new checks and formats (PE, Mach‑O).
+- **Extensible analyzer architecture**: Plugins for new checks and additional binary formats (PE, Mach‑O).
 - **AI explanations**: Optional integration with LLMs (e.g., DeepSeek) to produce human-readable evidence summaries.
-- **Counter-measures against evasive binaries**: Improve dynamic analysis resilience to anti-debugging and anti-tracing techniques (e.g., `PTRACE_SEIZE`, eBPF, LD_PRELOAD, detection of anti-tracing behavior). Initial support may include detecting and reporting anti‑tracing behavior in target binaries.
+- **Counter-measures against evasive binaries**:
+  - Use `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK` for less intrusive tracing
+  - Detect anti-debugging/anti-tracing behaviour (e.g., `TracerPid` checks, self-ptrace)
+  - Explore eBPF as a harder-to-evade tracing backend
 
 ## 📈 Long-Term Vision
 
 - Cross-platform support for Windows (PE) and macOS (Mach‑O).
 - Public benchmark against popular open-source projects.
 - Community contributions and plugin ecosystem.
+- Optional commercial/enterprise offering while keeping core open source (private planning).
 
 *This roadmap reflects technical goals and may evolve based on user feedback and maintainer decisions.*

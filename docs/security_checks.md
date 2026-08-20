@@ -1,13 +1,15 @@
 # Security Checks in RuntimeXRay
 
-This document describes the static security checks currently performed by RuntimeXRay on ELF binaries.
+This document describes the static and dynamic security checks currently performed by RuntimeXRay on ELF binaries.
 
 ## Table of Contents
 - [NX (No eXecute)](#nx-no-execute)
 - [PIE (Position-Independent Executable)](#pie-position-independent-executable)
 - [RELRO (RELocation Read-Only)](#relro-relocation-read-only)
 - [Stack Canary](#stack-canary)
+- [Output Filtering](#output-filtering)
 - [Dangerous API Detection](#dangerous-api-detection)
+- [Dynamic Analysis Findings](#dynamic-analysis-findings)
 - [Real-world Examples](#real-world-examples)
 
 ---
@@ -85,7 +87,7 @@ Canary: Enabled
 
 ---
 
-## Output filtering
+## Output Filtering
 
 By default, RuntimeXRay shows findings with severity **Medium and higher** (Critical, High, Medium). Use:
 - `--min-severity=High` to show only High and Critical.
@@ -138,7 +140,33 @@ Dangerous API usage:
 
 ---
 
-## Real-world Examples
+## Dynamic Analysis Findings
+
+In addition to static binary checks, RuntimeXRay can observe a running process using `ptrace` (via the **Tachikoma** component) and generate findings from system call activity.
+
+Currently implemented dynamic findings include:
+
+- **Sensitive file access** – detects attempts to open known sensitive files (e.g., `/etc/shadow`, `~/.ssh/id_rsa`, `~/.aws/credentials`).
+- **Suspicious network connection** – flags connections to sensitive ports (22, 3389, 445, 1433, etc.).
+- **Sensitive data written** – identifies writes containing strings like `password=`, `api_key=`, `secret=`, `token=`.
+- **Sensitive data in child output** – scans the captured stdout/stderr of the traced process for the same patterns.
+
+These findings are still experimental and should be interpreted as indicators of potentially risky behaviour, not as definitive exploits.
+
+### How to run dynamic analysis
+
+```bash
+./xray-trace /path/to/program
+```
+Use --verbose to show all system calls, not only interesting ones:
+
+```bash
+./xray-trace --verbose /path/to/program
+```
+
+---
+
+Real-world Examples
 
 ### `/usr/bin/wget`
 Despite full hardening (NX, PIE, Full RELRO, Canary), `wget` imports weak cryptographic algorithms and predictable random functions, which could be dangerous in certain contexts.
@@ -171,4 +199,4 @@ These examples illustrate that even modern, well-protected services can include 
 
 ---
 
-*Last updated: 2026-08-16*
+*Last updated: 2026-08-20*

@@ -1,10 +1,84 @@
+<!--
+  RuntimeXRay - evidence-driven security analysis for compiled applications.
+  Copyright 2026 Peter Magram.
+  Licensed under the Apache License, Version 2.0.
+-->
+
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RuntimeXRay</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 2rem auto;
+            max-width: 800px;
+            padding: 0 1rem;
+            background: #f9fafb;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .tagline {
+            font-size: 1.25rem;
+            color: #4b5563;
+            font-style: italic;
+        }
+        .badge {
+            margin: 1rem 0;
+        }
+        .links {
+            margin-top: 2rem;
+        }
+        .links a {
+            display: inline-block;
+            margin-right: 1rem;
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .links a:hover {
+            text-decoration: underline;
+        }
+        code {
+            background: #e5e7eb;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.9rem;
+        }
+    </style>
 </head>
 <body>
     <h1>RuntimeXRay</h1>
-    <p>Security posture testing for compiled applications. Coming soon.</p>
+    <p class="tagline">Don't tell me my application is insecure — show me why.</p>
+
+    <p>
+        RuntimeXRay is an <strong>evidence-driven security analysis tool</strong> for compiled
+        applications. It combines static binary analysis with runtime observation to produce
+        actionable security findings backed by observable evidence.
+    </p>
+
+    <p>
+        Current focus: ELF binaries, security hardening checks, dangerous API detection, and
+        early ptrace-based dynamic analysis.
+    </p>
+
+    <div class="badge">
+        <a href="https://github.com/runtimexray/runtime-xray/actions/workflows/build.yml">
+            <img src="https://github.com/runtimexray/runtime-xray/actions/workflows/build.yml/badge.svg" alt="Build and Test">
+        </a>
+    </div>
+
+    <div class="links">
+        <a href="https://github.com/runtimexray/runtime-xray">GitHub Repository</a>
+        <a href="https://github.com/runtimexray/runtime-xray/blob/main/README.md">README</a>
+        <a href="https://github.com/runtimexray/runtime-xray/blob/main/docs/security_checks.md">Security Checks</a>
+        <a href="https://github.com/runtimexray/runtime-xray/blob/main/ROADMAP.md">Roadmap</a>
+    </div>
 </body>
 </html>

@@ -136,6 +136,21 @@ RuntimeXRay is currently in active development.
 * Verbose reporting
 * Regression tests using CTest
 
+**Early dynamic analysis** (experimental but functional via `xray-trace`)
+
+* Linux `ptrace`-based syscall tracing on x86_64 and ARM64
+* Syscall name mapping and filtering of interesting events
+* Reading file paths from `open` / `openat`
+* Reading network addresses from `connect` / `sendto`
+* Reading `write` buffer contents (first 4 KB)
+* Capturing child stdout/stderr for later secret scanning
+* Dynamic findings:
+  - Sensitive file access
+  - Suspicious network connections
+  - Sensitive data writes
+  - Sensitive data in captured process output
+* CTest regression and integration tests (currently 24 tests)
+
 Dangerous API detection currently identifies imported functions that may indicate unsafe or obsolete practices, such as:
 
 * `strcpy`
@@ -147,15 +162,16 @@ These findings indicate **potential risk based on binary metadata**; an imported
 
 ### 🚧 Under active development
 
-**Dynamic analysis**
+**Dynamic analysis** – next steps
 
-* Linux `ptrace`-based syscall tracing
-* Runtime process observation
-* Memory inspection
-* Sensitive-data discovery
+* Full process memory scanning / sensitive-data discovery in memory
 * Data-flow / lineage analysis
 * Network-boundary detection
-* Correlation of static and runtime evidence
+* Correlation of static and runtime evidence into a unified report
+* Anti-evasion measures:
+  - `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK`
+  - Detection of anti-debugging behaviour
+  - Exploration of eBPF as a harder-to-evade backend
 
 The core of dynamic analysis is **Tachikoma**, our `ptrace`-based tracer. It launches the target process under trace, intercepts system calls, and will eventually feed runtime evidence into the same finding pipeline used by static analysis.
 
@@ -207,6 +223,17 @@ Example output:
 ```
 
 The exact findings depend on the binary being analyzed.
+
+### Run a dynamic trace
+
+```bash
+./xray-trace /bin/ls
+```
+Use --verbose to see all system calls:
+```bash
+./xray-trace --verbose /bin/ls
+```
+The traced program’s stdout/stderr are saved to /tmp/runtimexray_child_*.log for later inspection.
 
 ---
 
