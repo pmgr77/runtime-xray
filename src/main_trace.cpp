@@ -32,9 +32,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
 
 namespace {
     
+    // sensitive keywords (passwords, secrets, tokens)
+    static const std::vector<std::string> sensitive_keywords = {
+        "password", "passwd", "pwd", "pass", "pswd",
+        "password_hash", "password_salt", "password_encrypted",
+        "hashed_password", "secret", "api_key", "token", "credentials"
+    };
+
     struct ParsedSockaddr {
         std::string ip;
         uint16_t port = 0;
@@ -91,20 +101,45 @@ namespace {
         return out;
     }
 
-    bool contains_password_keyword(const std::string& text) {
-        static const std::vector<std::string> keywords = {
-            "password", "passwd", "pwd", "pass", "pswd",
-            "password_hash", "password_salt", "password_encrypted",
-            "hashed_password", "secret", "api_key", "token", "credentials"
-        };
-
-        for (const auto& kw : keywords) {
+    bool contains_sensitive_keyword(const std::string& text) {
+        for (const auto& kw : sensitive_keywords) {
             if (text.find(kw) != std::string::npos) {
                 return true;
             }
         }
         return false;
     }
+
+    runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
+        runtimexray::FindingList results;
+        std::ifstream infile(file_path);
+        if (!infile) {
+            return results; // file does exist or not accessible
+        }
+
+        std::string line;
+        int line_count = 0;
+        const int max_findings_per_file = 5; // limit amount not to overload
+
+        while (std::getline(infile, line) && line_count < max_findings_per_file) {
+            if (contains_sensitive_keyword(line)) {
+                // Cut the line for snippet
+                std::string snippet = line.substr(0, 200);
+                if (line.size() > 200) {
+                    snippet += "...";
+                }
+
+                results.emplace_back(
+                    runtimexray::FindingSeverity::High,
+                    "Sensitive data found in process output",
+                    "The program printed potentially sensitive information to stdout/stderr.",
+                    runtimexray::SensitiveDataWriteDetails{snippet, "Keyword match in child output"}
+                );
+                ++line_count;
+            }
+        }
+        return results;
+    }    
 };
 
 int main(int argc, char* argv[])
@@ -221,7 +256,7 @@ int main(int argc, char* argv[])
                             std::string data_str = sanitize_data(bytes);
                             extra = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
                             // Search for secrets
-                            if (contains_password_keyword(data_str)) {
+                            if (contains_sensitive_keyword(data_str)) {
                                 findings.emplace_back(
                                     runtimexray::FindingSeverity::High,
                                     "Sensitive data written",
@@ -245,6 +280,12 @@ int main(int argc, char* argv[])
         });
 
         std::cout << "\n[Child stdout/stderr saved to " << tracer.child_output_path() << "]\n";
+        // Anylyze save child process output
+        std::string child_output = tracer.child_output_path();
+        if (!child_output.empty()) {
+            auto extra_findings = scan_child_output_for_secrets(child_output);
+            findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
+        }
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << '\n';
         return 1;
@@ -267,6 +308,6 @@ int main(int argc, char* argv[])
             }, f.details);
         }
     }
-    
+
     return 0;
 }
