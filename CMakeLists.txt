@@ -13,7 +13,7 @@ endif()
 enable_testing()
 
 add_executable(xray
-    src/main.cpp
+    src/main_elf.cpp
     src/mapped_file.cpp
     src/elf_parser.cpp
 )

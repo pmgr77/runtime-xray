@@ -1,5 +1,5 @@
 /**
- * @file    main.cpp
+ * @file    main_elf.cpp
  * @brief   Entry point for RuntimeXRay – analyzes binary files for security findings.
  *
  * Currently implements a minimal ELF detector that checks the first four bytes
@@ -26,7 +26,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// src/main.cpp
 #include "mapped_file.hpp"
 #include "elf_parser.hpp"
 #include "finding.hpp"
