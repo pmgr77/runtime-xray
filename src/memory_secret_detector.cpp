@@ -19,7 +19,8 @@ namespace runtimexray {
 namespace {
     // Helper: returns true if the character is a valid separator after a keyword.
     bool is_separator(char c) {
-        return c == '=' || c == ':' || c == '"' || c == '\'' || c == ' ';
+        //return c == '=' || c == ':' || c == '"' || c == '\'' || c == ' ';
+        return c == '=' || c == ':';
     }
 
     // Helper: extracts a clean printable snippet of length up to max_len.
@@ -55,7 +56,7 @@ std::vector<SecretMatch> PasswordDetector::detect(const std::string& chunk) cons
                 size_t value_start = next + 1; // skip the separator
                 // Skip spaces if separator was space
                 while (value_start < chunk.size() && chunk[value_start] == ' ') {
-                    value_start++;
+                    ++value_start;
                 }
                 size_t value_end = value_start;
                 size_t max_val_len = 128;
