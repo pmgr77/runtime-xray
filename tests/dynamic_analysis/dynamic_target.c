@@ -33,12 +33,31 @@
 
 int main(void) {
     // 1. Sensitive file access
-    int fd = open("/etc/shadow", O_RDONLY);
-    if (fd >= 0) {
-        close(fd);
-    }
+    // Critical: /etc/sudoers (exists in most systems, but open can fail; path is still traced)
+    int fd_sudoers = open("/etc/sudoers", O_RDONLY);
+    if (fd_sudoers >= 0) close(fd_sudoers);
 
-    // 2. Suspicious network connection (port 22)
+    // Critical also: /etc/shadow (already present)
+    int fd_shadow = open("/etc/shadow", O_RDONLY);
+    if (fd_shadow >= 0) close(fd_shadow);
+
+    // High: file with "secret" in path (no need to exist)
+    int fd_secret = open("/tmp/fake_secret_file", O_RDONLY);
+    if (fd_secret >= 0) close(fd_secret);
+
+    // Medium: /etc/passwd (exists)
+    int fd_passwd = open("/etc/passwd", O_RDONLY);
+    if (fd_passwd >= 0) close(fd_passwd);
+
+    // Low: /etc/hosts (exists)
+    int fd_hosts = open("/etc/hosts", O_RDONLY);
+    if (fd_hosts >= 0) close(fd_hosts);
+
+    // Info: /etc/hostname (exists)
+    int fd_hostname = open("/etc/hostname", O_RDONLY);
+    if (fd_hostname >= 0) close(fd_hostname);
+
+    // 2. Suspicious network connection (port 22 -> Medium)
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock >= 0) {
         struct sockaddr_in addr;
@@ -50,7 +69,7 @@ int main(void) {
         close(sock);
     }
 
-    // 3. Write data containing secrets to stdout (will be captured)
+    // 3. Write data containing secrets to stdout (High) (will be captured)
     const char* sensitive_data = "password=supersecret123\n";
     write(STDOUT_FILENO, sensitive_data, strlen(sensitive_data));
 

@@ -79,4 +79,41 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_trace_timeout PROPERTIES
         PASS_REGULAR_EXPRESSION "Trace timed out"
     )
+
+    # Severity filtering for dynamic findings
+    add_test(NAME check_trace_critical_show
+             COMMAND $<TARGET_FILE:xray-trace> --min-severity Critical $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_trace_critical_show PROPERTIES
+        PASS_REGULAR_EXPRESSION "path=/etc/sudoers"
+    )
+
+    add_test(NAME check_trace_high_show
+             COMMAND $<TARGET_FILE:xray-trace> --min-severity High $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_trace_high_show PROPERTIES
+        PASS_REGULAR_EXPRESSION "path=/tmp/fake_secret_file"
+    )
+
+    add_test(NAME check_trace_medium_show
+             COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_trace_medium_show PROPERTIES
+        PASS_REGULAR_EXPRESSION "path=/etc/passwd"
+    )
+
+    add_test(NAME check_trace_low_hide_default
+             COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_trace_low_hide_default PROPERTIES
+        FAIL_REGULAR_EXPRESSION "path=/etc/hosts"
+    )
+
+    add_test(NAME check_trace_low_show
+             COMMAND $<TARGET_FILE:xray-trace> --min-severity Low $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_trace_low_show PROPERTIES
+        PASS_REGULAR_EXPRESSION "path=/etc/hosts"
+    )
+
+    add_test(NAME check_trace_info_show
+             COMMAND $<TARGET_FILE:xray-trace> --min-severity Info $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_trace_info_show PROPERTIES
+        PASS_REGULAR_EXPRESSION "path=/etc/hostname"
+    )
 endif()

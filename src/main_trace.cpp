@@ -40,6 +40,19 @@
 
 namespace {
     
+    runtimexray::FindingSeverity parse_severity(const std::string& s) {
+        if (s == "Critical") return runtimexray::FindingSeverity::Critical;
+        if (s == "High")     return runtimexray::FindingSeverity::High;
+        if (s == "Medium")   return runtimexray::FindingSeverity::Medium;
+        if (s == "Low")      return runtimexray::FindingSeverity::Low;
+        if (s == "Info")     return runtimexray::FindingSeverity::Info;
+        return runtimexray::FindingSeverity::Medium; // default
+    }
+
+    bool should_show_finding(const runtimexray::Finding& f, runtimexray::FindingSeverity min_severity) {
+        return static_cast<int>(f.severity) <= static_cast<int>(min_severity);
+    }
+
     runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
         runtimexray::FindingList results;
         std::ifstream infile(file_path);
@@ -78,6 +91,7 @@ int main(int argc, char* argv[])
     std::chrono::seconds timeout{0};
     std::vector<std::string> args;
     runtimexray::FindingList findings;
+    runtimexray::FindingSeverity min_severity = runtimexray::FindingSeverity::Medium;
 
     // process args
     int i = 1;
@@ -94,12 +108,14 @@ int main(int argc, char* argv[])
                         << " [--verbose] [--timeout <seconds>] <program> [args...]\n";
                 return 1;
             }
+        } else if (arg == "--min-severity" && (i + 1) < argc) {
+            min_severity = parse_severity(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: " << argv[0]
-                    << " [--verbose] [--timeout <seconds>] <program> [args...]\n";
+            std::cout << "Usage: " << argv[0] << " [--verbose] [--timeout <seconds>] [--min-severity <level>] <program> [args...]\n";
             std::cout << "Options:\n";
             std::cout << "  --verbose             Show all system calls, not just interesting ones.\n";
             std::cout << "  --timeout <seconds>   Stop tracing after the specified time and report findings.\n";
+            std::cout << "  --min-severity <level> Minimum severity for findings (Critical, High, Medium, Low, Info). Default: Medium.\n";
             std::cout << "  --help                Show this help message.\n";
             return 0;
         } else {
@@ -140,9 +156,10 @@ int main(int argc, char* argv[])
                     std::string path = tracer.read_string(path_addr);
                     if (!path.empty()) {
                         extra = " path=\"" + path + "\"";
-                        if (runtimexray::is_sensitive_path(path)) {
+                        auto severity = runtimexray::get_sensitive_path_severity(path);
+                        if (severity != std::nullopt) {
                             findings.emplace_back(
-                                runtimexray::FindingSeverity::High,
+                                *severity,
                                 "Sensitive file access",
                                 "Process attempted to open: " + path,
                                 runtimexray::SensitiveFileAccessDetails{path, "Known sensitive path"}
@@ -237,6 +254,14 @@ int main(int argc, char* argv[])
         std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
+
+    runtimexray::FindingList filterted_findings;
+    for (const auto& f : findings) {
+        if (should_show_finding(f, min_severity)) {
+            filterted_findings.push_back(f);
+        }
+    }
+    findings = std::move(filterted_findings);
 
     if (!findings.empty()) {
         std::cout << "\n== Dynamic Findings ==\n";

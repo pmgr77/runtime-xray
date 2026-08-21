@@ -25,12 +25,21 @@
 #ifndef RUNTIMEXRAY_DYNAMIC_ANALYSIS_HPP
 #define RUNTIMEXRAY_DYNAMIC_ANALYSIS_HPP
 
+#include "finding.hpp"
+#include <optional>
 #include <string>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
 
 namespace runtimexray {
+
+    /**
+     * @brief Determines the severity of a file path based on known sensitive locations.
+     * @param path File path to evaluate.
+     * @return FindingSeverity if the path is sensitive, otherwise std::nullopt.
+     */
+    std::optional<FindingSeverity> get_sensitive_path_severity(const std::string& path);
 
     // Cleaning binary data: printable characters remain, others are replaced with '.'
     std::string sanitize_data(const std::vector<std::byte>& data, size_t max_len = 128);
