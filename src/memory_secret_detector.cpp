@@ -49,28 +49,42 @@ std::vector<SecretMatch> PasswordDetector::detect(const std::string& chunk) cons
     for (const auto& kw : keywords) {
         size_t pos = 0;
         while ((pos = chunk.find(kw, pos)) != std::string::npos) {
-            // Check that the next character is a separator (or end of string)
+            // Skip if the keyword is part of a larger identifier
+            // (e.g., struct_passwd, my_password_hash)
+            if (pos > 0 &&
+                (std::isalnum(static_cast<unsigned char>(chunk[pos - 1])) ||
+                 chunk[pos - 1] == '_')) {
+                pos += kw.size();
+                continue;
+            }
+
             size_t next = pos + kw.size();
+
+            // Check that the next character is a separator
             if (next < chunk.size() && is_separator(chunk[next])) {
                 // Find the end of the value (up to 128 chars, stop at whitespace or comma)
                 size_t value_start = next + 1; // skip the separator
+
                 // Skip spaces if separator was space
                 while (value_start < chunk.size() && chunk[value_start] == ' ') {
                     ++value_start;
                 }
+
                 size_t value_end = value_start;
-                size_t max_val_len = 128;
-                while (value_end < chunk.size() && value_end - value_start < max_val_len) {
+                const size_t max_val_len = 128;
+                while (value_end < chunk.size() && (value_end - value_start) < max_val_len) {
                     char c = chunk[value_end];
                     if (c == '\0' || c == '\n' || c == '\r' || c == ',' || c == ';' ||
-                        (c == ' ' && value_end > value_start && chunk[value_end-1] != '\\')) {
+                        (c == ' ' && value_end > value_start && chunk[value_end - 1] != '\\')) {
                         break;
                     }
-                    value_end++;
+                    ++value_end;
                 }
+
                 size_t snippet_start = (pos > 20) ? pos - 20 : 0;
                 size_t snippet_len = std::min<size_t>(160, chunk.size() - snippet_start);
                 std::string snippet = clean_snippet(chunk, snippet_start, snippet_len);
+
                 results.push_back({kw, snippet, "Potential password-like secret"});
                 pos = next;
             } else {

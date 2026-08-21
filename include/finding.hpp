@@ -75,13 +75,20 @@ struct SensitiveDataWriteDetails {
     std::string reason;
 };
 
+struct MemorySecretFindingDetails {
+    std::string snippet;      // extracted fragment
+    std::string secret_type;  // e.g., "password", "private_key"
+    std::string location;     // "memory", "cmdline", "environment"
+};
+
 // Variant type for all possible finding details
 using DetailsVariant = std::variant<
     HardeningFindingDetails,
     DangerousApiFindingDetails,
     SensitiveFileAccessDetails,
     NetworkConnectionDetails,
-    SensitiveDataWriteDetails
+    SensitiveDataWriteDetails,
+    MemorySecretFindingDetails
 >;
 
 /**

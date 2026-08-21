@@ -3,30 +3,15 @@
  * @brief   Unit tests for memory secret detectors.
  *
  * @author  Peter Magram
- * @date    2026-08-21
+ * @date    2026-08-22
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
-
-// Copyright 2026 Peter Magram
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 #include "memory_secret_detector.hpp"
 
 #include <iostream>
 #include <string>
-#include <vector>
 
 int test_password_detector_finds_secret() {
     runtimexray::PasswordDetector detector;
@@ -61,6 +46,16 @@ int test_password_detector_avoids_pwd_without_separator() {
     auto matches = detector.detect("PyInit_pwd");
     if (!matches.empty()) {
         std::cerr << "False positive on 'pwd' without separator\n";
+        return 1;
+    }
+    return 0;
+}
+
+int test_password_detector_avoids_word_boundary_false_positive() {
+    runtimexray::PasswordDetector detector;
+    auto matches = detector.detect("struct_passwd: Results from getpw*()");
+    if (!matches.empty()) {
+        std::cerr << "False positive on 'struct_passwd:'\n";
         return 1;
     }
     return 0;
@@ -111,6 +106,7 @@ int main() {
     if (test_password_detector_finds_secret()) { std::cerr << "test_password_detector_finds_secret failed\n"; return 1; }
     if (test_password_detector_avoids_false_positive_pass()) { std::cerr << "test_password_detector_avoids_false_positive_pass failed\n"; return 1; }
     if (test_password_detector_avoids_pwd_without_separator()) { std::cerr << "test_password_detector_avoids_pwd_without_separator failed\n"; return 1; }
+    if (test_password_detector_avoids_word_boundary_false_positive()) { std::cerr << "test_password_detector_avoids_word_boundary_false_positive failed\n"; return 1; }
     if (test_password_detector_finds_api_key_with_colon()) { std::cerr << "test_password_detector_finds_api_key_with_colon failed\n"; return 1; }
     if (test_private_key_detector_finds_pem()) { std::cerr << "test_private_key_detector_finds_pem failed\n"; return 1; }
     if (test_detect_secrets_in_chunk_combines_detectors()) { std::cerr << "test_detect_secrets_in_chunk_combines_detectors failed\n"; return 1; }

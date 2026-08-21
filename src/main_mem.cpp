@@ -51,7 +51,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     runtimexray::FindingList findings;
-    runtimexray::scan_memory_for_secrets(pid, findings);
+    runtimexray::scan_process_for_secrets(pid, findings, 50);
 
     if (findings.empty()) {
         std::cout << "No sensitive data found in memory of PID " << pid << ".\n";
@@ -63,6 +63,11 @@ int main(int argc, char* argv[]) {
                 if constexpr (std::is_same_v<T, runtimexray::SensitiveDataWriteDetails>) {
                     std::cout << " - " << f.description
                             << " data=\"" << details.data_snippet << "\"\n";
+                } else if constexpr (std::is_same_v<T, runtimexray::MemorySecretFindingDetails>) {
+                    std::cout << " - " << f.description
+                    << " type=" << details.secret_type
+                    << " location=" << details.location
+                    << " data=\"" << details.snippet << "\"\n";
                 } else {
                     std::cout << " - " << f.description << "\n";
                 }
