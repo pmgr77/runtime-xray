@@ -66,20 +66,22 @@ target_include_directories(test_memory_secret_detector PRIVATE include)
 target_compile_options(test_memory_secret_detector PRIVATE -Wall -Wextra)
 add_test(NAME check_memory_secret_detector COMMAND test_memory_secret_detector)
 
-# Integration test for scanning self
-add_executable(test_memory_scanner_self
-    tests/memory_scanner/test_memory_scanner_self.cpp
-    src/memory_scanner.cpp
-    src/memory_secret_detector.cpp
-)
-target_include_directories(test_memory_scanner_self PRIVATE include)
-target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
+if(NOT SKIP_PTRACE_TESTS)
+    # Integration test for scanning self
+    add_executable(test_memory_scanner_self
+        tests/memory_scanner/test_memory_scanner_self.cpp
+        src/memory_scanner.cpp
+        src/memory_secret_detector.cpp
+    )
+    target_include_directories(test_memory_scanner_self PRIVATE include)
+    target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
 
-add_test(NAME check_memory_scanner_self
-         COMMAND test_memory_scanner_self password=cmdline_secret_test)
-set_tests_properties(check_memory_scanner_self PROPERTIES
-    ENVIRONMENT "TEST_SECRET=password=env_secret_test"
-)
+    add_test(NAME check_memory_scanner_self
+            COMMAND test_memory_scanner_self password=cmdline_secret_test)
+    set_tests_properties(check_memory_scanner_self PROPERTIES
+        ENVIRONMENT "TEST_SECRET=password=env_secret_test"
+    )
+endif()
 
 # Dynamic integration test binary
 enable_language(C)
