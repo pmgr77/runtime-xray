@@ -72,4 +72,11 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_dynamic_output_scan PROPERTIES
         PASS_REGULAR_EXPRESSION "Sensitive data found in process output"
     )
+
+    # Timeout test
+    add_test(NAME check_trace_timeout
+            COMMAND $<TARGET_FILE:xray-trace> --timeout 1 /bin/sleep 10)
+    set_tests_properties(check_trace_timeout PROPERTIES
+        PASS_REGULAR_EXPRESSION "Trace timed out"
+    )
 endif()

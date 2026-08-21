@@ -36,8 +36,11 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <sys/uio.h>   // for process_vm_readv and struct iovec
 #include <fcntl.h>
+#include <thread>
+#include <chrono>
+#include <algorithm>
+#include <sys/uio.h>   // for process_vm_readv and struct iovec
 
 #if defined(__aarch64__)
 #include <sys/uio.h>      // for struct iovec
@@ -51,7 +54,7 @@ namespace runtimexray {
     // Architecture-specific register reading
     // ---------------------------------------------------------------------------
 
-    #if defined(__x86_64__)
+#if defined(__x86_64__)
 
     struct Registers {
         unsigned long long syscall_number;
@@ -77,7 +80,7 @@ namespace runtimexray {
         return out;
     }
 
-    #elif defined(__aarch64__)
+#elif defined(__aarch64__)
 
     struct Registers {
         unsigned long long syscall_number;
@@ -107,9 +110,9 @@ namespace runtimexray {
         return out;
     }
 
-    #else
-    #error "Unsupported architecture for Tachikoma (only x86_64 and ARM64 are supported)"
-    #endif
+#else
+#error "Unsupported architecture for Tachikoma (only x86_64 and ARM64 are supported)"
+#endif
 
     // ---------------------------------------------------------------------------
     // Tachikoma implementation (constructor, destructor, move, run)
@@ -174,9 +177,14 @@ namespace runtimexray {
     }
 
     Tachikoma::Tachikoma(Tachikoma&& other) noexcept
-        : child_pid_(other.child_pid_), running_(other.running_) {
+        : child_pid_(other.child_pid_),
+          running_(other.running_),
+          timed_out_(other.timed_out_),
+          timeout_(other.timeout_),
+          child_output_path_(std::move(other.child_output_path_)) {
         other.child_pid_ = -1;
         other.running_ = false;
+        other.timed_out_ = false;
     }
 
     Tachikoma& Tachikoma::operator=(Tachikoma&& other) noexcept {
@@ -187,8 +195,13 @@ namespace runtimexray {
             }
             child_pid_ = other.child_pid_;
             running_ = other.running_;
+            timed_out_ = other.timed_out_;
+            timeout_ = other.timeout_;
+            child_output_path_ = std::move(other.child_output_path_);
+
             other.child_pid_ = -1;
             other.running_ = false;
+            other.timed_out_ = false;
         }
         return *this;
     }
@@ -252,6 +265,41 @@ namespace runtimexray {
         return buffer;
     }
 
+    void Tachikoma::handle_syscall_stop(const SyscallCallback& cb, bool& in_syscall) {
+        // Read registers to get syscall number and ar
+        Registers regs = read_registers(child_pid_);
+
+        SyscallEvent ev;
+        ev.pid = child_pid_;
+        ev.syscall_number = regs.syscall_number;
+        ev.arg0 = regs.args[0];
+        ev.arg1 = regs.args[1];
+        ev.arg2 = regs.args[2];
+        ev.arg3 = regs.args[3];
+        ev.arg4 = regs.args[4];
+        ev.arg5 = regs.args[5];
+
+        if (!in_syscall) {
+            // Syscall entry
+            ev.is_entry = true;
+            ev.return_value = 0;
+            cb(ev);
+            in_syscall = true;
+        } else {
+            // Syscall exit
+            ev.is_entry = false;
+            ev.return_value = regs.return_value;
+            cb(ev);
+            in_syscall = false;
+        }
+
+        // Continue
+        if (ptrace(PTRACE_SYSCALL, child_pid_, nullptr, nullptr) == -1) {
+            running_ = false;
+            throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: ") + std::strerror(errno));
+        }
+    }
+
     int Tachikoma::run(const SyscallCallback& cb) {
         if (!running_) {
             throw std::runtime_error("Tachikoma: not running");
@@ -259,11 +307,34 @@ namespace runtimexray {
 
         int status;
         bool in_syscall = false; // false = entry, true = exit
+        timed_out_ = false;
+
+        auto start_time = std::chrono::steady_clock::now();
 
         while (running_) {
-            if (waitpid(child_pid_, &status, 0) == -1) {
+            pid_t res = waitpid(child_pid_, &status, WNOHANG);
+            if (res == -1) {
+                if (errno == EINTR) {
+                    continue;
+                }
                 running_ = false;
                 throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
+            }
+
+            if (res == 0) {
+                // Child still running
+                if (timeout_.count() > 0) {
+                    auto now = std::chrono::steady_clock::now();
+                    if (now - start_time >= timeout_) {
+                        kill(child_pid_, SIGKILL);
+                        waitpid(child_pid_, nullptr, 0);
+                        running_ = false;
+                        timed_out_ = true;
+                        return -2; // timeout code
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
             }
 
             if (WIFEXITED(status) || WIFSIGNALED(status)) {
@@ -272,38 +343,7 @@ namespace runtimexray {
             }
 
             if (WIFSTOPPED(status)) {
-                // Read registers to get syscall number and ar
-                Registers regs = read_registers(child_pid_);
-
-                SyscallEvent ev;
-                ev.pid = child_pid_;
-                ev.syscall_number = regs.syscall_number;
-                ev.arg0 = regs.args[0];
-                ev.arg1 = regs.args[1];
-                ev.arg2 = regs.args[2];
-                ev.arg3 = regs.args[3];
-                ev.arg4 = regs.args[4];
-                ev.arg5 = regs.args[5];
-
-                if (!in_syscall) {
-                    // Syscall entry
-                    ev.is_entry = true;
-                    ev.return_value = 0;
-                    cb(ev);
-                    in_syscall = true;
-                } else {
-                    // Syscall exit
-                    ev.is_entry = false;
-                    ev.return_value = regs.return_value;
-                    cb(ev);
-                    in_syscall = false;
-                }
-
-                // Continue
-                if (ptrace(PTRACE_SYSCALL, child_pid_, nullptr, nullptr) == -1) {
-                    running_ = false;
-                    throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: ") + std::strerror(errno));
-                }
+                handle_syscall_stop(cb, in_syscall);
             }
         }
         return 0;

@@ -29,6 +29,7 @@
 #include <vector>
 #include <functional>
 #include <cstdint>
+#include <chrono>
 
 namespace runtimexray {
 
@@ -70,6 +71,14 @@ public:
     Tachikoma operator=(const Tachikoma&) = delete;
 
     /**
+     * @brief Sets a timeout for tracing.
+     * @param timeout Maximum duration to trace. Zero means no timeout.
+     */
+    void set_timeout(std::chrono::seconds timeout) noexcept {
+        timeout_ = timeout;
+    }
+
+    /**
     * @brief Reads a null-terminated string from the traced process memory.
     * @param address Virtual address of the string in the traced process.
     * @param max_len Maximum number of bytes to read.
@@ -94,6 +103,11 @@ public:
     bool is_running() const noexcept { return running_; }
 
     /**
+     * @brief Returns true if the tracing ended because of timeout.
+     */
+    bool is_timed_out() const noexcept { return timed_out_; }
+
+    /**
      * @brief Returns the path where the child's stdout/stderr is saved.
      */
     const std::string& child_output_path() const noexcept { return child_output_path_; }
@@ -102,7 +116,11 @@ public:
 private:
     pid_t child_pid_ = -1;
     bool running_ = false;
+    bool timed_out_ = false;
+    std::chrono::seconds timeout_{0};
     std::string child_output_path_;
+
+    void handle_syscall_stop(const SyscallCallback& cb, bool& in_syscall);
 };
 } // namespace runtimexray
 

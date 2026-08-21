@@ -36,6 +36,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 
 namespace {
     
@@ -74,6 +75,7 @@ namespace {
 int main(int argc, char* argv[])
 {
     bool verbose = false;
+    std::chrono::seconds timeout{0};
     std::vector<std::string> args;
     runtimexray::FindingList findings;
 
@@ -83,19 +85,34 @@ int main(int argc, char* argv[])
         std::string arg = argv[i];
         if (arg == "--verbose") {
             verbose = true;
+        } else if (arg == "--timeout" && (i + 1) < argc) {
+            try {
+                timeout = std::chrono::seconds(std::stoi(argv[++i]));
+            } catch (...) {
+                std::cerr << "Invalid timeout value.\n";
+                std::cout << "Usage: " << argv[0]
+                        << " [--verbose] [--timeout <seconds>] <program> [args...]\n";
+                return 1;
+            }
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: " << argv[0] << " [--verbose] <program> [args...]\n";
+            std::cout << "Usage: " << argv[0]
+                    << " [--verbose] [--timeout <seconds>] <program> [args...]\n";
+            std::cout << "Options:\n";
+            std::cout << "  --verbose             Show all system calls, not just interesting ones.\n";
+            std::cout << "  --timeout <seconds>   Stop tracing after the specified time and report findings.\n";
+            std::cout << "  --help                Show this help message.\n";
             return 0;
         } else {
-            break; // first non-optional argument is program name
+            break;
         }
     }
 
     if (i >= argc) {
         std::cerr << "Error: no program specified.\n";
-        std::cout << "Usage: " << argv[0] << " [--verbose] <program> [args...]\n";
+        std::cout << "Usage: " << argv[0]
+                << " [--verbose] [--timeout <seconds>] <program> [args...]\n";
         return 1;
-    }
+    }    
 
     std::string program = argv[i];
     // Collect args for traced process: program name and other args
@@ -106,6 +123,7 @@ int main(int argc, char* argv[])
 
     try {
         runtimexray::Tachikoma tracer(program, args);
+        tracer.set_timeout(timeout);
         tracer.run([&tracer, &findings, verbose](const runtimexray::SyscallEvent& ev) {
             const long num = static_cast<long>(ev.syscall_number);
 
@@ -205,6 +223,9 @@ int main(int argc, char* argv[])
             }
         });
 
+        if (tracer.is_timed_out()) {
+            std::cout << "\n[Trace timed out after " << timeout.count() << " seconds]\n";
+        }
         std::cout << "\n[Child stdout/stderr saved to " << tracer.child_output_path() << "]\n";
         // Anylyze save child process output
         std::string child_output = tracer.child_output_path();
