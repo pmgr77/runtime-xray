@@ -41,6 +41,13 @@ It focuses on technical milestones and is subject to change.
   - Use `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK` for less intrusive tracing
   - Detect anti-debugging/anti-tracing behaviour (e.g., `TracerPid` checks, self-ptrace)
   - Explore eBPF as a harder-to-evade tracing backend
+- **Memory scanning for security findings**:
+  - [x] Parse `/proc/<pid>/maps` for readable regions
+  - [ ] Detect secrets in command line and environment
+  - [ ] Scan memory for private keys and high-entropy data
+  - [ ] Flag RWX anonymous memory
+  - [ ] Integrate with `xray-trace` for runtime memory inspection
+  - [ ] Track sensitive data lifetime in memory
 
 ## 📈 Long-Term Vision
 
