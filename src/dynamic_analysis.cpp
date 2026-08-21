@@ -105,19 +105,6 @@ namespace runtimexray {
         return out;
     }
 
-    bool is_sensitive_path(const std::string& path) {
-        static const std::vector<std::string> sensitive_substrings = {
-            "/etc/shadow", "/etc/passwd", "/etc/sudoers",
-            "/root/", "/home/*/.ssh", "/home/*/.aws", "/home/*/.gnupg",
-            ".ssh/id_rsa", ".ssh/id_dsa", ".aws/credentials", ".gnupg/secring.gpg",
-            "id_rsa", "id_dsa", "credentials", "secret", "token", "password"
-        };
-        for (const auto& sub : sensitive_substrings) {
-            if (path.find(sub) != std::string::npos) return true;
-        }
-        return false;
-    }
-
     std::string to_lower_case(const std::string& input) {
         std::string result = input;
 

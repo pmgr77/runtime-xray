@@ -31,11 +31,39 @@ target_include_directories(xray-trace PRIVATE include)
 target_compile_options(xray-trace PRIVATE -Wall -Wextra)
 target_compile_definitions(xray-trace PRIVATE _GNU_SOURCE)
 
+add_executable(xray-mem
+    src/main_mem.cpp
+    src/memory_scanner.cpp
+    src/memory_secret_detector.cpp
+)
+target_include_directories(xray-mem PRIVATE include)
+target_compile_options(xray-mem PRIVATE -Wall -Wextra)
+target_link_libraries(xray-mem PRIVATE)
+
+add_executable(test_memory_scanner 
+    tests/memory_scanner/test_memory_scanner.cpp 
+    src/memory_scanner.cpp
+    src/memory_secret_detector.cpp
+)
+target_include_directories(test_memory_scanner PRIVATE include)
+add_test(NAME check_memory_scanner COMMAND test_memory_scanner)
+
 # Unit tests for dynamic analysis helpers
-add_executable(test_dynamic_helpers tests/dynamic_analysis/test_dynamic_helpers.cpp src/dynamic_analysis.cpp)
+add_executable(test_dynamic_helpers
+    tests/dynamic_analysis/test_dynamic_helpers.cpp
+    src/dynamic_analysis.cpp
+)
 target_include_directories(test_dynamic_helpers PRIVATE include)
 target_compile_options(test_dynamic_helpers PRIVATE -Wall -Wextra)
 add_test(NAME check_dynamic_helpers COMMAND test_dynamic_helpers)
+
+add_executable(test_memory_secret_detector
+    tests/memory_scanner/test_memory_secret_detector.cpp
+    src/memory_secret_detector.cpp
+)
+target_include_directories(test_memory_secret_detector PRIVATE include)
+target_compile_options(test_memory_secret_detector PRIVATE -Wall -Wextra)
+add_test(NAME check_memory_secret_detector COMMAND test_memory_secret_detector)
 
 # Dynamic integration test binary
 enable_language(C)

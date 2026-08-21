@@ -46,13 +46,8 @@ namespace runtimexray {
 
     // Checks whether the string contains sensitive keywords (passwords, secrets, etc.)
     bool contains_sensitive_keyword(const std::string& text);
-
-    /**
-     * @brief Проверяет, указывает ли путь на конфиденциальный файл или каталог.
-     */
-    bool is_sensitive_path(const std::string& path);
-    
-    // Разбирает sockaddr (IPv4/IPv6) в IP-строку и порт
+  
+    // Translates sockaddr (IPv4/IPv6) into IP-строку and port
     struct ParsedSockaddr {
         std::string ip;
         uint16_t port = 0;
