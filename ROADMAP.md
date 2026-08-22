@@ -5,6 +5,14 @@ It focuses on technical milestones and is subject to change.
 
 ## ✅ Already Implemented
 
+- **Unified CLI** (`runtimexray`) with subcommands:
+  - `analyze` – static ELF analysis
+  - `trace` – dynamic ptrace‑based tracing
+  - `mem` – process memory scanning
+- **Common CLI options** shared across all subcommands:
+  - `--verbose`
+  - `--min-severity <level>`
+  - `--output-format <format>` (reserved for future use)
 - **ELF parsing**: Detect ELF class (32/64-bit), endianness, type, machine, entry point.
 - **Security checks**:
   - NX (No eXecute) via `PT_GNU_STACK`
@@ -14,15 +22,26 @@ It focuses on technical milestones and is subject to change.
 - **Memory-mapped file wrapper** (`MappedFile`) with RAII and move semantics.
 - **Dangerous API detection** via imported symbols, with CWE references, severity levels, and recommendations.
 - **Severity filtering** for findings (`--min-severity`, `--verbose`).
-- **Early dynamic analysis** (`xray-trace`):
+- **Dynamic analysis** (`runtimexray trace`):
   - `ptrace`-based tracing on x86_64 and ARM64
   - syscall name mapping and filtering of interesting events
   - file path reading for `open`/`openat`
   - network address parsing for `connect`/`sendto`
   - `write` buffer reading (first 4 KB)
   - child stdout/stderr capture and scanning for sensitive keywords
+  - timeout support (`--timeout <seconds>`)
   - dynamic findings: sensitive file access, suspicious network connections, sensitive data writes
-- **Comprehensive CTest suite**: 24 tests covering static checks, dynamic helpers, and integration tests.
+- **Memory scanning** (`runtimexray mem`):
+  - parsing `/proc/<pid>/maps` for readable regions
+  - reading `/proc/<pid>/cmdline` and `/proc/<pid>/environ`
+  - scanning memory pages for password‑like strings, private key markers, and other sensitive patterns
+  - `--max-pages` option to limit the number of scanned pages
+  - page count reporting in output
+  - `--max-pages 0` mode to skip page scanning and only check cmdline/environ
+- **Secret detectors**:
+  - `PasswordDetector` for key‑value pairs (`password=`, `api_key:`, etc.) with word‑boundary awareness
+  - `PrivateKeyDetector` for PEM markers (`BEGIN RSA PRIVATE KEY`, etc.)
+- **Comprehensive CTest suite**: 33 tests covering static checks, dynamic helpers, memory scanning, and integration tests.
 - **CI/CD**: GitHub Actions workflows for build and test on x86_64 and ARM64.
 - **Documentation**: `docs/security_checks.md` explains each check; README includes quick start and architecture.
 
@@ -33,7 +52,9 @@ It focuses on technical milestones and is subject to change.
   - Data lineage: track sensitive data from source through transformations to sinks
   - Network-boundary detection
   - Correlation of static and runtime evidence into a unified report
-- **Secret detection**: Find hardcoded keys, credentials, and other secrets in binaries and runtime memory.
+- **Secret detection**:
+  - Find hardcoded keys, credentials, and other secrets in binaries and runtime memory.
+  - High‑entropy data detection for keys and encrypted blobs.
 - **Reporting**: Generate JSON and HTML reports, not just console output.
 - **Extensible analyzer architecture**: Plugins for new checks and additional binary formats (PE, Mach‑O).
 - **AI explanations**: Optional integration with LLMs (e.g., DeepSeek) to produce human-readable evidence summaries.
@@ -41,13 +62,11 @@ It focuses on technical milestones and is subject to change.
   - Use `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK` for less intrusive tracing
   - Detect anti-debugging/anti-tracing behaviour (e.g., `TracerPid` checks, self-ptrace)
   - Explore eBPF as a harder-to-evade tracing backend
-- **Memory scanning for security findings**:
-  - [x] Parse `/proc/<pid>/maps` for readable regions
-  - [ ] Detect secrets in command line and environment
-  - [ ] Scan memory for private keys and high-entropy data
-  - [ ] Flag RWX anonymous memory
-  - [ ] Integrate with `xray-trace` for runtime memory inspection
-  - [ ] Track sensitive data lifetime in memory
+- **Memory scanning further improvements**:
+  - Flag RWX anonymous memory
+  - Integrate with `xray-trace` for runtime memory inspection
+  - Track sensitive data lifetime in memory
+  - Reduce false positives with advanced context analysis
 
 ## 📈 Long-Term Vision
 

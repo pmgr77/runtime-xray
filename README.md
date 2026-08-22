@@ -40,14 +40,15 @@ the goal is to answer:
 
 ---
 
-### 🧩 Static + Dynamic Analysis
+### 🧩 Static + Dynamic + Memory Analysis
 
-RuntimeXRay combines two complementary views of an application:
+RuntimeXRay combines three complementary views of an application:
 
 * **Static analysis** of the compiled binary
 * **Dynamic analysis** of the running process
+* **Memory analysis** of sensitive data in process memory
 
-Static analysis provides information that can be determined directly from the binary, while runtime analysis can reveal behavior that cannot be established from the binary alone.
+Static analysis provides information that can be determined directly from the binary, while runtime and memory analysis reveal behavior and data exposure that cannot be established from the binary alone.
 
 The runtime component, **Tachikoma**, uses Linux `ptrace`-based tracing and is currently under development.
 
@@ -121,6 +122,12 @@ RuntimeXRay is currently in active development.
 
 ### ✅ Available today
 
+**Unified CLI** (`runtimexray`) with subcommands:
+
+- `analyze` – static ELF hardening checks and dangerous API detection
+- `trace` – dynamic ptrace‑based syscall tracing and evidence capture
+- `mem` – process memory scanning for secrets
+
 **ELF static analysis**
 
 * ELF 32-bit and 64-bit parsing
@@ -136,7 +143,7 @@ RuntimeXRay is currently in active development.
 * Verbose reporting
 * Regression tests using CTest
 
-**Early dynamic analysis** (experimental but functional via `xray-trace`)
+**Dynamic analysis** (experimental but functional via `runtimexray trace`)
 
 * Linux `ptrace`-based syscall tracing on x86_64 and ARM64
 * Syscall name mapping and filtering of interesting events
@@ -149,7 +156,15 @@ RuntimeXRay is currently in active development.
   - Suspicious network connections
   - Sensitive data writes
   - Sensitive data in captured process output
-* CTest regression and integration tests (currently 24 tests)
+* CTest regression and integration tests (currently 33 tests)
+
+**Memory scanning** (via `runtimexray mem`)
+
+* Reads `/proc/<pid>/cmdline` and `/proc/<pid>/environ` for secrets
+* Scans readable memory pages for password-like strings, private keys, and other sensitive patterns
+* Supports `--max-pages` option to limit the number of scanned memory pages
+* `--max-pages 0` skips page scanning and only checks command line and environment
+* Reports the number of scanned pages
 
 Dangerous API detection currently identifies imported functions that may indicate unsafe or obsolete practices, such as:
 
@@ -197,43 +212,73 @@ cmake --build .
 ### Analyze an ELF binary
 
 ```bash
-./xray /bin/ls
+./runtimexray analyze /bin/ls
 ```
 
 Example output:
 
 ```text
-/bin/ls is an ELF file. Size: 142312 bytes
+/bin/ls is an ELF file. Size: 199464 bytes
   Class: Elf64
   Data Encoding: LittleEndian
   Type: DYN (Shared object/PIE)
-  Machine: x86_64
+  Machine: ARM64
   Version: 1
-  Entry point: 0x6d30
+  Entry point: 0x5dc0
 
 > Hardening checks:
-    NX: Enabled
-    PIE: Enabled
-    RELRO: Full
-    Canary: Enabled
-
-> Dangerous API detection:
-    Dangerous API: strncpy
-      Reason: Potentially unsafe if null-termination is not ensured
+    No findings at this severity level.
 ```
 
-The exact findings depend on the binary being analyzed.
+Use `--verbose` to see all findings, including informational hardening checks:
+
+```bash
+./runtimexray analyze --verbose /bin/ls
+```
 
 ### Run a dynamic trace
 
 ```bash
-./xray-trace /bin/ls
+./runtimexray trace --timeout 5 /usr/bin/curl https://example.com
 ```
-Use --verbose to see all system calls:
+
+Use `--verbose` to show all system calls, not just interesting ones:
+
 ```bash
-./xray-trace --verbose /bin/ls
+./runtimexray trace --verbose /bin/ls
 ```
-The traced program’s stdout/stderr are saved to /tmp/runtimexray_child_*.log for later inspection.
+
+The traced program’s stdout/stderr are saved to `/tmp/runtimexray_child_*.log` for later inspection.
+
+### Scan a process memory for secrets
+
+```bash
+./runtimexray mem <pid>
+```
+
+Limit the number of memory pages scanned with `--max-pages`:
+
+```bash
+./runtimexray mem --max-pages 500 <pid>
+./runtimexray mem --max-pages 0 <pid>   # only cmdline and environment
+```
+
+### Global options
+
+All subcommands support:
+
+- `--verbose`
+- `--min-severity <level>` (Critical, High, Medium, Low, Info)
+- `--output-format <format>` (reserved for future use)
+
+Get help for any subcommand:
+
+```bash
+./runtimexray --help
+./runtimexray analyze --help
+./runtimexray trace --help
+./runtimexray mem --help
+```
 
 ---
 
