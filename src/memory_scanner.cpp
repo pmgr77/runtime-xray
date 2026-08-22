@@ -117,17 +117,37 @@ std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
     return regions;
 }
 
-void scan_memory_for_secrets(pid_t pid, FindingList& findings, size_t max_findings) {
+void scan_memory_for_secrets(pid_t pid, FindingList& findings,
+                             size_t max_findings,
+                             size_t max_pages,
+                             size_t* pages_scanned) {
+    // Fast path: no memory pages should be scanned
+    if (max_pages == 0) {
+        if (pages_scanned) {
+            *pages_scanned = 0;
+        }
+        return;
+    }
+                          
     auto regions = get_readable_regions(pid);
-    if (regions.empty()) return;
+    if (regions.empty()) {
+        if (pages_scanned) {
+            *pages_scanned = 0;
+        }
+        return; // No readable regions or failed to read maps
+    }
 
     constexpr size_t chunk_size = 4096;
     std::vector<std::byte> buffer(chunk_size);
     size_t found = 0;
+    size_t scanned = 0;
 
     for (const auto& region : regions) {
+        if (scanned >= max_pages) {
+            break;
+        }
         uint64_t address = region.start;
-        while (address < region.end && found < max_findings) {
+        while (address < region.end && found < max_findings && scanned < max_pages) {
             size_t to_read = std::min<size_t>(chunk_size, region.end - address);
 
             struct iovec local;
@@ -141,8 +161,11 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings, size_t max_findin
             ssize_t n = process_vm_readv(pid, &local, 1, &remote, 1, 0);
             if (n <= 0) {
                 address += 4096; // skip inaccessible page
+                ++scanned;
                 continue;
             }
+
+            ++scanned;
 
             std::string chunk(reinterpret_cast<char*>(buffer.data()), static_cast<size_t>(n));
             auto matches = detect_secrets_in_chunk(chunk);
@@ -154,6 +177,10 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings, size_t max_findin
 
             address += static_cast<uint64_t>(n);
         }
+    }
+
+    if (pages_scanned) {
+        *pages_scanned = scanned;
     }
 }
 
@@ -197,21 +224,36 @@ void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     }
 }
 
-void scan_process_for_secrets(pid_t pid, FindingList& findings, size_t max_findings) {
+void scan_process_for_secrets(pid_t pid, FindingList& findings,
+                              size_t max_findings,
+                              size_t max_pages,
+                              size_t* pages_scanned) {
     size_t before = findings.size();
+    // cmdline and environ do not scan memory page by page, so pages_scanned is counted only for memory
     scan_cmdline_for_secrets(pid, findings, max_findings);
     size_t after_cmd = findings.size();
-    if (after_cmd - before >= max_findings) {
+    if ((after_cmd - before) >= max_findings) {
+        if (pages_scanned) {
+            *pages_scanned = 0;
+        }
         return;
     }
 
     scan_environ_for_secrets(pid, findings, max_findings - (after_cmd - before));
     size_t after_env = findings.size();
-    if (after_env - before >= max_findings) {
+    if ((after_env - before) >= max_findings) {
+        if (pages_scanned) {
+            *pages_scanned = 0;
+        }        
         return;
     }
-
-    scan_memory_for_secrets(pid, findings, max_findings - (after_env - before));
+    
+    size_t remaining = max_findings - (after_env - before);
+    size_t scanned = 0;
+    scan_memory_for_secrets(pid, findings, remaining, max_pages, &scanned);
+    if (pages_scanned) {
+        *pages_scanned = scanned;
+    }
 }
 
 } // namespace runtimexray

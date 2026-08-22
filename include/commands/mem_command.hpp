@@ -51,6 +51,7 @@ namespace runtimexray
 
     private:
         pid_t pid_ = -1;
+        size_t max_pages_ = 1000;   // default limit
     };
 
 } // namespace runtimexray

@@ -28,18 +28,27 @@
 namespace runtimexray
 {
 
-    bool MemCommand::parse_specific_args(const std::vector<std::string> &args)
-    {
+    bool MemCommand::parse_specific_args(const std::vector<std::string>& args) {
         pid_ = -1;
+        max_pages_ = 1000;   // default
 
-        for (const auto &arg : args) {
+        for (size_t i = 0; i < args.size(); ++i) {
+            const std::string& arg = args[i];
+
             if (arg == "-h" || arg == "--help") {
                 print_help();
                 return false; // signal that help was shown
+            } else if (arg == "--max-pages" && (i + 1 < args.size())) {
+                try {
+                    max_pages_ = std::stoull(args[++i]);
+                } catch (...) {
+                    std::cerr << "Error: Invalid value for --max-pages option.\n";
+                    return false;
+                }
             } else if (pid_ == -1) {
                 try {
                     pid_ = std::stoi(arg);
-                } catch (const std::invalid_argument &) {
+                } catch (const std::invalid_argument&) {
                     std::cerr << "Error: Invalid PID value: " << arg << std::endl;
                     return false;
                 }
@@ -60,13 +69,15 @@ namespace runtimexray
     int MemCommand::execute(const CommonOptions &common)
     {
         runtimexray::FindingList findings;
-        runtimexray::scan_process_for_secrets(pid_, findings, 50);
+        size_t pages_scanned = 0;
+
+        runtimexray::scan_process_for_secrets(pid_, findings, 50, max_pages_, &pages_scanned);
         runtimexray::filter_findings(findings, common.min_severity, common.verbose);
 
         if (findings.empty()) {
             std::cout << "No sensitive data found in memory of PID " << pid_ << ".\n";
         } else {
-            std::cout << "Found " << findings.size() << " potential secrets:\n";
+            std::cout << "Found " << findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
             for (const auto& f : findings) {
                 std::visit([&](const auto& details) {
                     using T = std::decay_t<decltype(details)>;
@@ -90,8 +101,12 @@ namespace runtimexray
     }
 
     void MemCommand::print_help() const {
-        std::cout << "Usage: runtimexray mem [--verbose] [--min-severity <level>] <pid>\n";
+        std::cout << "Usage: runtimexray mem [--verbose] [--min-severity <level>] [--max-pages <N>] <pid>\n";
         std::cout << "Scans readable memory of the given process for secrets.\n";
+        std::cout << "Options:\n";
+        std::cout << "  --max-pages <N>       Maximum number of memory pages to scan (default: 1000).\n";
+        std::cout << "                        Use 0 to skip memory page scanning and only check\n";
+        std::cout << "                        cmdline and environment variables.\n";
     }
 
 } // namespace runtimexray

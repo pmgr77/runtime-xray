@@ -68,16 +68,26 @@ namespace runtimexray {
      * @param pid Process ID.
      * @param findings Output list to append findings to.
      * @param max_findings Total maximum number of findings.
+     * @param max_pages Maximum number of memory pages to scan.
+     * @param pages_scanned Optional output parameter; set to number of memory pages actually scanned.
      */
-    void scan_process_for_secrets(pid_t pid, FindingList& findings, size_t max_findings = 50);    
+    void scan_process_for_secrets(pid_t pid, FindingList& findings,
+                                size_t max_findings = 50,
+                                size_t max_pages = 1000,
+                                size_t* pages_scanned = nullptr);
 
     /**
      * @brief Scans readable memory of a process for secrets.
      * @param pid Process ID.
      * @param findings Output list to append findings to.
-     * @param max_findings Max number of findings to detect.
+     * @param max_findings Maximum number of findings to add.
+     * @param max_pages Maximum number of memory pages to scan.
+     * @param pages_scanned Optional output parameter; will be set to the number of pages actually scanned.
      */
-    void scan_memory_for_secrets(pid_t pid, FindingList& findings, size_t max_findings = 50);
+    void scan_memory_for_secrets(pid_t pid, FindingList& findings,
+                                 size_t max_findings = 50,
+                                 size_t max_pages = 1000,
+                                 size_t* pages_scanned = nullptr);
 } // namespace runtimexray
 
 #endif // RUNTIMEXRAY_MEMORY_SCANNER_HPP
