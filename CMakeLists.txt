@@ -12,41 +12,35 @@ endif()
 
 enable_testing()
 
-add_executable(xray
-    src/main_elf.cpp
+add_executable(runtimexray
+    src/main.cpp
+    src/common_cli.cpp
+    src/finding_filter.cpp
+    src/commands/analyze_command.cpp
+    src/commands/trace_command.cpp
+    src/commands/mem_command.cpp
     src/mapped_file.cpp
     src/elf_parser.cpp
-)
-target_include_directories(xray PRIVATE include)
-
-add_subdirectory(tests/security_checks)
-
-add_executable(xray-trace
-    src/main_trace.cpp
     src/tachikoma.cpp
     src/syscall_names.cpp
     src/dynamic_analysis.cpp
-)
-target_include_directories(xray-trace PRIVATE include)
-target_compile_options(xray-trace PRIVATE -Wall -Wextra)
-target_compile_definitions(xray-trace PRIVATE _GNU_SOURCE)
-
-add_executable(xray-mem
-    src/main_mem.cpp
     src/memory_scanner.cpp
     src/memory_secret_detector.cpp
 )
-target_include_directories(xray-mem PRIVATE include)
-target_compile_options(xray-mem PRIVATE -Wall -Wextra)
-target_link_libraries(xray-mem PRIVATE)
+target_include_directories(runtimexray PRIVATE include)
+target_compile_options(runtimexray PRIVATE -Wall -Wextra)
+target_compile_definitions(runtimexray PRIVATE _GNU_SOURCE)
 
-add_executable(test_memory_scanner 
-    tests/memory_scanner/test_memory_scanner.cpp 
+add_executable(test_memory_scanner
+    tests/memory_scanner/test_memory_scanner.cpp
     src/memory_scanner.cpp
     src/memory_secret_detector.cpp
 )
 target_include_directories(test_memory_scanner PRIVATE include)
-add_test(NAME check_memory_scanner COMMAND test_memory_scanner)
+add_test(NAME check_memory_scanner COMMAND $<TARGET_FILE:test_memory_scanner>)
+
+add_subdirectory(tests/security_checks)
+
 
 # Unit tests for dynamic analysis helpers
 add_executable(test_dynamic_helpers
@@ -55,7 +49,7 @@ add_executable(test_dynamic_helpers
 )
 target_include_directories(test_dynamic_helpers PRIVATE include)
 target_compile_options(test_dynamic_helpers PRIVATE -Wall -Wextra)
-add_test(NAME check_dynamic_helpers COMMAND test_dynamic_helpers)
+add_test(NAME check_dynamic_helpers COMMAND $<TARGET_FILE:test_dynamic_helpers>)
 
 # Unit tests for memory secret detectors
 add_executable(test_memory_secret_detector
@@ -64,7 +58,7 @@ add_executable(test_memory_secret_detector
 )
 target_include_directories(test_memory_secret_detector PRIVATE include)
 target_compile_options(test_memory_secret_detector PRIVATE -Wall -Wextra)
-add_test(NAME check_memory_secret_detector COMMAND test_memory_secret_detector)
+add_test(NAME check_memory_secret_detector COMMAND $<TARGET_FILE:test_memory_secret_detector>)
 
 # Integration test for scanning self
 add_executable(test_memory_scanner_self
@@ -76,7 +70,7 @@ target_include_directories(test_memory_scanner_self PRIVATE include)
 target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
 
 add_test(NAME check_memory_scanner_self
-         COMMAND test_memory_scanner_self password=cmdline_secret_test)
+         COMMAND $<TARGET_FILE:test_memory_scanner_self> password=cmdline_secret_test)
 set_tests_properties(check_memory_scanner_self PROPERTIES
     ENVIRONMENT "TEST_SECRET=password=env_secret_test"
 )
@@ -89,74 +83,74 @@ target_compile_options(dynamic_target PRIVATE -O0)   # optimization disabled
 
 if(NOT SKIP_PTRACE_TESTS)
     add_test(NAME check_xray_trace_smoke
-             COMMAND $<TARGET_FILE:xray-trace> --verbose /bin/ls)
+             COMMAND $<TARGET_FILE:runtimexray> trace --verbose /bin/ls)
     set_tests_properties(check_xray_trace_smoke PROPERTIES PASS_REGULAR_EXPRESSION "openat")
 
     # Integration tests for xray-trace dynamic findings
     add_test(NAME check_dynamic_file_access
-            COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+            COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_dynamic_file_access PROPERTIES
         PASS_REGULAR_EXPRESSION "Sensitive file access"
     )
 
     add_test(NAME check_dynamic_network
-            COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+            COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_dynamic_network PROPERTIES
         PASS_REGULAR_EXPRESSION "Suspicious network connection"
     )
 
     add_test(NAME check_dynamic_write_secret
-         COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+         COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_dynamic_write_secret PROPERTIES
         PASS_REGULAR_EXPRESSION "Sensitive data written"
     )
 
     add_test(NAME check_dynamic_output_scan
-            COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+            COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_dynamic_output_scan PROPERTIES
         PASS_REGULAR_EXPRESSION "Sensitive data found in process output"
     )
 
     # Timeout test
     add_test(NAME check_trace_timeout
-            COMMAND $<TARGET_FILE:xray-trace> --timeout 1 /bin/sleep 10)
+            COMMAND $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/sleep 10)
     set_tests_properties(check_trace_timeout PROPERTIES
         PASS_REGULAR_EXPRESSION "Trace timed out"
     )
 
     # Severity filtering for dynamic findings
     add_test(NAME check_trace_critical_show
-             COMMAND $<TARGET_FILE:xray-trace> --min-severity Critical $<TARGET_FILE:dynamic_target>)
+             COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Critical $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_critical_show PROPERTIES
         PASS_REGULAR_EXPRESSION "path=/etc/sudoers"
     )
 
     add_test(NAME check_trace_high_show
-             COMMAND $<TARGET_FILE:xray-trace> --min-severity High $<TARGET_FILE:dynamic_target>)
+             COMMAND $<TARGET_FILE:runtimexray> trace --min-severity High $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_high_show PROPERTIES
         PASS_REGULAR_EXPRESSION "path=/tmp/fake_secret_file"
     )
 
     add_test(NAME check_trace_medium_show
-             COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+             COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_medium_show PROPERTIES
         PASS_REGULAR_EXPRESSION "path=/etc/passwd"
     )
 
     add_test(NAME check_trace_low_hide_default
-             COMMAND $<TARGET_FILE:xray-trace> $<TARGET_FILE:dynamic_target>)
+             COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_low_hide_default PROPERTIES
         FAIL_REGULAR_EXPRESSION "path=/etc/hosts"
     )
 
     add_test(NAME check_trace_low_show
-             COMMAND $<TARGET_FILE:xray-trace> --min-severity Low $<TARGET_FILE:dynamic_target>)
+             COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Low $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_low_show PROPERTIES
         PASS_REGULAR_EXPRESSION "path=/etc/hosts"
     )
 
     add_test(NAME check_trace_info_show
-             COMMAND $<TARGET_FILE:xray-trace> --min-severity Info $<TARGET_FILE:dynamic_target>)
+             COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Info $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_info_show PROPERTIES
         PASS_REGULAR_EXPRESSION "path=/etc/hostname"
     )

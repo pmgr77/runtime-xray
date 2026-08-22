@@ -33,8 +33,10 @@ namespace runtimexray {
 /**
  * @brief      Parse an ELF file and print basic information.
  * @param path Path to the file.
+ * @param min_severity Minimum severity level for findings to be displayed.
+ * @param verbose If true, show all findings regardless of severity.
  */
- void parse_elf(const std::string& path, FindingSeverity min_severity = FindingSeverity::Medium);
+ void parse_elf(const std::string& path, FindingSeverity min_severity = FindingSeverity::Medium, bool verbose = false);
 
 } // namespace runtimexray
 

@@ -26,6 +26,7 @@
 #include "elf_parser.hpp"
 #include "mapped_file.hpp"
 #include "finding.hpp"
+#include "finding_filter.hpp"
 #include <iostream>
 #include <ostream>
 #include <cstddef>
@@ -297,21 +298,6 @@ namespace runtimexray
             return be64toh(val);
         }
         return val;
-    }
-
-    bool should_show_finding(const Finding& f, FindingSeverity min_severity) {
-        // Lower numeric value = more severe (Critical=0, High=1, Medium=2, Low=3, Info=4)
-        return static_cast<int>(f.severity) <= static_cast<int>(min_severity);
-    }
-
-    void filter_findings(FindingList& findings, FindingSeverity min_severity)
-    {
-        findings.erase(
-            std::remove_if(findings.begin(), findings.end(),
-                            [min_severity](const Finding& f) {
-                                return !should_show_finding(f, min_severity);
-                            }),
-            findings.end());
     }
 
     /**
@@ -803,8 +789,10 @@ namespace runtimexray
     /**
      * @brief Parse an ELF file and print basic information.
      * @param path Path to the file.
+     * @param min_severity Minimum severity level for findings to be reported.
+     * @param verbose If true, show all findings regardless of severity.
      */
-    void parse_elf(const std::string &path, FindingSeverity min_severity)
+    void parse_elf(const std::string &path, FindingSeverity min_severity, bool verbose)
     {
         MappedFile mapped(path);
         if (!mapped.is_valid())
@@ -885,7 +873,7 @@ namespace runtimexray
 
         // Hardening checks
         FindingList hardening_findings = make_findings(sec_info);
-        filter_findings(hardening_findings, min_severity);
+        filter_findings(hardening_findings, min_severity, verbose);
         std::cout << ">  Hardening checks:\n";
         if (hardening_findings.empty()) {
             std::cout << "    No findings at this severity level.\n";
@@ -896,7 +884,7 @@ namespace runtimexray
         // Dangerous API detection
         auto symbols = get_symbol_names(data, elf_class, elf_data);
         FindingList api_findings = detect_dangerous_apis(symbols);
-        filter_findings(api_findings, min_severity);
+        filter_findings(api_findings, min_severity, verbose);
         if (!api_findings.empty()) {
             std::cout << ">  Dangerous API usage:\n";
             report_findings(api_findings, std::cout);

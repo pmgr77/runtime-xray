@@ -78,6 +78,8 @@ public:
         timeout_ = timeout;
     }
 
+    const auto& timeout() const noexcept { return timeout_; }
+
     /**
     * @brief Reads a null-terminated string from the traced process memory.
     * @param address Virtual address of the string in the traced process.
