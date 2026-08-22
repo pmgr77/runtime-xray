@@ -31,6 +31,10 @@ target_include_directories(runtimexray PRIVATE include)
 target_compile_options(runtimexray PRIVATE -Wall -Wextra)
 target_compile_definitions(runtimexray PRIVATE _GNU_SOURCE)
 
+# CLI-level test for `runtimexray mem`
+add_test(NAME check_cli_mem_finds_cmdline_secret
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/memory_scanner/test_mem_cli.sh $<TARGET_FILE:runtimexray>)
+
 add_executable(test_memory_scanner
     tests/memory_scanner/test_memory_scanner.cpp
     src/memory_scanner.cpp
