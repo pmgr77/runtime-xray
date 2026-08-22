@@ -118,7 +118,12 @@ namespace runtimexray {
         runtimexray::FindingList findings;
 
         try {
-            runtimexray::Tachikoma tracer(program_, program_args_);
+            std::vector<std::string> full_args;
+            full_args.reserve(1 + program_args_.size());
+            full_args.push_back(program_);
+            full_args.insert(full_args.end(), program_args_.begin(), program_args_.end());
+            
+            runtimexray::Tachikoma tracer(program_, full_args);
             tracer.set_timeout(timeout_);
             tracer.run([&tracer, &findings, common](const runtimexray::SyscallEvent& ev) {
                 const long num = static_cast<long>(ev.syscall_number);
