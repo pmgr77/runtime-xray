@@ -76,19 +76,21 @@ add_test(NAME check_memory_secret_detector COMMAND $<TARGET_FILE:test_memory_sec
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-# JSON validation for analyze
+# JSON validation for analyze (no ptrace needed)
 add_test(NAME check_json_analyze
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
                  analyze $<TARGET_FILE:runtimexray> analyze $<TARGET_FILE:nx_enabled>)
 
-# JSON validation for trace
-add_test(NAME check_json_trace
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
-                 trace $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/ls)
+if(NOT SKIP_PTRACE_TESTS)
+    # JSON validation for trace (requires ptrace)
+    add_test(NAME check_json_trace
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
+                     trace $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/ls)
 
-# JSON validation for mem (dedicated script)
-add_test(NAME check_json_mem
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py $<TARGET_FILE:runtimexray>)
+    # JSON validation for mem (may use process_vm_readv, affected on emulated ARM)
+    add_test(NAME check_json_mem
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py $<TARGET_FILE:runtimexray>)
+endif()
 
 if(NOT SKIP_PTRACE_TESTS)
     # Integration test for scanning self
