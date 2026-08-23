@@ -22,8 +22,10 @@
 // limitations under the License.
 
 #include "commands/analyze_command.hpp"
+#include "reporter.hpp"
 
 #include <iostream>
+#include <chrono>
 
 namespace runtimexray
 {
@@ -54,11 +56,60 @@ namespace runtimexray
 
     int AnalyzeCommand::execute(const CommonOptions &common)
     {
+        auto start_time = std::chrono::steady_clock::now();
+
+        ElfMetadata metadata;
+        FindingList findings;
         try {
-            runtimexray::parse_elf(binary_path_, common.min_severity, common.verbose);
+            findings = runtimexray::analyze_binary(binary_path_,
+                                               common.min_severity,
+                                               common.verbose,
+                                               &metadata);
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << '\n';
             return 1;
+        }
+
+        auto end_time = std::chrono::steady_clock::now();
+        int duration_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
+        );
+
+        if (common.output_format == "json") {
+            ReportContext ctx;
+            ctx.command     = "analyze";
+            ctx.target      = binary_path_;
+            ctx.started_at  = current_iso8601_utc();
+            ctx.duration_ms = duration_ms;
+            std::cout << Reporter::to_json(findings, ctx);
+        } else {
+            std::cout << ">  Hardening checks:\n";
+            bool has_hardening = false;
+            for (const auto& f : findings) {
+                if (std::holds_alternative<HardeningFindingDetails>(f.details)) {
+                    const auto& details = std::get<HardeningFindingDetails>(f.details);
+                    std::cout << "    " << details.feature << ": " << details.status << '\n';
+                    has_hardening = true;
+                }
+            }
+            if (!has_hardening) {
+                std::cout << "    No findings at this severity level.\n";
+            }
+
+            bool has_api = false;
+            for (const auto& f : findings) {
+                if (std::holds_alternative<DangerousApiFindingDetails>(f.details)) {
+                    const auto& details = std::get<DangerousApiFindingDetails>(f.details);
+                    if (!has_api) {
+                        std::cout << ">  Dangerous API usage:\n";
+                        has_api = true;
+                    }
+                    std::cout << "    Dangerous API: " << details.api
+                            << " (reason: " << details.reason
+                            << ", recommendation: " << details.recommendation
+                            << ", cwe: " << details.cwe_id << ")\n";
+                }
+            }
         }
         return 0;
     }

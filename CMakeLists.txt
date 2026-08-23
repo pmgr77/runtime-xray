@@ -12,10 +12,19 @@ endif()
 
 enable_testing()
 
+include(FetchContent)
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 add_executable(runtimexray
     src/main.cpp
     src/common_cli.cpp
     src/finding_filter.cpp
+    src/reporter.cpp
     src/commands/analyze_command.cpp
     src/commands/trace_command.cpp
     src/commands/mem_command.cpp
@@ -30,6 +39,7 @@ add_executable(runtimexray
 target_include_directories(runtimexray PRIVATE include)
 target_compile_options(runtimexray PRIVATE -Wall -Wextra)
 target_compile_definitions(runtimexray PRIVATE _GNU_SOURCE)
+target_link_libraries(runtimexray PRIVATE nlohmann_json::nlohmann_json)
 
 # CLI-level test for `runtimexray mem`
 add_test(NAME check_cli_mem_finds_cmdline_secret
@@ -63,6 +73,22 @@ add_executable(test_memory_secret_detector
 target_include_directories(test_memory_secret_detector PRIVATE include)
 target_compile_options(test_memory_secret_detector PRIVATE -Wall -Wextra)
 add_test(NAME check_memory_secret_detector COMMAND $<TARGET_FILE:test_memory_secret_detector>)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+# JSON validation for analyze
+add_test(NAME check_json_analyze
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
+                 analyze $<TARGET_FILE:runtimexray> analyze $<TARGET_FILE:nx_enabled>)
+
+# JSON validation for trace
+add_test(NAME check_json_trace
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
+                 trace $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/ls)
+
+# JSON validation for mem (dedicated script)
+add_test(NAME check_json_mem
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py $<TARGET_FILE:runtimexray>)
 
 if(NOT SKIP_PTRACE_TESTS)
     # Integration test for scanning self

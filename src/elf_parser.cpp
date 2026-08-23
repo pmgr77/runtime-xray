@@ -786,108 +786,79 @@ namespace runtimexray
         }
     }
 
-    /**
-     * @brief Parse an ELF file and print basic information.
-     * @param path Path to the file.
-     * @param min_severity Minimum severity level for findings to be reported.
-     * @param verbose If true, show all findings regardless of severity.
-     */
-    void parse_elf(const std::string &path, FindingSeverity min_severity, bool verbose)
-    {
+    FindingList analyze_binary(const std::string& path,
+                            FindingSeverity min_severity,
+                            bool verbose,
+                            ElfMetadata* metadata) {
         MappedFile mapped(path);
-        if (!mapped.is_valid())
-        {
-            std::cerr << "Failed to map file " << path << '\n';
-            return;
+        if (!mapped.is_valid()) {
+            throw std::runtime_error("Failed to map file " + path);
         }
 
-        const std::byte *data = mapped.data();
+        const std::byte* data = mapped.data();
         const std::size_t size = mapped.size();
 
-        if (!is_elf(data, size))
-        {
-            std::cout << path << " is not an ELF file.\n";
-            return;
+        if (!is_elf(data, size)) {
+            throw std::runtime_error(path + " is not an ELF file.");
         }
 
-        // We know the first 16 bytes (e_ident) are present; check that
-        if (size < ELF_IDENT_SIZE)
-        {
-            std::cerr << "Error: ELF file is too short " << size << " bytes (less than " << ELF_IDENT_SIZE << " bytes).\n";
-            return;
+        if (size < ELF_IDENT_SIZE) {
+            throw std::runtime_error("ELF file is too short: " + std::to_string(size) + " bytes.");
         }
 
-        // Read the class and data encoding
         const unsigned char elf_class_byte = static_cast<unsigned char>(data[EI_CLASS]);
-        const unsigned char elf_data_byte = static_cast<unsigned char>(data[EI_DATA]);
+        const unsigned char elf_data_byte  = static_cast<unsigned char>(data[EI_DATA]);
 
-        // Interpret
         ElfClass elf_class = to_elf_class(elf_class_byte);
-        ElfData elf_data = to_elf_data(elf_data_byte);
+        ElfData elf_data   = to_elf_data(elf_data_byte);
 
-        // Print basic info
-        std::cout << path << " is an ELF file. Size: " << size << " bytes\n";
-        std::cout << "  Class: " << elf_class_to_string(elf_class) << '\n';
-        std::cout << "  Data Encoding: " << elf_data_to_string(elf_data) << '\n';
-
-        // Continue only if we know class and endianness
-        if (elf_class == ElfClass::None || elf_data == ElfData::None)
-        {
-            std::cerr << "Unsupported ELF class or data encoding.\n";
-            return;
+        if (elf_class == ElfClass::None || elf_data == ElfData::None) {
+            throw std::runtime_error("Unsupported ELF class or data encoding.");
         }
 
-        // Offsets in ELF header (64-bit vs 32-bit)
-        // e_type: 2 bytes at offset 16
-        // e_machine: 2 bytes at offset 18
-        // e_version: 4 bytes at offset 20
-        // e_entry: 8 bytes (64-bit) or 4 bytes (32-bit) at offset 24
-        constexpr std::size_t offset_e_type = 16;
-        constexpr std::size_t offset_e_machine = 18;
-        constexpr std::size_t offset_e_version = 20;
-        constexpr std::size_t offset_e_entry = 24;
+        constexpr std::size_t offset_e_type      = 16;
+        constexpr std::size_t offset_e_machine   = 18;
+        constexpr std::size_t offset_e_version   = 20;
+        constexpr std::size_t offset_e_entry     = 24;
 
-        const uint16_t e_type = read_u16(data, offset_e_type, elf_data);
+        const uint16_t e_type    = read_u16(data, offset_e_type, elf_data);
         const uint16_t e_machine = read_u16(data, offset_e_machine, elf_data);
         const uint32_t e_version = read_u32(data, offset_e_version, elf_data);
 
         uint64_t e_entry = 0;
-        if (elf_class == ElfClass::Elf64)
-        {
+        if (elf_class == ElfClass::Elf64) {
             e_entry = read_u64(data, offset_e_entry, elf_data);
-        }
-        else
-        {
+        } else {
             e_entry = read_u32(data, offset_e_entry, elf_data);
         }
 
-        // Print type
-        std::cout << "  Type: " << elf_type_to_string(static_cast<ElfType>(e_type)) << '\n';
-        // Print machine
-        std::cout << "  Machine: " << elf_machine_to_string(static_cast<ElfMachine>(e_machine)) << '\n';
-        std::cout << "  Version: " << e_version << '\n';
-        std::cout << "  Entry point: 0x" << std::hex << e_entry << std::dec << '\n';
+        if (metadata) {
+            metadata->path          = path;
+            metadata->size_bytes    = size;
+            metadata->elf_class     = elf_class_to_string(elf_class);
+            metadata->data_encoding = elf_data_to_string(elf_data);
+            metadata->elf_type      = elf_type_to_string(static_cast<ElfType>(e_type));
+            metadata->machine       = elf_machine_to_string(static_cast<ElfMachine>(e_machine));
+            metadata->version       = e_version;
+            metadata->entry_point   = e_entry;
+        }
 
-        // Now read program headers
+        FindingList findings;
+
+        // 1. Hardening checks
         ElfSecurityInfo sec_info = check_security_features(data, elf_class, elf_data, e_type);
+        FindingList hardening = make_findings(sec_info);
+        findings.insert(findings.end(), hardening.begin(), hardening.end());
 
-        // Hardening checks
-        FindingList hardening_findings = make_findings(sec_info);
-        filter_findings(hardening_findings, min_severity, verbose);
-        std::cout << ">  Hardening checks:\n";
-        if (hardening_findings.empty()) {
-            std::cout << "    No findings at this severity level.\n";
-        } else {
-            report_findings(hardening_findings, std::cout);
-        }
-        
-        // Dangerous API detection
+        // 2. Dangerous API detection
         auto symbols = get_symbol_names(data, elf_class, elf_data);
-        FindingList api_findings = detect_dangerous_apis(symbols);
-        filter_findings(api_findings, min_severity, verbose);
-        if (!api_findings.empty()) {
-            std::cout << ">  Dangerous API usage:\n";
-            report_findings(api_findings, std::cout);
-        }
+        FindingList api = detect_dangerous_apis(symbols);
+        findings.insert(findings.end(), api.begin(), api.end());
+
+        // Apply central filtering
+        filter_findings(findings, min_severity, verbose);
+
+        return findings;
     }
+
 } // namespace runtimexray

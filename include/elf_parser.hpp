@@ -30,13 +30,30 @@
 
 namespace runtimexray {
 
+struct ElfMetadata {
+    std::string path;
+    std::size_t size_bytes = 0;
+    std::string elf_class;
+    std::string data_encoding;
+    std::string elf_type;
+    std::string machine;
+    uint32_t version = 0;
+    uint64_t entry_point = 0;
+};
+
 /**
- * @brief      Parse an ELF file and print basic information.
- * @param path Path to the file.
- * @param min_severity Minimum severity level for findings to be displayed.
- * @param verbose If true, show all findings regardless of severity.
+ * @brief Analyzes an ELF binary and returns collected findings.
+ * @param path Path to the ELF file.
+ * @param min_severity Minimum severity threshold for findings.
+ * @param verbose If true, include informational findings.
+ * @param metadata Optional output parameter; if not null, filled with ELF metadata.
+ * @return FindingList with static analysis results.
+ * @throws std::runtime_error on fatal errors (cannot open, not ELF, unsupported, etc.).
  */
- void parse_elf(const std::string& path, FindingSeverity min_severity = FindingSeverity::Medium, bool verbose = false);
+FindingList analyze_binary(const std::string& path,
+                           FindingSeverity min_severity = FindingSeverity::Medium,
+                           bool verbose = false,
+                           ElfMetadata* metadata = nullptr);
 
 } // namespace runtimexray
 

@@ -22,6 +22,7 @@
 // limitations under the License.
 
 #include "commands/trace_command.hpp"
+#include "reporter.hpp"
 #include "syscall_names.hpp"
 #include "tachikoma.hpp"
 #include "syscall_names.hpp"
@@ -75,8 +76,7 @@ namespace {
 
 namespace runtimexray {
 
-    bool TraceCommand::parse_specific_args(const std::vector<std::string> &args)
-    {
+    bool TraceCommand::parse_specific_args(const std::vector<std::string> &args) {
         program_.clear();
         program_args_.clear();
         timeout_ = std::chrono::seconds(0);
@@ -113,8 +113,9 @@ namespace runtimexray {
         return true;
     }
 
-    int TraceCommand::execute(const CommonOptions &common)
-    {
+    int TraceCommand::execute(const CommonOptions &common) {
+        auto start_time = std::chrono::steady_clock::now();
+
         runtimexray::FindingList findings;
 
         try {
@@ -122,7 +123,7 @@ namespace runtimexray {
             full_args.reserve(1 + program_args_.size());
             full_args.push_back(program_);
             full_args.insert(full_args.end(), program_args_.begin(), program_args_.end());
-            
+
             runtimexray::Tachikoma tracer(program_, full_args);
             tracer.set_timeout(timeout_);
             tracer.run([&tracer, &findings, common](const runtimexray::SyscallEvent& ev) {
@@ -213,22 +214,28 @@ namespace runtimexray {
                             }
                         }
                     }
-                    std::cout << "syscall " << ev.syscall_number << ": "
-                            << syscall_name
-                            << " entry (pid=" << ev.pid << ") " 
-                            << extra << '\n';
+                    if (common.output_format != "json") {
+                        std::cout << "syscall " << ev.syscall_number << ": "
+                                << syscall_name
+                                << " entry (pid=" << ev.pid << ") " 
+                                << extra << '\n';
+                    }
                 } else {
-                    std::cout << "syscall " << ev.syscall_number << ": "
-                            << syscall_name
-                            << " exit (pid=" << ev.pid << ") = " 
-                            << ev.return_value << '\n';
+                    if (common.output_format != "json") {
+                        std::cout << "syscall " << ev.syscall_number << ": "
+                                << syscall_name
+                                << " exit (pid=" << ev.pid << ") = " 
+                                << ev.return_value << '\n';
+                    }
                 }
             });
 
-            if (tracer.is_timed_out()) {
+            if (tracer.is_timed_out() && common.output_format != "json") {
                 std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
             }
-            std::cout << "\n[Child stdout/stderr saved to " << tracer.child_output_path() << "]\n";
+            if (common.output_format != "json") {
+                std::cout << "\n[Child stdout/stderr saved to " << tracer.child_output_path() << "]\n";
+            }
             // Anylyze save child process output
             std::string child_output = tracer.child_output_path();
             if (!child_output.empty()) {
@@ -242,28 +249,40 @@ namespace runtimexray {
 
         runtimexray::filter_findings(findings, common.min_severity, common.verbose);
 
-        if (!findings.empty()) {
-            std::cout << "\n== Dynamic Findings ==\n";
-            for (const auto& f : findings) {
-                std::visit([&](const auto& details) {
-                    using T = std::decay_t<decltype(details)>;
-                    if constexpr (std::is_same_v<T, runtimexray::NetworkConnectionDetails>) {
-                        std::cout << " - " << f.description << " (" << details.remote_addr << ":" << details.port << ")\n";
-                    } else if constexpr (std::is_same_v<T, runtimexray::SensitiveDataWriteDetails>) {
-                        std::cout << " - " << f.description << " data=\"" << details.data_snippet << "\"\n";
-                    } else if constexpr (std::is_same_v<T, runtimexray::SensitiveFileAccessDetails>) {
-                        std::cout << " - " << f.description << " path=" << details.path << "\n";
-                    } else {
-                        std::cout << " - " << f.description << "\n";
-                    }
-                }, f.details);
+        auto end_time = std::chrono::steady_clock::now();
+        int duration_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
+        );
+
+        ReportContext ctx;
+        ctx.command = "trace";
+        ctx.target = program_;
+        ctx.started_at = runtimexray::current_iso8601_utc();
+        ctx.duration_ms = duration_ms;
+
+        if (common.output_format == "json") {
+            std::cout << Reporter::to_json(findings, ctx);
+        } else {
+            if (!findings.empty()) {
+                std::cout << "\n== Dynamic Findings ==\n";
+                for (const auto& f : findings) {
+                    std::visit([&](const auto& details) {
+                        using T = std::decay_t<decltype(details)>;
+                        if constexpr (std::is_same_v<T, runtimexray::NetworkConnectionDetails>) {
+                            std::cout << " - " << f.description << " (" << details.remote_addr << ":" << details.port << ")\n";
+                        } else if constexpr (std::is_same_v<T, runtimexray::SensitiveDataWriteDetails>) {
+                            std::cout << " - " << f.description << " data=\"" << details.data_snippet << "\"\n";
+                        } else if constexpr (std::is_same_v<T, runtimexray::SensitiveFileAccessDetails>) {
+                            std::cout << " - " << f.description << " path=" << details.path << "\n";
+                        } else {
+                            std::cout << " - " << f.description << "\n";
+                        }
+                    }, f.details);
+                }
             }
+            std::cout << "Trace command: " << program_ << " timeout=" << timeout_.count() << "\n";
         }
 
-
-        // TODO: Copy the body of the old main_trace.cpp here,
-        // using common.verbose and common.min_severity.
-        std::cout << "Trace command: " << program_ << " timeout=" << timeout_.count() << "\n";
         return 0;
     }
 

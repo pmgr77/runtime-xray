@@ -22,9 +22,10 @@
 // limitations under the License.
 
 #include "commands/mem_command.hpp"
+#include "reporter.hpp"
 #include "finding_filter.hpp"
 #include <iostream>
-
+#include <chrono>
 namespace runtimexray
 {
 
@@ -66,37 +67,53 @@ namespace runtimexray
         return true;
     }
 
-    int MemCommand::execute(const CommonOptions &common)
-    {
+    int MemCommand::execute(const CommonOptions &common) {
+        auto start_time = std::chrono::steady_clock::now();
+
         runtimexray::FindingList findings;
         size_t pages_scanned = 0;
 
         runtimexray::scan_process_for_secrets(pid_, findings, 50, max_pages_, &pages_scanned);
         runtimexray::filter_findings(findings, common.min_severity, common.verbose);
 
-        if (findings.empty()) {
-            std::cout << "No sensitive data found in memory of PID " << pid_ << ".\n";
+        auto end_time = std::chrono::steady_clock::now();
+        int duration_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
+        );
+
+        ReportContext ctx;
+        ctx.command = "mem";
+        ctx.target = std::to_string(pid_);
+        ctx.started_at = runtimexray::current_iso8601_utc();
+        ctx.duration_ms = duration_ms;
+
+        if (common.output_format == "json") {
+            std::cout << Reporter::to_json(findings, ctx);
         } else {
-            std::cout << "Found " << findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
-            for (const auto& f : findings) {
-                std::visit([&](const auto& details) {
-                    using T = std::decay_t<decltype(details)>;
-                    if constexpr (std::is_same_v<T, runtimexray::SensitiveDataWriteDetails>) {
-                        std::cout << " - " << f.description
-                                << " data=\"" << details.data_snippet << "\"\n";
-                    } else if constexpr (std::is_same_v<T, runtimexray::MemorySecretFindingDetails>) {
-                        std::cout << " - " << f.description
-                        << " type=" << details.secret_type
-                        << " location=" << details.location
-                        << " data=\"" << details.snippet << "\"\n";
-                    } else {
-                        std::cout << " - " << f.description << "\n";
-                    }
-                }, f.details);
+            if (findings.empty()) {
+                std::cout << "No sensitive data found in memory of PID " << pid_ << ".\n";
+            } else {
+                std::cout << "Found " << findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
+                for (const auto& f : findings) {
+                    std::visit([&](const auto& details) {
+                        using T = std::decay_t<decltype(details)>;
+                        if constexpr (std::is_same_v<T, runtimexray::SensitiveDataWriteDetails>) {
+                            std::cout << " - " << f.description
+                                    << " data=\"" << details.data_snippet << "\"\n";
+                        } else if constexpr (std::is_same_v<T, runtimexray::MemorySecretFindingDetails>) {
+                            std::cout << " - " << f.description
+                            << " type=" << details.secret_type
+                            << " location=" << details.location
+                            << " data=\"" << details.snippet << "\"\n";
+                        } else {
+                            std::cout << " - " << f.description << "\n";
+                        }
+                    }, f.details);
+                }
             }
+            std::cout << "Mem command: PID " << pid_ << "\n";
         }
 
-        std::cout << "Mem command: PID " << pid_ << "\n";
         return 0;
     }
 
