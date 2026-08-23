@@ -1,6 +1,6 @@
 # RuntimeXRay
 
-[![Build and Test](https://github.com/runtimexray/runtime-xray/actions/workflows/build.yml/badge.svg)](https://github.com/runtimexray/runtime-xray/actions/workflows/build.yml)
+[![Build and Test](https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml/badge.svg)](https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml)
 
 > **Don't tell me my application is insecure — show me why.**
 
@@ -199,7 +199,7 @@ See the [Roadmap](ROADMAP.md) for the planned development path.
 ### Build
 
 ```bash
-git clone https://github.com/runtimexray/runtime-xray.git
+git clone https://github.com/pmgr77/runtime-xray.git
 cd runtime-xray
 
 mkdir build
