@@ -14,6 +14,7 @@ This document demonstrates practical scenarios where custom analyzers add signif
 
 **Solution:** Register a custom analyzer that scans memory chunks for 16‑digit sequences matching common card formats.
 
+{% raw %}
 ```cpp
 #include <ianalyzer.hpp>
 #include <evidence.hpp>
@@ -59,6 +60,7 @@ public:
     }
 };
 ```
+{% endraw %}
 
 **Value:** Automated PCI DSS compliance, reduced risk of cardholder data exposure.
 
@@ -70,6 +72,7 @@ public:
 
 **Solution:** Implement an analyzer that recognizes known cloud credential prefixes and patterns.
 
+{% raw %}
 ```cpp
 #include <ianalyzer.hpp>
 #include <evidence.hpp>
@@ -108,6 +111,7 @@ public:
     }
 };
 ```
+{% endraw %}
 
 **Value:** Prevents accidental cloud credential leaks, protects infrastructure.
 
@@ -119,6 +123,7 @@ public:
 
 **Solution:** Add a custom analyzer that flags any imported symbol from a banned list.
 
+{% raw %}
 ```cpp
 #include <ianalyzer.hpp>
 #include <evidence.hpp>
@@ -160,6 +165,7 @@ public:
     }
 };
 ```
+{% endraw %}
 
 **Value:** Continuous compliance with internal security policies.
 
@@ -171,6 +177,7 @@ public:
 
 **Solution:** Register a temporary analyzer that scans for specific strings or patterns associated with a threat campaign.
 
+{% raw %}
 ```cpp
 #include <ianalyzer.hpp>
 #include <evidence.hpp>
@@ -205,6 +212,7 @@ public:
     }
 };
 ```
+{% endraw %}
 
 **Value:** Accelerates incident response and threat hunting.
 
@@ -216,6 +224,7 @@ public:
 
 **Solution:** Implement an analyzer that sends suspicious memory snippets to an LLM and returns a new Finding with the AI‑generated explanation.
 
+{% raw %}
 ```cpp
 #include <ianalyzer.hpp>
 #include <evidence.hpp>
@@ -298,6 +307,7 @@ public:
     }
 };
 ```
+{% endraw %}
 
 **Value:** Makes findings accessible to developers, managers, and auditors.
 
