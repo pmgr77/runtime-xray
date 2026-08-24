@@ -41,7 +41,12 @@ It focuses on technical milestones and is subject to change.
 - **Secret detectors**:
   - `PasswordDetector` for key‑value pairs (`password=`, `api_key:`, etc.) with word‑boundary awareness
   - `PrivateKeyDetector` for PEM markers (`BEGIN RSA PRIVATE KEY`, etc.)
-- **Comprehensive CTest suite**: 33 tests covering static checks, dynamic helpers, memory scanning, and integration tests.
+- **JSON output for all subcommands** (`--output-format json`)
+- **Detector registry** for custom memory secret detectors
+- **Centralized finding filtering** (`--min-severity`, `--verbose`)
+- **Memory scanner with `--max-pages` support**
+- **Tests for JSON output**
+- **Comprehensive CTest suite**: 36+ tests covering static checks, dynamic helpers, memory scanning, integration, and JSON output validation.
 - **CI/CD**: GitHub Actions workflows for build and test on x86_64 and ARM64.
 - **Documentation**: `docs/security_checks.md` explains each check; README includes quick start and architecture.
 
@@ -54,9 +59,9 @@ It focuses on technical milestones and is subject to change.
   - Correlation of static and runtime evidence into a unified report
 - **Secret detection**:
   - Find hardcoded keys, credentials, and other secrets in binaries and runtime memory.
-  - High‑entropy data detection for keys and encrypted blobs.
-- **Reporting**: Generate JSON and HTML reports, not just console output.
-- **Extensible analyzer architecture**: Plugins for new checks and additional binary formats (PE, Mach‑O).
+  - High-entropy data detection for keys and encrypted blobs.
+- **Reporting**: Generate HTML reports, not just console output.
+- **Extensible analyzer architecture**: Plugins for new checks and additional binary formats (PE, Mach-O).
 - **AI explanations**: Optional integration with LLMs (e.g., DeepSeek) to produce human-readable evidence summaries.
 - **Counter-measures against evasive binaries**:
   - Use `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK` for less intrusive tracing
@@ -66,7 +71,6 @@ It focuses on technical milestones and is subject to change.
   - Flag RWX anonymous memory
   - Integrate with `xray-trace` for runtime memory inspection
   - Track sensitive data lifetime in memory
-  - Reduce false positives with advanced context analysis
 
 ## 📈 Long-Term Vision
 
