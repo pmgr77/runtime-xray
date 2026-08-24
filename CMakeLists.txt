@@ -25,6 +25,7 @@ add_executable(runtimexray
     src/common_cli.cpp
     src/finding_filter.cpp
     src/reporter.cpp
+    src/analyzer_registry.cpp
     src/commands/analyze_command.cpp
     src/commands/trace_command.cpp
     src/commands/mem_command.cpp
