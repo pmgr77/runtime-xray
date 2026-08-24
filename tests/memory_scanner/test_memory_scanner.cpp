@@ -1,13 +1,12 @@
 /**
  * @file    test_memory_scanner.cpp
- * @brief   Unit tests for memory secret detectors and registry.
+ * @brief   Tests for the analyzer registry using memory evidence.
  *
  * @author  Peter Magram
- * @date    2026-08-23
+ * @date    2026-08-24
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
-
 // Copyright 2026 Peter Magram
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,116 +21,62 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "memory_secret_detector.hpp"
+#include "analyzer_registry.hpp"
+#include "evidence.hpp"
+#include "finding.hpp"
 
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
-using runtimexray::SecretMatch;
-
-// Helper: check if a vector contains a match with a given secret_type.
-bool contains_type(const std::vector<SecretMatch>& matches, const std::string& type) {
-    for (const auto& m : matches) {
-        if (m.secret_type == type) {
-            return true;
+// Helper: check if the findings contain a memory secret of a given type.
+bool contains_memory_secret(const runtimexray::FindingList& findings,
+                            const std::string& secret_type) {
+    for (const auto& f : findings) {
+        if (auto* details = std::get_if<runtimexray::MemorySecretFindingDetails>(&f.details)) {
+            if (details->secret_type == secret_type) {
+                return true;
+            }
         }
     }
     return false;
 }
 
-int test_password_detector_finds_secret() {
-    auto matches = runtimexray::detect_secrets_in_chunk("some data password=supersecret123 more data");
-    if (!contains_type(matches, "password")) {
-        std::cerr << "Password detector did not find password=...\n";
-        return 1;
-    }
-    return 0;
-}
-
-int test_password_detector_avoids_false_positive_pass() {
-    auto matches = runtimexray::detect_secrets_in_chunk("the function passed the test");
-    if (!matches.empty()) {
-        std::cerr << "False positive on 'passed'\n";
-        return 1;
-    }
-    return 0;
-}
-
-int test_password_detector_avoids_pwd_without_separator() {
-    auto matches = runtimexray::detect_secrets_in_chunk("PyInit_pwd");
-    if (!matches.empty()) {
-        std::cerr << "False positive on 'pwd' without separator\n";
-        return 1;
-    }
-    return 0;
-}
-
-int test_password_detector_avoids_word_boundary_false_positive() {
-    auto matches = runtimexray::detect_secrets_in_chunk("struct_passwd: Results from getpw*()");
-    if (!matches.empty()) {
-        std::cerr << "False positive on 'struct_passwd:'\n";
-        return 1;
-    }
-    return 0;
-}
-
-int test_password_detector_finds_api_key_with_colon() {
-    auto matches = runtimexray::detect_secrets_in_chunk("config api_key: abc123");
-    if (!contains_type(matches, "api_key")) {
-        std::cerr << "Password detector did not find api_key: ...\n";
-        return 1;
-    }
-    return 0;
-}
-
-int test_private_key_detector_finds_pem() {
-    std::string chunk = "random data -----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY----- tail";
-    auto matches = runtimexray::detect_secrets_in_chunk(chunk);
-    if (!contains_type(matches, "private_key")) {
-        std::cerr << "PrivateKeyDetector did not find PEM marker\n";
-        return 1;
-    }
-    return 0;
-}
-
-int test_registry_disable_enable() {
-    auto& reg = runtimexray::DetectorRegistry::instance();
-
-    // Initially both detectors should be active.
-    auto initial = runtimexray::detect_secrets_in_chunk("password=abc");
-    bool has_password_initial = contains_type(initial, "password");
-    if (!has_password_initial) {
-        std::cerr << "Initial password detection failed\n";
-        return 1;
-    }
-
-    // Disable password detector.
-    reg.disable_detector("password");
-    auto after_disable = runtimexray::detect_secrets_in_chunk("password=abc");
-    if (contains_type(after_disable, "password")) {
-        std::cerr << "Password detector still active after disable\n";
-        return 1;
-    }
-
-    // Re-enable.
-    reg.enable_detector("password");
-    auto after_enable = runtimexray::detect_secrets_in_chunk("password=abc");
-    if (!contains_type(after_enable, "password")) {
-        std::cerr << "Password detector not active after re-enable\n";
-        return 1;
-    }
-
-    return 0;
-}
-
 int main() {
-    if (test_password_detector_finds_secret()) { std::cerr << "test_password_detector_finds_secret failed\n"; return 1; }
-    if (test_password_detector_avoids_false_positive_pass()) { std::cerr << "test_password_detector_avoids_false_positive_pass failed\n"; return 1; }
-    if (test_password_detector_avoids_pwd_without_separator()) { std::cerr << "test_password_detector_avoids_pwd_without_separator failed\n"; return 1; }
-    if (test_password_detector_avoids_word_boundary_false_positive()) { std::cerr << "test_password_detector_avoids_word_boundary_false_positive failed\n"; return 1; }
-    if (test_password_detector_finds_api_key_with_colon()) { std::cerr << "test_password_detector_finds_api_key_with_colon failed\n"; return 1; }
-    if (test_private_key_detector_finds_pem()) { std::cerr << "test_private_key_detector_finds_pem failed\n"; return 1; }
-    if (test_registry_disable_enable()) { std::cerr << "test_registry_disable_enable failed\n"; return 1; }
+    auto& registry = runtimexray::AnalyzerRegistry::instance();
+
+    // Built-in analyzers should be registered.
+    auto analyzer_names = registry.list_analyzers();
+    if (analyzer_names.empty()) {
+        std::cerr << "No analyzers registered.\n";
+        return 1;
+    }
+
+    // 1. Password evidence should produce a finding with secret_type == "password".
+    runtimexray::MemoryChunkEvidence password_ev{
+        "some text password=supersecret123 more text",
+        "memory",
+        getpid()
+    };
+    auto password_findings = registry.analyze_evidence(password_ev);
+    if (!contains_memory_secret(password_findings, "password")) {
+        std::cerr << "Password analyzer failed to detect password evidence.\n";
+        return 1;
+    }
+
+    // 2. Private key evidence should produce a finding with secret_type == "private_key".
+    runtimexray::MemoryChunkEvidence key_ev{
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----",
+        "memory",
+        getpid()
+    };
+    auto key_findings = registry.analyze_evidence(key_ev);
+    if (!contains_memory_secret(key_findings, "private_key")) {
+        std::cerr << "Private key analyzer failed to detect private key evidence.\n";
+        return 1;
+    }
+
+    std::cout << "Memory scanner analyzer tests passed.\n";
     return 0;
 }

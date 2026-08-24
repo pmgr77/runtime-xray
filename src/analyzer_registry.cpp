@@ -22,6 +22,7 @@
 // limitations under the License.
 
 #include "analyzer_registry.hpp"
+#include "builtin_analyzers.hpp"
 
 #include <algorithm>
 
@@ -33,7 +34,8 @@ namespace runtimexray {
     }
 
     AnalyzerRegistry::AnalyzerRegistry() {
-        // Built-in analyzers will be registered later; initially empty.
+        // Register built-in analyzers automatically.
+        register_builtin_analyzers(*this);
     }
 
 

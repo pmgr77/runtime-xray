@@ -23,7 +23,8 @@
 // limitations under the License.
 
 #include "memory_scanner.hpp"
-#include "memory_secret_detector.hpp"
+#include "analyzer_registry.hpp"
+#include "evidence.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -72,18 +73,6 @@ std::vector<std::string> split_nul_strings(const std::string& data) {
     return parts;
 }
 
-// Converts a SecretMatch into a Finding and appends it to the list.
-void add_secret_finding(FindingList& findings,
-                        const SecretMatch& match,
-                        const std::string& source) {
-    findings.emplace_back(
-        FindingSeverity::High,
-        "Sensitive data found in process",
-        "Potential secret detected in " + source + ".",
-        MemorySecretFindingDetails{match.snippet, match.secret_type, source}
-    );
-}
-
 } // namespace
 
 std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
@@ -128,7 +117,7 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
         }
         return;
     }
-                          
+
     auto regions = get_readable_regions(pid);
     if (regions.empty()) {
         if (pages_scanned) {
@@ -168,10 +157,12 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
             ++scanned;
 
             std::string chunk(reinterpret_cast<char*>(buffer.data()), static_cast<size_t>(n));
-            auto matches = detect_secrets_in_chunk(chunk);
-            for (const auto& match : matches) {
+            // Create evidence and send to registry
+            MemoryChunkEvidence ev{chunk, "memory", pid};
+            FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
+            for (const auto& f : results) {
                 if (found >= max_findings) break;
-                add_secret_finding(findings, match, "memory");
+                findings.push_back(f);
                 ++found;
             }
 
@@ -193,12 +184,14 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     auto args = split_nul_strings(cmdline);
     size_t found = 0;
     for (const auto& arg : args) {
-        auto matches = detect_secrets_in_chunk(arg);
-        for (const auto& match : matches) {
+        // Create evidence from this argument string.
+        MemoryChunkEvidence ev{arg, "cmdline", pid};
+        FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
+        for (const auto& f : results) {
             if (found >= max_findings) {
                 return;
             }
-            add_secret_finding(findings, match, "cmdline");
+            findings.push_back(f);
             ++found;
         }
     }
@@ -213,12 +206,14 @@ void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     auto env_vars = split_nul_strings(environ);
     size_t found = 0;
     for (const auto& var : env_vars) {
-        auto matches = detect_secrets_in_chunk(var);
-        for (const auto& match : matches) {
+        // Create evidence from this environment variable string.
+        MemoryChunkEvidence ev{var, "environment", pid};
+        FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
+        for (const auto& f : results) {
             if (found >= max_findings) {
                 return;
             }
-            add_secret_finding(findings, match, "environment");
+            findings.push_back(f);
             ++found;
         }
     }
@@ -244,10 +239,10 @@ void scan_process_for_secrets(pid_t pid, FindingList& findings,
     if ((after_env - before) >= max_findings) {
         if (pages_scanned) {
             *pages_scanned = 0;
-        }        
+        }
         return;
     }
-    
+
     size_t remaining = max_findings - (after_env - before);
     size_t scanned = 0;
     scan_memory_for_secrets(pid, findings, remaining, max_pages, &scanned);

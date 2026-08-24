@@ -25,8 +25,9 @@
 #include "reporter.hpp"
 #include "syscall_names.hpp"
 #include "tachikoma.hpp"
-#include "syscall_names.hpp"
 #include "finding.hpp"
+#include "analyzer_registry.hpp"
+#include "evidence.hpp"
 #include "finding_filter.hpp"
 #include "dynamic_analysis.hpp"
 #include <iostream>
@@ -40,34 +41,31 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
-
 namespace {
     runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
         runtimexray::FindingList results;
         std::ifstream infile(file_path);
         if (!infile) {
-            return results; // file does exist or not accessible
+            return results;
         }
 
         std::string line;
-        int line_count = 0;
-        const int max_findings_per_file = 5; // limit amount not to overload
+        size_t found = 0;
+        const size_t max_findings = 5;
 
-        while (std::getline(infile, line) && line_count < max_findings_per_file) {
-            if (runtimexray::contains_sensitive_keyword(line)) {
-                // Cut the line for snippet
-                std::string snippet = line.substr(0, 200);
-                if (line.size() > 200) {
-                    snippet += "...";
+        while (std::getline(infile, line) && found < max_findings) {
+            if (!line.empty()) {
+                // Create memory evidence from the output line.
+                runtimexray::MemoryChunkEvidence ev{line, "child_output", 0}; // pid unknown
+                auto findings = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ev);
+
+                for (const auto& f : findings) {
+                    if (found >= max_findings) {
+                        break;
+                    }
+                    results.push_back(f);
+                    ++found;
                 }
-
-                results.emplace_back(
-                    runtimexray::FindingSeverity::High,
-                    "Sensitive data found in process output",
-                    "The program printed potentially sensitive information to stdout/stderr.",
-                    runtimexray::SensitiveDataWriteDetails{snippet, "Keyword match in child output"}
-                );
-                ++line_count;
             }
         }
         return results;
@@ -142,15 +140,9 @@ namespace runtimexray {
                         std::string path = tracer.read_string(path_addr);
                         if (!path.empty()) {
                             extra = " path=\"" + path + "\"";
-                            auto severity = runtimexray::get_sensitive_path_severity(path);
-                            if (severity != std::nullopt) {
-                                findings.emplace_back(
-                                    *severity,
-                                    "Sensitive file access",
-                                    "Process attempted to open: " + path,
-                                    runtimexray::SensitiveFileAccessDetails{path, "Known sensitive path"}
-                                );
-                            }
+                            runtimexray::FileAccessEvidence fe{path, 0, ev.pid};
+                            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
+                            findings.insert(findings.end(), res.begin(), res.end());
                         }
                     } else if (std::strcmp(syscall_name, "connect") == 0) {
                         uint64_t sockaddr_ptr = ev.arg1;
@@ -160,17 +152,10 @@ namespace runtimexray {
                             auto parsed = runtimexray::parse_sockaddr(bytes);
                             if (parsed.valid) {
                                 extra = " addr=" + parsed.ip + ":" + std::to_string(parsed.port);
-                                // check for suspicious ports
-                                if (parsed.port == 22 || parsed.port == 3389 || parsed.port == 445 ||
-                                    parsed.port == 1433 || parsed.port == 3306) {
-                                    findings.emplace_back(
-                                        runtimexray::FindingSeverity::Medium,
-                                        "Suspicious network connection",
-                                        "Connecting to " + parsed.ip + ":" + std::to_string(parsed.port),
-                                        runtimexray::NetworkConnectionDetails{parsed.ip, parsed.port, "Potentially sensitive port"}
-                                    );
-                                }
-                            }
+                                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
+                                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
+                                findings.insert(findings.end(), res.begin(), res.end());
+                            }                            
                         }
                     } else if (std::strcmp(syscall_name, "sendto") == 0) {
                         // sendto: arg4 – dest_addr, arg5 – addrlen (x86_64: r8, r9)
@@ -181,17 +166,10 @@ namespace runtimexray {
                             auto parsed = runtimexray::parse_sockaddr(bytes);
                             if (parsed.valid) {
                                 extra = " dest addr=" + parsed.ip + ":" + std::to_string(parsed.port);
-                                // check for suspicious ports
-                                if (parsed.port == 22 || parsed.port == 3389 || parsed.port == 445 ||
-                                    parsed.port == 1433 || parsed.port == 3306) {
-                                    findings.emplace_back(
-                                        runtimexray::FindingSeverity::Medium,
-                                        "Suspicious network connection",
-                                        "Connecting to " + parsed.ip + ":" + std::to_string(parsed.port),
-                                        runtimexray::NetworkConnectionDetails{parsed.ip, parsed.port, "Potentially sensitive port"}
-                                    );
-                                }
-                            }
+                                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
+                                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
+                                findings.insert(findings.end(), res.begin(), res.end());
+                            }                            
                         }
                     }  else if (std::strcmp(syscall_name, "write") == 0) {
                         uint64_t fd = ev.arg0;
@@ -202,15 +180,9 @@ namespace runtimexray {
                             if (!bytes.empty()) {
                                 std::string data_str = runtimexray::sanitize_data(bytes);
                                 extra = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
-                                // Search for secrets
-                                if (runtimexray::contains_sensitive_keyword(data_str)) {
-                                    findings.emplace_back(
-                                        runtimexray::FindingSeverity::High,
-                                        "Sensitive data written",
-                                        "Data written may contain credentials or secrets",
-                                        runtimexray::SensitiveDataWriteDetails{data_str, "Keyword match"}
-                                    );
-                                }                            
+                                runtimexray::MemoryChunkEvidence mce{data_str, "write_data", ev.pid};
+                                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+                                findings.insert(findings.end(), res.begin(), res.end());                                
                             }
                         }
                     }

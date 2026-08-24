@@ -138,10 +138,10 @@ All subcommands support common options:
 - Reports number of scanned pages
 - JSON output
 
-#### Extensible secret detectors
+#### Extensible analyzers
 
-- `DetectorRegistry` allows custom memory secret detectors to be registered, disabled, enabled, or removed without modifying core code.
-- Built‑in detectors: `password`, `private_key`.
+- `AnalyzerRegistry` allows custom analyzers to be registered, disabled, enabled, or removed without modifying core code.
+- Built‑in analyzers include hardening, dangerous API, sensitive file, network, and memory secret detection.
 - Documentation: `docs/extending_detectors.md`.
 
 #### Tests

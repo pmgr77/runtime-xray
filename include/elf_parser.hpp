@@ -27,6 +27,7 @@
 
 #include "finding.hpp"   // for FindingSeverity
 #include <string>
+#include <optional>
 
 namespace runtimexray {
 

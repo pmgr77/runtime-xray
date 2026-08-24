@@ -54,7 +54,7 @@ struct FileAccessEvidence {
  * @brief Describes a network connection or data transfer.
  */
 struct NetworkEvidence {
-    std::string remote_address;
+    std::string remote_addr;
     uint16_t remote_port;
     pid_t pid;
     std::string direction; // "outbound", "inbound", "unknown"
@@ -65,7 +65,7 @@ struct NetworkEvidence {
  */
 struct MemoryChunkEvidence {
     std::string chunk;      // already sanitised printable fragment
-    std::string location;   // "cmdline", "environ", "memory"
+    std::string location;   // "cmdline", "environment", "memory"
     pid_t pid;
 };
 

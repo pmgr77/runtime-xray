@@ -23,9 +23,6 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_executable(runtimexray
     src/main.cpp
     src/common_cli.cpp
-    src/finding_filter.cpp
-    src/reporter.cpp
-    src/analyzer_registry.cpp
     src/commands/analyze_command.cpp
     src/commands/trace_command.cpp
     src/commands/mem_command.cpp
@@ -35,7 +32,10 @@ add_executable(runtimexray
     src/syscall_names.cpp
     src/dynamic_analysis.cpp
     src/memory_scanner.cpp
-    src/memory_secret_detector.cpp
+    src/analyzer_registry.cpp
+    src/builtin_analyzers.cpp
+    src/finding_filter.cpp
+    src/reporter.cpp
 )
 target_include_directories(runtimexray PRIVATE include)
 target_compile_options(runtimexray PRIVATE -Wall -Wextra)
@@ -48,10 +48,12 @@ add_test(NAME check_cli_mem_finds_cmdline_secret
 
 add_executable(test_memory_scanner
     tests/memory_scanner/test_memory_scanner.cpp
-    src/memory_scanner.cpp
-    src/memory_secret_detector.cpp
+    src/analyzer_registry.cpp
+    src/builtin_analyzers.cpp
+    src/dynamic_analysis.cpp
 )
 target_include_directories(test_memory_scanner PRIVATE include)
+target_compile_options(test_memory_scanner PRIVATE -Wall -Wextra)
 add_test(NAME check_memory_scanner COMMAND $<TARGET_FILE:test_memory_scanner>)
 
 add_subdirectory(tests/security_checks)
@@ -66,14 +68,14 @@ target_include_directories(test_dynamic_helpers PRIVATE include)
 target_compile_options(test_dynamic_helpers PRIVATE -Wall -Wextra)
 add_test(NAME check_dynamic_helpers COMMAND $<TARGET_FILE:test_dynamic_helpers>)
 
-# Unit tests for memory secret detectors
-add_executable(test_memory_secret_detector
-    tests/memory_scanner/test_memory_secret_detector.cpp
-    src/memory_secret_detector.cpp
+add_executable(test_analyzer_registry
+    tests/analyzer_registry/test_analyzer_registry.cpp
+    src/analyzer_registry.cpp
+    src/builtin_analyzers.cpp
 )
-target_include_directories(test_memory_secret_detector PRIVATE include)
-target_compile_options(test_memory_secret_detector PRIVATE -Wall -Wextra)
-add_test(NAME check_memory_secret_detector COMMAND $<TARGET_FILE:test_memory_secret_detector>)
+target_include_directories(test_analyzer_registry PRIVATE include)
+target_compile_options(test_analyzer_registry PRIVATE -Wall -Wextra)
+add_test(NAME check_analyzer_registry COMMAND test_analyzer_registry)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -98,9 +100,11 @@ if(NOT SKIP_PTRACE_TESTS)
     add_executable(test_memory_scanner_self
         tests/memory_scanner/test_memory_scanner_self.cpp
         src/memory_scanner.cpp
-        src/memory_secret_detector.cpp
+        src/analyzer_registry.cpp
+        src/builtin_analyzers.cpp
+        src/dynamic_analysis.cpp
     )
-    target_include_directories(test_memory_scanner_self PRIVATE include)
+    target_include_directories(test_memory_scanner_self PRIVATE include)    
     target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
 
     add_test(NAME check_memory_scanner_self
@@ -137,13 +141,13 @@ if(NOT SKIP_PTRACE_TESTS)
     add_test(NAME check_dynamic_write_secret
          COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_dynamic_write_secret PROPERTIES
-        PASS_REGULAR_EXPRESSION "Sensitive data written"
+        PASS_REGULAR_EXPRESSION "Sensitive data found in memory"
     )
 
     add_test(NAME check_dynamic_output_scan
             COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_dynamic_output_scan PROPERTIES
-        PASS_REGULAR_EXPRESSION "Sensitive data found in process output"
+        PASS_REGULAR_EXPRESSION "Sensitive data found in memory"
     )
 
     # Timeout test

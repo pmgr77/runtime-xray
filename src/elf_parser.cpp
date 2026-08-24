@@ -27,6 +27,8 @@
 #include "mapped_file.hpp"
 #include "finding.hpp"
 #include "finding_filter.hpp"
+#include "evidence.hpp"
+#include "analyzer_registry.hpp"
 #include <iostream>
 #include <ostream>
 #include <cstddef>
@@ -35,9 +37,6 @@
 #include <vector>
 #include <string>
 #include <cstdint>
-#include <optional>
-#include <type_traits>
-#include <algorithm>
 #include <endian.h>
 
 namespace runtimexray
@@ -402,192 +401,6 @@ namespace runtimexray
         return symbols;
     }
 
-    struct ApiRiskInfo {
-        FindingSeverity severity;
-        std::string description;
-        std::string recommendation;
-        std::string cwe_id;
-    };
-
-    // Strip version suffix from a symbol name (e.g., "strcpy@GLIBC_2.2.5" -> "strcpy")
-    std::string strip_symbol_version(const std::string& name)
-    {
-        auto pos = name.find('@');
-        if (pos != std::string::npos) {
-            return name.substr(0, pos);
-        }
-        return name;
-    }
-
-    std::optional<ApiRiskInfo> get_api_risk(const std::string& name) {
-        // Unsafe string functions (buffer overflow)
-        if (name == "strcpy" || name == "strcat" || name == "sprintf" || name == "vsprintf" ||
-            name == "gets" || name == "scanf" || name == "sscanf") {
-            return ApiRiskInfo{
-                FindingSeverity::High,
-                "Unsafe string function that does not check bounds or format",
-                "Use strncpy, snprintf, fgets, or modern C++ std::string",
-                "CWE-119"
-            };
-        }
-        if (name == "strncpy" || name == "strncat") {
-            return ApiRiskInfo{
-                FindingSeverity::Medium,
-                "Potentially unsafe if null-termination is not ensured",
-                "Use explicit length checks or std::string",
-                "CWE-120"
-            };
-        }
-        
-        // Command execution (command injection)
-        if (name == "system" || name == "popen") {
-            return ApiRiskInfo{
-                FindingSeverity::High,
-                "Potential command injection if input is not sanitized",
-                "Avoid shell interpretation; use exec* with argument arrays",
-                "CWE-78"
-            };
-        }
-
-        // Insecure temporary file creation
-        if (name == "mktemp" || name == "tmpnam" || name == "tempnam") {
-            return ApiRiskInfo{
-                FindingSeverity::Medium,
-                "Predictable temporary file names may lead to symlink attacks",
-                "Use mkstemp or tmpfile",
-                "CWE-377"
-            };
-        }
-
-        // Weak random number generation
-        if (name == "rand" || name == "random" || name == "srand") {
-            return ApiRiskInfo{
-                FindingSeverity::Medium,
-                "Weak predictable random number generator",
-                "Use getrandom(), /dev/urandom, or std::random_device for security-sensitive randomness",
-                "CWE-338"
-            };
-        }
-
-        // Weak cryptographic hash functions
-        if (name.find("MD5_") == 0 || name.find("SHA1_") == 0) {
-            return ApiRiskInfo{
-                FindingSeverity::High,
-                "Weak cryptographic hash function (collisions)",
-                "Use SHA-256 or stronger hash algorithms",
-                "CWE-327"
-            };
-        }
-
-        // Weak encryption algorithms
-        if (name.find("DES_") == 0 || name.find("RC4") == 0) {
-            return ApiRiskInfo{
-                FindingSeverity::High,
-                "Weak encryption algorithm (known attacks)",
-                "Use AES-GCM or ChaCha20-Poly1305 (modern ciphers)",
-                "CWE-327"
-            };
-        }
-        
-        // Insecure TLS protocol versions (deprecated functions)
-        if (name == "SSLv3_client_method" || name == "SSLv3_server_method" ||
-            name == "TLSv1_client_method" || name == "TLSv1_server_method" ||
-            name == "TLSv1_1_client_method" || name == "TLSv1_1_server_method") {
-            return ApiRiskInfo{
-                FindingSeverity::High,
-                "Insecure TLS protocol version (deprecated)",
-                "Use TLS 1.2 or TLS 1.3",
-                "CWE-326"
-            };
-        }
-
-        // Memory functions (with caveats)
-        if (name == "memcpy" || name == "memmove" || name == "memset") {
-            return ApiRiskInfo{
-                FindingSeverity::Low,
-                "Memory function often misused (size calculation errors)",
-                "Verify size arguments; use safer abstractions where possible",
-                "CWE-805"
-            };
-        }
-
-        // Alloca (stack allocation)
-        if (name == "alloca") {
-            return ApiRiskInfo{
-                FindingSeverity::Medium,
-                "Non-standard stack allocation can lead to stack overflow",
-                "Use dynamic allocation or fixed-size arrays",
-                "CWE-770"
-            };
-        }
-
-        // getopt / getopt_long (input parsing)
-        if (name == "getopt" || name == "getopt_long") {
-            return ApiRiskInfo{
-                FindingSeverity::Info,
-                "Argument parsing (not inherently dangerous, but misused can cause issues)",
-                "Validate inputs and handle errors",
-                "CWE-20"};
-        }
-
-        // atoi / atol / atoll (string to integer)
-        if (name == "atoi" || name == "atol" || name == "atoll") {
-            return ApiRiskInfo{
-                FindingSeverity::Low,
-                "Conversion functions without error checking",
-                "Use strtol/strtoul with end pointer validation",
-                "CWE-190"
-            };
-        }
-
-        // strtok (non-reentrant, modifies input)
-        if (name == "strtok") {
-            return ApiRiskInfo{
-                FindingSeverity::Low,
-                "Modifies input string and not thread-safe",
-                "Use strtok_r or std::string tokenization",
-                "CWE-366"
-            };
-        }
-        // Network functions (obsolete, thread-unsafe)
-        if (name == "gethostbyname" || name == "gethostbyaddr") {
-            return ApiRiskInfo{
-                FindingSeverity::Medium,
-                "Obsolete and not thread-safe; returns static data.",
-                "Use getaddrinfo()/getnameinfo().",
-                "CWE-362"
-            };
-        }
-        if (name == "inet_ntoa") {
-            return ApiRiskInfo{
-                FindingSeverity::Low,
-                "Not thread-safe, uses static buffer.",
-                "Use inet_ntop().",
-                "CWE-362"
-            };
-        }
-        
-        return std::nullopt;
-    }
-
-    FindingList detect_dangerous_apis(const std::vector<std::string>& symbols)
-    {
-        FindingList findings;
-        for (const auto& sym: symbols) {
-            std::string base = strip_symbol_version(sym);
-            auto risk = get_api_risk(base);
-            if (risk) {
-                findings.emplace_back(
-                    risk->severity,
-                    "Dangerous/obsolete API used: " + base,
-                    "Imported symbol matches known dangerous API list.",
-                    DangerousApiFindingDetails{base, risk->description, risk->recommendation, risk->cwe_id}
-                );
-            }
-        }
-        return findings;
-    }
-
     bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
     {
         auto symbols = get_symbol_names(data, elf_class, elf_data);
@@ -723,69 +536,6 @@ namespace runtimexray
         return info;
     }
 
-    FindingList make_findings(const ElfSecurityInfo& info) {
-        FindingList findings;
-        using Details = HardeningFindingDetails;
-
-        // NX
-        findings.emplace_back(
-            info.nx_enabled ? FindingSeverity::Info : FindingSeverity::High,
-            info.nx_enabled ? "NX (No Execute) enabled" : "NX (No Execute) is disabled",
-            info.nx_enabled ? "Stack is non-executable (PT_GNU_STACK segment without PF_X)." :
-                              "Stack is executable (PT_GNU_STACK segment has PF_X set).",
-            Details{"NX", info.nx_enabled ? "Enabled" : "Disabled"}
-        );
-
-        // PIE
-        findings.emplace_back(
-            info.pie_enabled ? FindingSeverity::Info : FindingSeverity::Medium,
-            info.pie_enabled ? "PIE (Position-Independent Executable) is enabled" : "PIE (Position-Independent Executable) is disabled",
-            info.pie_enabled ? "Binary is position-independent (ET_DYN)." :
-                               "ELF type is ET_EXEC, so the binary is not position-independent.",
-            Details{"PIE", info.pie_enabled ? "Enabled": "Disabled"}
-        );
-
-        // RELRO
-        std::string relro_status = info.relro_full ? "Full" : (info.relro_partial ? "Partial" : "Disabled");
-        FindingSeverity relro_severity = info.relro_full ? FindingSeverity::Info : (info.relro_partial ? FindingSeverity::Low : FindingSeverity::Medium);
-        findings.emplace_back(
-            relro_severity,
-            "RELRO is " + relro_status,
-            info.relro_full ? 
-                "Full RELRO (PT_GNU_RELRO and DT_BIND_NOW)." : 
-                (info.relro_partial ? 
-                    "Partial RELRO (PT_GNU_RELRO without DT_BIND_NOW)." : "No RELRO (PT_GNU_RELRO not found)."),
-            Details{"RELRO", relro_status}
-        );
-
-        // Canary
-        findings.emplace_back(
-            info.canary_enabled ? FindingSeverity::Info : FindingSeverity::High,
-            info.canary_enabled ? "Stack canary is enabled" : "Stack canary is disabled",
-            info.canary_enabled ? "Symbol __stack_chk_fail found in symbol tables." : "Symbol __stack_chk_fail not found in symbol tables.",
-            Details{"Canary", info.canary_enabled ? "Enabled" : "Disabled"}
-        );
-
-        return findings;
-    }
-
-    void report_findings(const FindingList& findings, std::ostream& out) 
-    {
-        for (const Finding& f : findings) {
-            std::visit([&](const auto& details) {
-                using T = std::decay_t<decltype(details)>;
-                if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
-                    out << "    " << details.feature << ": " << details.status << '\n';
-                } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
-                    out << "    Dangerous API: " << details.api
-                        << " (reason: " << details.reason
-                        << ", recommendation: " << details.recommendation
-                        << ", cwe: " << details.cwe_id << ")\n";
-                }
-            }, f.details);           
-        }
-    }
-
     FindingList analyze_binary(const std::string& path,
                             FindingSeverity min_severity,
                             bool verbose,
@@ -845,15 +595,29 @@ namespace runtimexray
 
         FindingList findings;
 
-        // 1. Hardening checks
+        // 1. Hardening checks: convert to HardeningEvidence and feed to registry
         ElfSecurityInfo sec_info = check_security_features(data, elf_class, elf_data, e_type);
-        FindingList hardening = make_findings(sec_info);
-        findings.insert(findings.end(), hardening.begin(), hardening.end());
+        // For each hardening feature, create an evidence and run analyzers
+        auto add_hardening_evidence = [&](const std::string& feature, const std::string& status) {
+            HardeningEvidence h{feature, status};
+            auto res = AnalyzerRegistry::instance().analyze_evidence(h);
+            findings.insert(findings.end(), res.begin(), res.end());
+        };
+
+        add_hardening_evidence("NX",    sec_info.nx_enabled    ? "Enabled" : "Disabled");
+        add_hardening_evidence("PIE",   sec_info.pie_enabled   ? "Enabled" : "Disabled");
+        std::string relro_status = sec_info.relro_full ? "Full" :
+                                   (sec_info.relro_partial ? "Partial" : "Disabled");
+        add_hardening_evidence("RELRO", relro_status);
+        add_hardening_evidence("Canary", sec_info.canary_enabled ? "Enabled" : "Disabled");
 
         // 2. Dangerous API detection
         auto symbols = get_symbol_names(data, elf_class, elf_data);
-        FindingList api = detect_dangerous_apis(symbols);
-        findings.insert(findings.end(), api.begin(), api.end());
+        for (const auto& sym : symbols) {
+            SymbolEvidence s{sym, "import"};
+            auto res = AnalyzerRegistry::instance().analyze_evidence(s);
+            findings.insert(findings.end(), res.begin(), res.end());
+        }
 
         // Apply central filtering
         filter_findings(findings, min_severity, verbose);

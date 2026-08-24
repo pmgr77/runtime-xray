@@ -33,60 +33,6 @@
 
 namespace runtimexray {
 
-    std::optional<FindingSeverity> get_sensitive_path_severity(const std::string& path) {
-        // Critical: extremely sensitive files (e.g., sudoers, shadow)
-        const std::vector<std::string> critical = {
-            "/etc/sudoers", "/etc/shadow", "/root/", "/.ssh", ".ssh",
-            ".aws/credentials", ".gnupg", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"
-        };
-        for (const auto& sub : critical) {
-            if (path.find(sub) != std::string::npos) {
-                return FindingSeverity::Critical;
-            }
-        }
-
-        // High: files containing secrets or sensitive tokens
-        const std::vector<std::string> high = {
-            "secret", "token", "password", "credential", "api_key"
-        };
-        for (const auto& sub : high) {
-            if (path.find(sub) != std::string::npos) {
-                return FindingSeverity::High;
-            }
-        }
-
-        // Medium: user/group databases, system configuration files
-        const std::vector<std::string> medium = {
-            "/etc/passwd", "/etc/group"
-        };
-        for (const auto& sub : medium) {
-            if (path.find(sub) != std::string::npos) {
-                return FindingSeverity::Medium;
-            }
-        }
-
-        // Low: less sensitive but still interesting files
-        const std::vector<std::string> low = {
-            "/etc/hosts", "/etc/resolv.conf"
-        };
-        for (const auto& sub : low) {
-            if (path.find(sub) != std::string::npos) {
-                return FindingSeverity::Low;
-            }
-        }
-
-        // Info: files that give basic system information
-        const std::vector<std::string> info = {
-            "/etc/hostname", "/etc/machine-id"
-        };
-        for (const auto& sub : info) {
-            if (path.find(sub) != std::string::npos) {
-                return FindingSeverity::Info;
-            }
-        }
-
-        return std::nullopt;
-    }
 
     std::string sanitize_data(const std::vector<std::byte>& data, size_t max_len) {
         std::string out;
@@ -103,29 +49,6 @@ namespace runtimexray {
             out += "...";
         }
         return out;
-    }
-
-    std::string to_lower_case(const std::string& input) {
-        std::string result = input;
-
-        std::transform(input.begin(), input.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return result;
-    }
-
-    bool contains_sensitive_keyword(const std::string& text) {
-        static const std::vector<std::string> keywords = {
-            "password", "passwd", "pwd", "pass", "pswd",
-            "password_hash", "password_salt", "password_encrypted",
-            "hashed_password", "secret", "api_key", "token", "credentials"
-        };
-
-        std::string lowered = to_lower_case(text);
-        for (const auto& kw : keywords) {
-            if (lowered.find(kw) != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
     }
 
     ParsedSockaddr parse_sockaddr(const std::vector<std::byte>& data) {

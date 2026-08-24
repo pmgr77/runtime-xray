@@ -1,101 +1,115 @@
-# Extending RuntimeXRay Detectors
+# Extending RuntimeXRay Analyzers
 
-RuntimeXRay uses a simple registry for memory secret detectors. You can add your own custom detectors, remove built‑in ones, or temporarily disable them without modifying the core code.
+RuntimeXRay uses a registry of analyzers. You can add your own custom analyzers, remove built‑in ones, or temporarily disable them without modifying the core code.
 
-## Built-in detectors
+## Built-in analyzers
 
-The following detectors are registered automatically:
+The following analyzers are registered automatically:
 
-| Detector name   | Description                                       |
-|-----------------|---------------------------------------------------|
-| `password`      | Detects sensitive keywords in `key=value` or `key: value` pairs (e.g., `password=secret`, `api_key: abc`) |
-| `private_key`   | Detects PEM private key blocks (`BEGIN RSA PRIVATE KEY`, etc.) |
+| Analyzer name         | Category | Description |
+|-----------------------|----------|-------------|
+| `hardening`           | Static   | Evaluates binary hardening features (NX, PIE, RELRO, Canary) |
+| `dangerous_api`       | Static   | Detects known dangerous imports |
+| `sensitive_file`      | Dynamic  | Flags access to sensitive files |
+| `network`             | Dynamic  | Flags suspicious network connections |
+| `memory_password`     | Memory   | Detects password‑like strings in memory |
+| `memory_private_key`  | Memory   | Detects private key blocks in memory |
 
-## Adding a custom detector
+## Adding a custom analyzer
 
-Create a class that inherits from `runtimexray::MemorySecretDetector`. Implement the three pure virtual methods: `name()`, `description()`, and `detect()`.
+Create a class that inherits from `runtimexray::IAnalyzer`. Implement the four pure virtual methods:
+`name()`, `description()`, `category()`, and `analyze(const Evidence&)`.
 
-### Example: AWS Access Key detector
+### Example: AWS Access Key analyzer
 
 ```cpp
-#include <memory_secret_detector.hpp>
+#include <ianalyzer.hpp>
+#include <evidence.hpp>
+#include <finding.hpp>
 
-class AwsAccessKeyDetector : public runtimexray::MemorySecretDetector {
+class AwsAccessKeyAnalyzer : public runtimexray::IAnalyzer {
 public:
     std::string name() const override { return "aws_access_key"; }
     std::string description() const override {
         return "Detects AWS Access Key IDs (AKIA...)";
     }
+    runtimexray::AnalyzerCategory category() const override {
+        return runtimexray::AnalyzerCategory::Memory;
+    }
 
-    std::vector<runtimexray::SecretMatch> detect(const std::string& chunk) const override {
-        std::vector<runtimexray::SecretMatch> results;
-        size_t pos = 0;
-        while ((pos = chunk.find("AKIA", pos)) != std::string::npos) {
-            if (pos + 20 <= chunk.size()) {
-                std::string key = chunk.substr(pos, 20);
-                results.push_back({"aws_access_key", key, "AWS Access Key ID"});
+    runtimexray::FindingList analyze(const runtimexray::Evidence& evidence) const override {
+        runtimexray::FindingList findings;
+        if (auto* mem = std::get_if<runtimexray::MemoryChunkEvidence>(&evidence)) {
+            const std::string& chunk = mem->chunk;
+            size_t pos = 0;
+            while ((pos = chunk.find("AKIA", pos)) != std::string::npos) {
+                if (pos + 20 <= chunk.size()) {
+                    std::string key = chunk.substr(pos, 20);
+                    findings.emplace_back(
+                        runtimexray::FindingSeverity::High,
+                        "AWS Access Key found",
+                        "Potential AWS Access Key ID detected.",
+                        runtimexray::MemorySecretFindingDetails{key, "aws_access_key", mem->location}
+                    );
+                }
+                pos += 4;
             }
-            pos += 4;
         }
-        return results;
+        return findings;
     }
 };
 ```
 
-To register it, call `register_detector` before scanning:
+To register it, call `register_analyzer` before running any scan:
 
 ```cpp
-#include <memory_secret_detector.hpp>
+#include <analyzer_registry.hpp>
 
 int main() {
-    auto& reg = runtimexray::DetectorRegistry::instance();
-    reg.register_detector(std::make_unique<AwsAccessKeyDetector>());
+    auto& reg = runtimexray::AnalyzerRegistry::instance();
+    reg.register_analyzer(std::make_unique<AwsAccessKeyAnalyzer>());
 
     // Now run your scan...
 }
 ```
 
-Alternatively, use a simple macro to make registration easy:
+Alternatively, use a macro for automatic registration:
 
 ```cpp
-#define REGISTER_DETECTOR(Type) \
+#define REGISTER_ANALYZER(Type) \
     static struct Type##_registrar { \
         Type##_registrar() { \
-            runtimexray::DetectorRegistry::instance().register_detector(std::make_unique<Type>()); \
+            runtimexray::AnalyzerRegistry::instance().register_analyzer(std::make_unique<Type>()); \
         } \
     } Type##_registrar_instance;
+
+REGISTER_ANALYZER(AwsAccessKeyAnalyzer)
 ```
 
-Then use:
+## Removing or disabling a built-in analyzer
+
+### Disable (skip execution but keep registered)
 
 ```cpp
-REGISTER_DETECTOR(AwsAccessKeyDetector)
-```
-
-## Removing or disabling a built-in detector
-
-### Disable (skip scanning but keep registered)
-
-```cpp
-runtimexray::DetectorRegistry::instance().disable_detector("password");
+runtimexray::AnalyzerRegistry::instance().disable_analyzer("memory_password");
 ```
 
 ### Re-enable
 
 ```cpp
-runtimexray::DetectorRegistry::instance().enable_detector("password");
+runtimexray::AnalyzerRegistry::instance().enable_analyzer("memory_password");
 ```
 
 ### Remove entirely
 
 ```cpp
-runtimexray::DetectorRegistry::instance().unregister_detector("password");
+runtimexray::AnalyzerRegistry::instance().unregister_analyzer("memory_password");
 ```
 
-## Listing active detectors
+## Listing active analyzers
 
 ```cpp
-auto names = runtimexray::DetectorRegistry::instance().list_detectors();
+auto names = runtimexray::AnalyzerRegistry::instance().list_analyzers();
 for (const auto& n : names) {
     std::cout << n << "\n";
 }
@@ -103,8 +117,9 @@ for (const auto& n : names) {
 
 ## Notes
 
-- Detector names must be unique.
+- Analyzer names must be unique.
 - The registry is a singleton; thread safety is not yet guaranteed, but it is safe for single‑threaded CLI use.
-- If you disable a detector, it will not be called by `detect_secrets_in_chunk`.
+- If you disable an analyzer, it will not be called for any evidence.
+- Each analyzer is responsible for checking the evidence type it supports (using `std::get_if`).
 
 This design allows RuntimeXRay to be extended without modifying the core library.
