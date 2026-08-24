@@ -3,20 +3,44 @@
 [![Build and Test](https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml/badge.svg)](https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml)
 
 > **Don't tell me my application is insecure — show me why.**
+> **See what an attacker can learn from your application at runtime.**
 
 RuntimeXRay is an **evidence-driven security analysis tool for compiled applications**.
 
-It combines static binary analysis with runtime observation to build concrete security findings from what can actually be observed in an application — rather than relying only on generic warnings.
-
-Today, RuntimeXRay analyzes ELF binaries for security hardening and potentially dangerous APIs. Runtime analysis is under active development, with the goal of correlating **binary metadata, runtime behavior, memory, system calls, files, and network activity** into actionable security evidence.
-
-The long-term goal is simple:
-
-> **Show what an application actually exposes, and what an attacker could learn from it.**
+It combines static binary analysis with runtime observation to build security findings from evidence that can actually be observed in the compiled application — not from assumptions, but from facts.
 
 ---
 
 ## Why RuntimeXRay?
+
+Software is being produced faster and in larger quantities than ever before.
+AI‑assisted development, third‑party components, legacy code and rapidly changing dependencies make it increasingly difficult to know exactly what ends up inside a deployed application — and what that application actually exposes while running.
+
+### 🤖 “The AI wrote it. But what did it actually build?”
+
+AI can produce working code in seconds. Tests may pass and the application may ship.
+
+**The problem:** You know what the code was supposed to do. Do you know what the resulting binary actually exposes at runtime?
+
+### 📦 “You didn’t write that library. Do you really know what it does?”
+
+Modern applications depend on third‑party and legacy components that may be difficult or impossible to fully audit.
+
+**The problem:** Documentation and source‑level analysis tell only part of the story. What does the running process actually access, retain, expose or communicate?
+
+### 🧩 “Who still understands this entire application?”
+
+Large applications accumulate years of code, dependencies and configuration paths.
+
+**The problem:** Security decisions increasingly rely on assumptions about what the application does.
+
+### ⚡ “Can security review keep up with the release cycle?”
+
+Software changes faster than security teams can manually inspect every change.
+
+**The problem:** Traditional analysis can identify potential weaknesses. Runtime evidence can show what actually happened.
+
+---
 
 ### 🔍 Evidence over warnings
 
@@ -40,157 +64,107 @@ the goal is to answer:
 
 ---
 
-### 🧩 Static + Dynamic + Memory Analysis
+## What does RuntimeXRay actually show?
 
-RuntimeXRay combines three complementary views of an application:
+Suppose a compiled application:
 
-* **Static analysis** of the compiled binary
-* **Dynamic analysis** of the running process
-* **Memory analysis** of sensitive data in process memory
+- contains a security‑sensitive API,
+- reads configuration containing credentials,
+- accesses sensitive files,
+- connects to an unexpected network endpoint, or
+- leaves secrets in process memory.
 
-Static analysis provides information that can be determined directly from the binary, while runtime and memory analysis reveal behavior and data exposure that cannot be established from the binary alone.
+RuntimeXRay is designed to turn these observations into concrete evidence that can be investigated and correlated with the security finding.
 
-The runtime component, **Tachikoma**, uses Linux `ptrace`-based tracing and is currently under development.
-
-Tachikoma — named after the autonomous spider-like “think tanks” from *Ghost in the Shell* — follows the target process and intercepts its system calls, allowing RuntimeXRay to observe runtime behaviour that static inspection alone cannot reveal.
-
----
-
-### 🛡️ Works Without Source Code
-
-RuntimeXRay is designed to analyze **compiled applications**, including stripped and third-party binaries.
-
-This makes the approach useful for software where source code may not be available, including:
-
-* third-party components
-* legacy applications
-* proprietary software
-* vendor binaries
-* security assessments of deployed applications
-
----
-
-### 🧠 Evidence-First AI
-
-RuntimeXRay is designed to optionally use LLMs to explain security findings in human-readable language.
-
-AI is an **explanation layer, not the source of truth**.
-
-The intended model is:
-
-```text
-Application
-     ↓
-Observed evidence
-     ↓
-Security analysis
-     ↓
-Findings
-     ↓
-Optional AI explanation
-```
-
-The AI should explain evidence collected by RuntimeXRay — **not invent evidence or findings**.
-
----
-
-### 📈 From Findings to Data Lineage
-
-A major goal of RuntimeXRay is to track sensitive information through an application's execution:
-
-```text
-Source
-  ↓
-Memory
-  ↓
-Processing
-  ↓
-API / syscall
-  ↓
-File / network / external boundary
-  ↓
-Destination
-```
-
-This will allow RuntimeXRay to move beyond isolated warnings and toward understanding **how sensitive information actually flows through a running application**.
+> *A full demonstration is coming soon. We are currently preparing a sample application that will show how RuntimeXRay collects evidence and produces a finding.*
 
 ---
 
 ## Current Status
 
-RuntimeXRay is currently in active development.
+RuntimeXRay is in active development.
+The following capabilities are available today, experimental, or planned.
 
 ### ✅ Available today
 
-**Unified CLI** (`runtimexray`) with subcommands:
+#### Unified CLI
+
+Single binary `runtimexray` with subcommands:
 
 - `analyze` – static ELF hardening checks and dangerous API detection
 - `trace` – dynamic ptrace‑based syscall tracing and evidence capture
 - `mem` – process memory scanning for secrets
 
-**ELF static analysis**
+All subcommands support common options:
 
-* ELF 32-bit and 64-bit parsing
-* Architecture and endianness detection
-* ELF type and entry-point inspection
-* NX / executable-stack detection
-* PIE detection
-* RELRO detection
-* Stack Canary detection
-* Dangerous API/import detection
-* CWE references and security recommendations
-* Severity filtering
-* Verbose reporting
-* Regression tests using CTest
+- `--verbose`
+- `--min-severity <level>` (Critical, High, Medium, Low, Info)
+- `--output-format text|json`
 
-**Dynamic analysis** (experimental but functional via `runtimexray trace`)
+#### Static analysis (`runtimexray analyze`)
 
-* Linux `ptrace`-based syscall tracing on x86_64 and ARM64
-* Syscall name mapping and filtering of interesting events
-* Reading file paths from `open` / `openat`
-* Reading network addresses from `connect` / `sendto`
-* Reading `write` buffer contents (first 4 KB)
-* Capturing child stdout/stderr for later secret scanning
-* Dynamic findings:
-  - Sensitive file access
-  - Suspicious network connections
-  - Sensitive data writes
-  - Sensitive data in captured process output
-* CTest regression and integration tests (currently 33 tests)
+- ELF 32‑bit and 64‑bit parsing
+- Architecture and endianness detection
+- ELF type and entry‑point inspection
+- NX / executable‑stack detection
+- PIE detection
+- RELRO (Partial/Full) detection
+- Stack canary detection
+- Dangerous API/import detection with CWE references
+- Severity filtering
+- JSON output
 
-**Memory scanning** (via `runtimexray mem`)
+#### Dynamic tracing (`runtimexray trace`)
 
-* Reads `/proc/<pid>/cmdline` and `/proc/<pid>/environ` for secrets
-* Scans readable memory pages for password-like strings, private keys, and other sensitive patterns
-* Supports `--max-pages` option to limit the number of scanned memory pages
-* `--max-pages 0` skips page scanning and only checks command line and environment
-* Reports the number of scanned pages
+- Linux `ptrace`‑based syscall tracing on x86_64 and ARM64
+- Syscall name mapping and filtering of interesting events
+- File path reading for `open` / `openat`
+- Network address parsing for `connect` / `sendto`
+- `write` buffer reading (first 4 KB)
+- Child stdout/stderr capture and scanning for sensitive keywords
+- Timeout support (`--timeout <seconds>`)
+- Dynamic findings: sensitive file access, suspicious network connections, sensitive data writes
+- JSON output
 
-Dangerous API detection currently identifies imported functions that may indicate unsafe or obsolete practices, such as:
+#### Memory scanning (`runtimexray mem`)
 
-* `strcpy`
-* `system`
-* weak or obsolete cryptographic APIs
-* other security-sensitive functions
+- Reads `/proc/<pid>/cmdline` and `/proc/<pid>/environ`
+- Scans readable memory pages for:
+  - password‑like strings
+  - private key markers (PEM)
+  - other sensitive patterns
+- `--max-pages <N>` option to limit the number of scanned pages
+- `--max-pages 0` skips page scanning and only checks cmdline/environ
+- Reports number of scanned pages
+- JSON output
 
-These findings indicate **potential risk based on binary metadata**; an imported function is not necessarily executed at runtime.
+#### Extensible secret detectors
 
-### 🚧 Under active development
+- `DetectorRegistry` allows custom memory secret detectors to be registered, disabled, enabled, or removed without modifying core code.
+- Built‑in detectors: `password`, `private_key`.
+- Documentation: `docs/extending_detectors.md`.
 
-**Dynamic analysis** – next steps
+#### Tests
 
-* Full process memory scanning / sensitive-data discovery in memory
-* Data-flow / lineage analysis
-* Network-boundary detection
-* Correlation of static and runtime evidence into a unified report
-* Anti-evasion measures:
-  - `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK`
-  - Detection of anti-debugging behaviour
-  - Exploration of eBPF as a harder-to-evade backend
+- CTest suite (currently 33+ tests)
+- Regression tests for static checks, dynamic helpers, memory scanners, and JSON output
+- Runs on x86_64 and ARM64 via GitHub Actions
 
-The core of dynamic analysis is **Tachikoma**, our `ptrace`-based tracer. It launches the target process under trace, intercepts system calls, and will eventually feed runtime evidence into the same finding pipeline used by static analysis.
+### 🧪 Experimental
 
-See the [Roadmap](ROADMAP.md) for the planned development path.
+- **Runtime correlation** – combining static and dynamic findings in a unified view is being designed.
+- **Memory scanning under load** – performance tuning and heuristic improvements.
+
+### 📋 Planned
+
+- **Data lineage** – track sensitive data from source through transformations to sinks
+- **Network‑boundary detection** – identify unexpected outbound communication
+- **eBPF backend** – low‑overhead tracing using `libbpf`, harder to evade than `ptrace`
+- **AI explanations** – optional LLM integration to explain findings, always evidence‑first
+- **Plugin API for custom analyzers** – support for third‑party static, dynamic, memory, and post‑process analyzers
+- **Additional binary formats** – PE (Windows), Mach‑O (macOS)
+- **Public benchmark** – run against popular open‑source projects
+- **Web service** – upload a binary and receive a report
 
 ---
 
@@ -215,70 +189,80 @@ cmake --build .
 ./runtimexray analyze /bin/ls
 ```
 
-Example output:
-
-```text
-/bin/ls is an ELF file. Size: 199464 bytes
-  Class: Elf64
-  Data Encoding: LittleEndian
-  Type: DYN (Shared object/PIE)
-  Machine: ARM64
-  Version: 1
-  Entry point: 0x5dc0
-
-> Hardening checks:
-    No findings at this severity level.
-```
-
 Use `--verbose` to see all findings, including informational hardening checks:
 
 ```bash
 ./runtimexray analyze --verbose /bin/ls
 ```
 
-### Run a dynamic trace
+JSON output:
+
+```bash
+./runtimexray analyze --output-format json /bin/ls
+```
+
+### Trace a process dynamically
 
 ```bash
 ./runtimexray trace --timeout 5 /usr/bin/curl https://example.com
 ```
 
-Use `--verbose` to show all system calls, not just interesting ones:
+Use `--verbose` to show all system calls:
 
 ```bash
 ./runtimexray trace --verbose /bin/ls
 ```
 
-The traced program’s stdout/stderr are saved to `/tmp/runtimexray_child_*.log` for later inspection.
+JSON output:
 
-### Scan a process memory for secrets
+```bash
+./runtimexray trace --timeout 5 --output-format json /bin/cat /etc/passwd
+```
+
+### Scan process memory for secrets
 
 ```bash
 ./runtimexray mem <pid>
 ```
 
-Limit the number of memory pages scanned with `--max-pages`:
+Limit pages:
 
 ```bash
 ./runtimexray mem --max-pages 500 <pid>
 ./runtimexray mem --max-pages 0 <pid>   # only cmdline and environment
 ```
 
-### Global options
-
-All subcommands support:
-
-- `--verbose`
-- `--min-severity <level>` (Critical, High, Medium, Low, Info)
-- `--output-format <format>` (reserved for future use)
-
-Get help for any subcommand:
+JSON output:
 
 ```bash
-./runtimexray --help
-./runtimexray analyze --help
-./runtimexray trace --help
-./runtimexray mem --help
+./runtimexray mem --output-format json <pid>
 ```
+
+---
+
+## Evidence-First AI
+
+RuntimeXRay is designed to optionally use LLMs to explain security findings in human‑readable language.
+
+AI is an **explanation layer, not the source of truth**.
+
+The intended model:
+
+```text
+Application
+     ↓
+Observed evidence
+     ↓
+Security analysis
+     ↓
+Findings
+     ↓
+Optional AI explanation
+```
+
+The AI should explain evidence collected by RuntimeXRay — **not invent evidence or findings**.
+
+Even in an era where AI may help create software, the evidence must come from the application itself.
 
 ---
 
@@ -329,20 +313,20 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for more details.
 
 ## Roadmap
 
-The project is evolving from static binary inspection toward **evidence-based runtime security analysis**.
+The project is evolving from static binary inspection toward **evidence‑based runtime security analysis**.
 
 Planned areas include:
 
 * Runtime memory scanning
-* Sensitive-data and secret detection
+* Sensitive‑data and secret detection
 * Syscall analysis and correlation
 * Data lineage
-* Network-boundary analysis
+* Network‑boundary analysis
 * Static/runtime evidence correlation
 * JSON and HTML reporting
-* Additional binary formats such as PE and Mach-O
+* Additional binary formats such as PE and Mach‑O
 * Plugin architecture
-* Optional AI-assisted analysis and explanations
+* Optional AI‑assisted analysis and explanations
 * CI/CD integration
 
 See the [Roadmap](ROADMAP.md) for the current priorities.
@@ -357,12 +341,14 @@ See the [Roadmap](ROADMAP.md) for the current priorities.
 * [Roadmap](ROADMAP.md) — planned development
 * [Contributing](CONTRIBUTING.md) — how to contribute
 * [Security](SECURITY.md) — reporting security issues
+* [Extending Detectors](docs/extending_detectors.md) — add custom memory secret detectors
+* [Integration Examples](docs/integration_examples.md) — parse JSON output
 
 ---
 
 ## Contributing
 
-RuntimeXRay is an open-source project and contributions are welcome.
+RuntimeXRay is an open‑source project and contributions are welcome.
 
 Areas that are particularly interesting include:
 
@@ -371,7 +357,7 @@ Areas that are particularly interesting include:
 * `ptrace`
 * memory analysis
 * security research
-* data-flow analysis
+* data‑flow analysis
 * networking
 * C++
 * security tooling
@@ -387,7 +373,7 @@ If you discover a security vulnerability in RuntimeXRay, please **do not open a 
 Instead, report it responsibly to:
 
 - **security@runtimexray.com** – for vulnerabilities in RuntimeXRay itself
-- **hello@runtimexray.com** – for general security questions or non-urgent inquiries
+- **hello@runtimexray.com** – for general security questions or non‑urgent inquiries
 
 We follow coordinated disclosure and will respond as quickly as possible. For more details, see [SECURITY.md](SECURITY.md).
 
