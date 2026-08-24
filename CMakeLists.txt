@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(RuntimeXRay VERSION 0.1.0 LANGUAGES CXX)
 option(SKIP_PTRACE_TESTS "Skip ptrace-based dynamic tests (useful for emulated environments)" OFF)
+option(BUILD_EXAMPLES "Build custom analyzer examples" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -193,4 +194,8 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_trace_info_show PROPERTIES
         PASS_REGULAR_EXPRESSION "path=/etc/hostname"
     )
+endif()
+
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples/custom_analyzers)
 endif()

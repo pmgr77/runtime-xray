@@ -183,6 +183,14 @@ cmake ..
 cmake --build .
 ```
 
+### Build custom analyzer examples
+
+```bash
+cmake .. -DBUILD_EXAMPLES=ON
+cmake --build .
+./examples/custom_analyzers/custom_analyzer_demo
+```
+
 ### Analyze an ELF binary
 
 ```bash
