@@ -21,6 +21,12 @@ RuntimeXRay answers the question: *"What could an attacker learn by observing th
 - Password‑like strings and private key markers in readable memory pages
 - Number of scanned pages reported; page scanning can be limited with `--max-pages`
 
+### Extensibility via Analyzers
+- Users can register custom analyzers implementing `IAnalyzer`.
+- Analyzers consume `Evidence` objects and produce `FindingList`.
+- Built‑in analyzers cover hardening, dangerous APIs, sensitive files, network, and memory secrets.
+- This allows third parties to add their own detection logic without modifying core code, but also means that a malicious or poorly written custom analyzer could influence results.
+
 ## Planned detection (future)
 - Hardcoded secrets in binary sections
 - Secrets lingering in process memory after use
@@ -39,6 +45,7 @@ RuntimeXRay answers the question: *"What could an attacker learn by observing th
 - Memory scanning of arbitrary processes may require root privileges depending on `ptrace_scope`. Self‑scanning and child processes usually work without root.
 - Memory scanning is limited by `--max-pages`; a low limit may miss secrets in later memory pages. Use `0` to skip page scanning entirely (only cmdline/environ are scanned).
 - Detectors currently focus on known patterns (`password=`, private key markers). Unknown or heavily obfuscated secrets may not be detected.
+- Custom analyzers are not sandboxed; they run with the same privileges as the RuntimeXRay process and could affect performance, stability, or correctness if not carefully written.
 
 ## Assumptions
 - The target binary runs on Linux x86_64 or ARM64.
@@ -47,3 +54,4 @@ RuntimeXRay answers the question: *"What could an attacker learn by observing th
 - The runtime environment is not actively hostile to tracing (no anti‑debugging), although we recognise that real-world binaries may attempt to evade ptrace and are working on countermeasures.
 - The target process is non-interactive during tracing; interactive or highly concurrent processes may produce incomplete traces.
 - For memory scanning of other processes, the user may need elevated privileges (root or appropriate capabilities) on systems with Yama LSM enabled.
+- Users who register custom analyzers are responsible for their correctness and security implications.

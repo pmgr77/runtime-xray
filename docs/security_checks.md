@@ -10,6 +10,7 @@ This document describes the static and dynamic security checks currently perform
 - [Output Filtering](#output-filtering)
 - [Dangerous API Detection](#dangerous-api-detection)
 - [Dynamic Analysis Findings](#dynamic-analysis-findings)
+- [Memory Analysis Findings](#memory-analysis-findings)
 - [Real-world Examples](#real-world-examples)
 
 ---
@@ -90,8 +91,10 @@ Canary: Enabled
 ## Output Filtering
 
 By default, RuntimeXRay shows findings with severity **Medium and higher** (Critical, High, Medium). Use:
-- `--min-severity=High` to show only High and Critical.
-- `--min-severity=Info` or `--verbose` to show all findings including Low/Info.
+- `--min-severity High` to show only High and Critical.
+- `--min-severity Info` or `--verbose` to show all findings including Low/Info.
+
+*Note: `--min-severity=High` (equals form) is also supported.*
 
 ---
 
@@ -136,7 +139,7 @@ Dangerous API usage:
 - **Input parsing**: `getopt`, `getopt_long`
 - **Unsafe conversions**: `atoi`, `atol`, `atoll`
 
-*This list is maintained in `src/elf_parser.cpp` and will be expanded over time.*
+*This list is maintained in `src/builtin_analyzers.cpp` and will be expanded over time.*
 
 ---
 
@@ -156,17 +159,44 @@ These findings are still experimental and should be interpreted as indicators of
 ### How to run dynamic analysis
 
 ```bash
-./xray-trace /path/to/program
+./runtimexray trace /path/to/program
 ```
-Use --verbose to show all system calls, not only interesting ones:
+Use `--verbose` to show all system calls, not only interesting ones:
 
 ```bash
-./xray-trace --verbose /path/to/program
+./runtimexray trace --verbose /path/to/program
+```
+
+For JSON output:
+
+```bash
+./runtimexray trace --output-format json /path/to/program
 ```
 
 ---
 
-Real-world Examples
+## Memory Analysis Findings
+
+RuntimeXRay can also scan the memory of a running process to detect secrets and sensitive data.
+
+Available via:
+
+```bash
+./runtimexray mem <pid>
+```
+
+Findings include:
+
+- **Secrets in command line arguments** (`/proc/<pid>/cmdline`)
+- **Secrets in environment variables** (`/proc/<pid>/environ`)
+- **Password‑like strings** in readable memory pages
+- **Private key blocks** (PEM markers) in memory
+
+Use `--max-pages` to limit the number of pages scanned, or `--max-pages 0` to skip page scanning entirely and only check cmdline/environ.
+
+---
+
+## Real-world Examples
 
 ### `/usr/bin/wget`
 Despite full hardening (NX, PIE, Full RELRO, Canary), `wget` imports weak cryptographic algorithms and predictable random functions, which could be dangerous in certain contexts.
@@ -199,4 +229,4 @@ These examples illustrate that even modern, well-protected services can include 
 
 ---
 
-*Last updated: 2026-08-20*
+*Last updated: 2026-08-24*

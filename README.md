@@ -2,10 +2,10 @@
 
 [![Build and Test](https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml/badge.svg)](https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml)
 
-> **Don't tell me my application is insecure — show me why.**
+> **Don't tell me my application is insecure — show me why.**  
 > **See what an attacker can learn from your application at runtime.**
 
-RuntimeXRay is an **evidence-driven security analysis tool for compiled applications**.
+RuntimeXRay is an **evidence‑driven security analysis tool for compiled applications**.
 
 It combines static binary analysis with runtime observation to build security findings from evidence that can actually be observed in the compiled application — not from assumptions, but from facts.
 
@@ -13,7 +13,7 @@ It combines static binary analysis with runtime observation to build security fi
 
 ## Why RuntimeXRay?
 
-Software is being produced faster and in larger quantities than ever before.
+Software is being produced faster and in larger quantities than ever before.  
 AI‑assisted development, third‑party components, legacy code and rapidly changing dependencies make it increasingly difficult to know exactly what ends up inside a deployed application — and what that application actually exposes while running.
 
 ### 🤖 “The AI wrote it. But what did it actually build?”
@@ -141,13 +141,14 @@ All subcommands support common options:
 #### Extensible analyzers
 
 - `AnalyzerRegistry` allows custom analyzers to be registered, disabled, enabled, or removed without modifying core code.
-- Built‑in analyzers include hardening, dangerous API, sensitive file, network, and memory secret detection.
+- Analyzers consume `Evidence` objects (`SymbolEvidence`, `FileAccessEvidence`, `NetworkEvidence`, `MemoryChunkEvidence`, `HardeningEvidence`) and produce `FindingList`.
+- Built‑in analyzers include hardening, dangerous API, sensitive file, network, password memory, and private key memory.
 - Documentation: `docs/extending_detectors.md`.
 
 #### Tests
 
-- CTest suite (currently 33+ tests)
-- Regression tests for static checks, dynamic helpers, memory scanners, and JSON output
+- Comprehensive CTest suite (40+ tests)
+- Regression and integration tests for static checks, dynamic tracing, memory scanning, JSON output, and analyzer registry
 - Runs on x86_64 and ARM64 via GitHub Actions
 
 ### 🧪 Experimental
@@ -161,7 +162,6 @@ All subcommands support common options:
 - **Network‑boundary detection** – identify unexpected outbound communication
 - **eBPF backend** – low‑overhead tracing using `libbpf`, harder to evade than `ptrace`
 - **AI explanations** – optional LLM integration to explain findings, always evidence‑first
-- **Plugin API for custom analyzers** – support for third‑party static, dynamic, memory, and post‑process analyzers
 - **Additional binary formats** – PE (Windows), Mach‑O (macOS)
 - **Public benchmark** – run against popular open‑source projects
 - **Web service** – upload a binary and receive a report
@@ -280,7 +280,7 @@ RuntimeXRay is being developed around a layered analysis architecture:
               ▼                             ▼
       ┌───────────────┐             ┌───────────────┐
       │ Static        │             │ Dynamic       │
-      │ Analysis      │             │ Analysis      │
+      │ Collector     │             │ Collector     │
       │               │             │               │
       │ ELF metadata  │             │ ptrace        │
       │ Hardening     │             │ syscalls      │
@@ -291,7 +291,8 @@ RuntimeXRay is being developed around a layered analysis architecture:
                              ▼
                     ┌─────────────────┐
                     │ Evidence /      │
-                    │ Correlation     │
+                    │ Analyzer        │
+                    │ Registry        │
                     └────────┬────────┘
                              ▼
                     ┌─────────────────┐
@@ -305,7 +306,7 @@ RuntimeXRay is being developed around a layered analysis architecture:
                     └─────────────────┘
 ```
 
-The architecture is intentionally modular so that additional binary formats, runtime analyzers, security rules, and reporting mechanisms can be added independently.
+The architecture is intentionally modular so that additional binary formats, collectors, analyzers, security rules, and reporting mechanisms can be added independently.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for more details.
 
@@ -317,17 +318,16 @@ The project is evolving from static binary inspection toward **evidence‑based 
 
 Planned areas include:
 
-* Runtime memory scanning
-* Sensitive‑data and secret detection
-* Syscall analysis and correlation
 * Data lineage
-* Network‑boundary analysis
+* Network‑boundary detection
 * Static/runtime evidence correlation
-* JSON and HTML reporting
+* HTML reporting
 * Additional binary formats such as PE and Mach‑O
-* Plugin architecture
+* General plugin architecture for custom analyzers
 * Optional AI‑assisted analysis and explanations
-* CI/CD integration
+* eBPF backend
+* Public benchmark
+* Web service
 
 See the [Roadmap](ROADMAP.md) for the current priorities.
 
@@ -341,7 +341,7 @@ See the [Roadmap](ROADMAP.md) for the current priorities.
 * [Roadmap](ROADMAP.md) — planned development
 * [Contributing](CONTRIBUTING.md) — how to contribute
 * [Security](SECURITY.md) — reporting security issues
-* [Extending Detectors](docs/extending_detectors.md) — add custom memory secret detectors
+* [Extending Detectors](docs/extending_detectors.md) — add custom analyzers
 * [Integration Examples](docs/integration_examples.md) — parse JSON output
 
 ---

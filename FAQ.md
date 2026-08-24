@@ -3,8 +3,10 @@
 ## What is RuntimeXRay?
 
 RuntimeXRay is a security posture analyzer for **compiled applications**.  
-It runs your binary in a controlled sandbox, collects both **static** (ELF structure, hardening flags) and **dynamic** (system call tracing, memory scanning) evidence, and produces a human-readable security report — optionally with AI‑generated explanations.  
-Think of it as “`checksec` on steroids + runtime data-flow tracking + evidence‑backed findings”.
+It runs your binary in a controlled sandbox, collects both **static** (ELF structure, hardening flags) and **dynamic** (system call tracing, memory scanning) evidence, and produces a human-readable security report.  
+AI‑generated explanations are optional and currently planned for future releases.
+
+Think of it as “`checksec` on steroids + runtime tracing + memory scanning + evidence‑backed findings”.
 
 ---
 
@@ -46,7 +48,7 @@ RuntimeXRay acts as a **post‑build security verifier** specifically designed f
 challenge. You compile the AI‑written code, run the binary in a sandbox, and get an
 evidence‑based report that shows:
 
-- What secrets actually appear in memory and where they travel (data lineage).
+- What secrets actually appear in memory and where they travel (data lineage is planned, not yet fully implemented).
 - Whether the binary respects modern hardening (NX, PIE, RELRO, stack canary).
 - If sensitive data reaches the network, a log file, or an unexpected process.
 - Which weak cryptographic primitives are in use, even if called indirectly.
@@ -76,7 +78,7 @@ concrete memory contents, system call arguments, actual network destinations, an
 
 ## What is “data lineage” and why does it matter?
 
-Data lineage is the ability to trace **how a piece of sensitive information travels through the application**:
+Data lineage (planned, not yet fully implemented) is the ability to trace **how a piece of sensitive information travels through the application**:
 ```
 config.json
     |
@@ -97,7 +99,7 @@ plaintext_key (in memory, 4.7 sec)
     +---> HTTP header -> api.example.com
 ```
 
-Instead of just saying “a password was found”, RuntimeXRay shows you:
+Instead of just saying “a password was found”, RuntimeXRay will show you:
 
 - **Where** the secret came from (file, environment, network)
 - **Which functions** touched it
@@ -148,7 +150,7 @@ If you *are* a reverse engineer, RuntimeXRay can be a quick first pass to highli
 ## Do I need an AI API key to use RuntimeXRay?
 
 No, the AI analyst is **optional**.  
-The core engine works entirely offline and produces structured results (JSON, HTML, plain text).  
+The core engine works entirely offline and produces structured results (JSON and plain text; HTML planned).  
 If you provide an API key (e.g., DeepSeek), RuntimeXRay can generate **human‑readable explanations** for each finding, but this is a bonus layer, not a requirement.
 
 ---
