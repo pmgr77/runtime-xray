@@ -227,22 +227,19 @@ namespace runtimexray {
 
             backend->trace(config);
 
-            if (backend->name() == "ptrace") {
-                // Access timeout info from config, but PtraceBackend currently doesn't expose timed_out.
-                // We can keep the old Tachikoma timing logic in backend or derive from status.
-                // For now, we can print timeout if status == -2
-                if (backend->is_timed_out() && common.output_format != "json") {
-                    std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
-                }
+            // ---- Timeout handling (works for any backend) ----
+            if (backend->is_timed_out() && common.output_format != "json") {
+                std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
+            }
+
+            // ---- Child output handling (works for any backend that saves it) ----
+            std::string child_output = backend->child_output_path();
+            if (!child_output.empty()) {
                 if (common.output_format != "json") {
-                    std::cout << "\n[Child stdout/stderr saved to " << backend->child_output_path() << "]\n";
+                    std::cout << "\n[Child stdout/stderr saved to " << child_output << "]\n";
                 }
-                // Anylyze save child process output
-                std::string child_output = backend->child_output_path();
-                if (!child_output.empty()) {
-                    auto extra_findings = scan_child_output_for_secrets(child_output);
-                    findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
-                }
+                auto extra_findings = scan_child_output_for_secrets(child_output);
+                findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
             }
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << '\n';

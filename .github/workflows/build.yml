@@ -27,20 +27,32 @@ jobs:
       - name: Build and Test
         run: |
           PLATFORM=${{ matrix.arch == 'arm64' && 'linux/arm64' || 'linux/amd64' }}
-          SKIP_FLAG=""
+
+          # Default flags
+          SKIP_FLAGS=""
+          BUILD_FLAGS=""
+
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            SKIP_FLAG="-DSKIP_PTRACE_TESTS=ON"
+            SKIP_FLAGS="-DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
+            BUILD_FLAGS="-DBUILD_EBPF_BACKEND=OFF"
           fi
 
           docker run --rm --platform "$PLATFORM" \
-            -e SKIP_FLAG="$SKIP_FLAG" \
+            -e SKIP_FLAGS="$SKIP_FLAGS" \
+            -e BUILD_FLAGS="$BUILD_FLAGS" \
             -v ${{ github.workspace }}:/workspace -w /workspace \
             ubuntu:24.04 \
             bash -c "
               set -e
               apt-get update
               apt-get install -y build-essential cmake g++ git python3
-              cmake -B build -DCMAKE_BUILD_TYPE=Release \$SKIP_FLAG
+
+              # Install eBPF dependencies only for x86_64
+              if [ \"${{ matrix.arch }}\" = \"x86_64\" ]; then
+                apt-get install -y libbpf-dev clang libelf-dev zlib1g-dev xxd
+              fi
+
+              cmake -B build -DCMAKE_BUILD_TYPE=Release \$BUILD_FLAGS \$SKIP_FLAGS
               cmake --build build -j\$(nproc)
               cd build
               ctest --output-on-failure
