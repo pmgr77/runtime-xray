@@ -188,7 +188,11 @@ public:
             }
         }
 
-        // Cleanup eBPF resources.
+        // Drain any remaining events from the ring buffer before cleanup
+        while (ring_buffer__poll(ring_buffer_, 0) > 0) {
+            // busy-wait until all currently available events are consumed
+        }
+        // Cleanup eBPF resources
         ring_buffer__free(ring_buffer_);
         bpf_link__destroy(link_enter_);
         bpf_link__destroy(link_exit_);
