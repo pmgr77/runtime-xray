@@ -37,6 +37,7 @@ add_executable(runtimexray
     src/builtin_analyzers.cpp
     src/finding_filter.cpp
     src/reporter.cpp
+    src/ptrace_backend.cpp
 )
 target_include_directories(runtimexray PRIVATE include)
 target_compile_options(runtimexray PRIVATE -Wall -Wextra)

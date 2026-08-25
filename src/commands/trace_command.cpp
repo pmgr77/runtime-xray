@@ -24,6 +24,7 @@
 #include "commands/trace_command.hpp"
 #include "reporter.hpp"
 #include "syscall_names.hpp"
+#include "itrace_backend.hpp"
 #include "tachikoma.hpp"
 #include "finding.hpp"
 #include "analyzer_registry.hpp"
@@ -41,6 +42,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+
 namespace {
     runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
         runtimexray::FindingList results;
@@ -122,13 +124,18 @@ namespace runtimexray {
             full_args.push_back(program_);
             full_args.insert(full_args.end(), program_args_.begin(), program_args_.end());
 
-            runtimexray::Tachikoma tracer(program_, full_args);
-            tracer.set_timeout(timeout_);
-            tracer.run([&tracer, &findings, common](const runtimexray::SyscallEvent& ev) {
+            // Prepare the tracing backend (currently only ptrace, but future ebpf).
+            auto backend = runtimexray::create_default_tracer_backend();
+            TraceConfig config;
+            config.program = program_;
+            config.args = full_args;
+            config.timeout = timeout_;
+            config.callback = [&](const runtimexray::SyscallEvent& ev) {
+                // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
 
                 if (!common.verbose && !runtimexray::is_interesting_syscall(num)) {
-                    return; // skip 
+                    return; // skip non-interesting syscalls
                 }
 
                 const char *syscall_name = runtimexray::syscall_name(static_cast<long>(ev.syscall_number));
@@ -137,7 +144,7 @@ namespace runtimexray {
                 if (ev.is_entry) {
                     if (std::strcmp(syscall_name, "open") == 0 || std::strcmp(syscall_name,"openat") == 0) {
                         uint64_t path_addr = (std::strcmp(syscall_name, "open") == 0) ? ev.arg0 : ev.arg1;
-                        std::string path = tracer.read_string(path_addr);
+                        std::string path = backend->read_string(path_addr);
                         if (!path.empty()) {
                             extra = " path=\"" + path + "\"";
                             runtimexray::FileAccessEvidence fe{path, 0, ev.pid};
@@ -148,7 +155,7 @@ namespace runtimexray {
                         uint64_t sockaddr_ptr = ev.arg1;
                         uint64_t addrlen = ev.arg2;
                         if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-                            auto bytes = tracer.read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
+                            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
                             auto parsed = runtimexray::parse_sockaddr(bytes);
                             if (parsed.valid) {
                                 extra = " addr=" + parsed.ip + ":" + std::to_string(parsed.port);
@@ -162,7 +169,7 @@ namespace runtimexray {
                         uint64_t sockaddr_ptr = ev.arg4;
                         uint64_t addrlen = ev.arg5;
                         if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-                            auto bytes = tracer.read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
+                            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
                             auto parsed = runtimexray::parse_sockaddr(bytes);
                             if (parsed.valid) {
                                 extra = " dest addr=" + parsed.ip + ":" + std::to_string(parsed.port);
@@ -176,7 +183,7 @@ namespace runtimexray {
                         uint64_t buf_ptr = ev.arg1;
                         uint64_t count = ev.arg2;
                         if (buf_ptr > 0 && count > 0 && count <= 4096) {
-                            auto bytes = tracer.read_memory(buf_ptr, static_cast<size_t>(count));
+                            auto bytes = backend->read_memory(buf_ptr, static_cast<size_t>(count));
                             if (!bytes.empty()) {
                                 std::string data_str = runtimexray::sanitize_data(bytes);
                                 extra = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
@@ -186,6 +193,7 @@ namespace runtimexray {
                             }
                         }
                     }
+
                     if (common.output_format != "json") {
                         std::cout << "syscall " << ev.syscall_number << ": "
                                 << syscall_name
@@ -200,19 +208,26 @@ namespace runtimexray {
                                 << ev.return_value << '\n';
                     }
                 }
-            });
+            };
 
-            if (tracer.is_timed_out() && common.output_format != "json") {
-                std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
-            }
-            if (common.output_format != "json") {
-                std::cout << "\n[Child stdout/stderr saved to " << tracer.child_output_path() << "]\n";
-            }
-            // Anylyze save child process output
-            std::string child_output = tracer.child_output_path();
-            if (!child_output.empty()) {
-                auto extra_findings = scan_child_output_for_secrets(child_output);
-                findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
+            backend->trace(config);
+
+            if (backend->name() == "ptrace") {
+                // Access timeout info from config, but PtraceBackend currently doesn't expose timed_out.
+                // We can keep the old Tachikoma timing logic in backend or derive from status.
+                // For now, we can print timeout if status == -2
+                if (backend->is_timed_out() && common.output_format != "json") {
+                    std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
+                }
+                if (common.output_format != "json") {
+                    std::cout << "\n[Child stdout/stderr saved to " << backend->child_output_path() << "]\n";
+                }
+                // Anylyze save child process output
+                std::string child_output = backend->child_output_path();
+                if (!child_output.empty()) {
+                    auto extra_findings = scan_child_output_for_secrets(child_output);
+                    findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
+                }
             }
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << '\n';

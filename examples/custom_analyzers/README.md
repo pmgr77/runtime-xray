@@ -58,6 +58,7 @@ cmake .. -DBUILD_EXAMPLES=ON
 cmake --build .
 ./examples/custom_analyzers/custom_analyzer_demo
 ```
+
 ## Notes
 
 - All code is licensed under Apache 2.0, same as RuntimeXRay.
