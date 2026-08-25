@@ -54,6 +54,7 @@ namespace runtimexray
         std::chrono::seconds timeout_{0};
         std::string program_;
         std::vector<std::string> program_args_;
+        std::string backend_name_ = "ptrace";
     };
 
 } // namespace runtimexray

@@ -13,6 +13,65 @@ endif()
 
 enable_testing()
 
+# ---- eBPF support ----
+find_program(CLANG_EXECUTABLE clang REQUIRED)
+find_program(XXD_EXECUTABLE xxd)
+if(NOT XXD_EXECUTABLE)
+    find_program(PYTHON3_EXECUTABLE python3 REQUIRED)
+endif()
+
+# Find libbpf and related libraries
+find_path(LIBBPF_INCLUDE_DIR bpf/bpf_helpers.h)
+find_library(LIBBPF_LIBRARY bpf)
+find_library(ELF_LIBRARY elf)
+find_library(ZLIB_LIBRARY z)
+
+if(NOT LIBBPF_INCLUDE_DIR OR NOT LIBBPF_LIBRARY)
+    message(FATAL_ERROR "libbpf not found. Install libbpf-dev.")
+endif()
+
+# Determine the multiarch include directory for asm/types.h
+execute_process(
+    COMMAND uname -m
+    OUTPUT_VARIABLE MACHINE_ARCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+set(EBPF_ARCH_INCLUDE "/usr/include/${MACHINE_ARCH}-linux-gnu")
+
+set(EBPF_SOURCE ${CMAKE_SOURCE_DIR}/ebpf/trace.bpf.c)
+set(EBPF_OBJECT ${CMAKE_BINARY_DIR}/trace.bpf.o)
+set(EBPF_HEADER ${CMAKE_BINARY_DIR}/trace_bpf_bytecode.h)
+
+add_custom_command(
+    OUTPUT ${EBPF_OBJECT}
+    COMMAND ${CLANG_EXECUTABLE} -g -O2 -target bpf
+            -I/usr/include/bpf
+            -I${EBPF_ARCH_INCLUDE}
+            -c ${EBPF_SOURCE} -o ${EBPF_OBJECT}
+    DEPENDS ${EBPF_SOURCE}
+    COMMENT "Compiling eBPF program"
+)
+
+if(XXD_EXECUTABLE)
+    add_custom_command(
+        OUTPUT ${EBPF_HEADER}
+        COMMAND ${XXD_EXECUTABLE} -i -n trace_bpf_bytecode ${EBPF_OBJECT} > ${EBPF_HEADER}
+        DEPENDS ${EBPF_OBJECT}
+        COMMENT "Generating eBPF bytecode header"
+    )
+else()
+    add_custom_command(
+        OUTPUT ${EBPF_HEADER}
+        COMMAND ${PYTHON3_EXECUTABLE} -c
+                "import sys; data = open('${EBPF_OBJECT}', 'rb').read(); print('unsigned char trace_bpf_bytecode[] = {', ', '.join('0x{:02x}'.format(b) for b in data), '};'); print('unsigned int trace_bpf_bytecode_len = {};'.format(len(data)))" > ${EBPF_HEADER}
+        DEPENDS ${EBPF_OBJECT}
+        COMMENT "Generating eBPF bytecode header using python3"
+    )
+endif()
+
+add_custom_target(ebpf_bytecode DEPENDS ${EBPF_HEADER})
+# ---- End of eBPF support ----
+
 include(FetchContent)
 FetchContent_Declare(
   nlohmann_json
@@ -38,11 +97,14 @@ add_executable(runtimexray
     src/finding_filter.cpp
     src/reporter.cpp
     src/ptrace_backend.cpp
+    src/ebpf_backend.cpp
 )
 target_include_directories(runtimexray PRIVATE include)
+add_dependencies(runtimexray ebpf_bytecode)
+target_include_directories(runtimexray PRIVATE ${CMAKE_BINARY_DIR})
 target_compile_options(runtimexray PRIVATE -Wall -Wextra)
 target_compile_definitions(runtimexray PRIVATE _GNU_SOURCE)
-target_link_libraries(runtimexray PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(runtimexray PRIVATE nlohmann_json::nlohmann_json ${LIBBPF_LIBRARY} ${ELF_LIBRARY} ${ZLIB_LIBRARY})
 
 # CLI-level test for `runtimexray mem`
 add_test(NAME check_cli_mem_finds_cmdline_secret
@@ -121,6 +183,14 @@ enable_language(C)
 add_executable(dynamic_target tests/dynamic_analysis/dynamic_target.c)
 set_target_properties(dynamic_target PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tests/dynamic_analysis)
 target_compile_options(dynamic_target PRIVATE -O0)   # optimization disabled
+
+# eBPF backend smoke test (skipped if eBPF not available)
+add_test(NAME check_ebpf_trace_smoke
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_smoke.sh $<TARGET_FILE:runtimexray>)
+set_tests_properties(check_ebpf_trace_smoke PROPERTIES
+    SKIP_RETURN_CODE 125
+    TIMEOUT 10
+)
 
 if(NOT SKIP_PTRACE_TESTS)
     add_test(NAME check_xray_trace_smoke

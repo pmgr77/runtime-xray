@@ -37,6 +37,7 @@ It focuses on technical milestones and is subject to change.
   - `write` buffer reading (first 4 KB)
   - child stdout/stderr capture and scanning for sensitive keywords
   - timeout support (`--timeout <seconds>`)
+  - eBPF backend (experimental): `--backend ebpf` using libbpf, embedded bytecode
   - dynamic findings: sensitive file access, suspicious network connections, sensitive data writes
   - JSON output
 
@@ -98,7 +99,7 @@ It focuses on technical milestones and is subject to change.
 - **Counter-measures against evasive binaries**:
   - Use `PTRACE_SEIZE` and `PTRACE_O_TRACEFORK` for less intrusive tracing
   - Detect anti-debugging/anti-tracing behaviour (e.g., `TracerPid` checks, self-ptrace)
-  - Explore eBPF as a harder-to-evade tracing backend
+  - Enhance eBPF backend: support attaching to running processes and function‑level tracing (uprobes)
 
 - **Memory scanning further improvements**:
   - Flag RWX anonymous memory

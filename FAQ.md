@@ -159,8 +159,7 @@ If you provide an API key (e.g., DeepSeek), RuntimeXRay can generate **human‑r
 
 The current MVP is designed for **controlled lab/sandbox environments**.  
 Production analysis is out of scope for now, because tracing and memory inspection can affect performance and stability.  
-We plan to explore low‑overhead tracing backends (e.g., eBPF) in the future to enable production‑friendly analysis.
-
+An experimental eBPF backend (`--backend ebpf`) is now available for low‑overhead tracing, but production use is still limited. We plan to enhance it with process attach and function‑level tracing (uprobes) in the future.
 ---
 
 ## How do I report a security vulnerability in RuntimeXRay itself?

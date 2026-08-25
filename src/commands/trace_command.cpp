@@ -98,6 +98,16 @@ namespace runtimexray {
                     std::cerr << "Error: Invalid value for --timeout option: " << args[i] << std::endl;
                     return false;
                 }
+            } else if (arg == "--backend") {
+                if ((i + 1) >= args.size()) {
+                    std::cerr << "Error: Missing value for --backend option." << std::endl;
+                    return false;
+                }
+                backend_name_ = args[++i];
+                if (backend_name_ != "ptrace" && backend_name_ != "ebpf") {
+                    std::cerr << "Error: Invalid backend. Supported: ptrace, ebpf." << std::endl;
+                    return false;
+                }
             } else if (program_.empty()) {
                 program_ = arg;
             } else {
@@ -125,7 +135,12 @@ namespace runtimexray {
             full_args.insert(full_args.end(), program_args_.begin(), program_args_.end());
 
             // Prepare the tracing backend (currently only ptrace, but future ebpf).
-            auto backend = runtimexray::create_default_tracer_backend();
+            std::unique_ptr<ITraceBackend> backend;
+            if (backend_name_ == "ebpf") {
+                backend = runtimexray::create_ebpf_backend();
+            } else {
+                backend = runtimexray::create_default_tracer_backend();
+            }
             TraceConfig config;
             config.program = program_;
             config.args = full_args;
@@ -276,11 +291,12 @@ namespace runtimexray {
     void TraceCommand::print_help() const
     {
         std::cout << "Usage: runtimexray trace [--verbose] [--min-severity <level>] "
-                 "[--timeout <seconds>] <program> [args...]\n";
+                 "[--timeout <seconds>] --backend <ptrace|ebpf> <program> [args...]\n";
         std::cout << "Options:\n";
         std::cout << "  --verbose             Show all system calls, not just interesting ones.\n";
         std::cout << "  --timeout <seconds>   Stop tracing after the specified time and report findings.\n";
         std::cout << "  --min-severity <level> Minimum severity for findings (Critical, High, Medium, Low, Info). Default: Medium.\n";
+        std::cout << "  --backend <ptrace|ebpf>  Select tracing backend (default: ptrace)\n";        
         std::cout << "  --help                Show this help message.\n";
     }
 } // namespace runtimexray

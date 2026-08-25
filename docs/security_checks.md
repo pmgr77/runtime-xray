@@ -166,6 +166,11 @@ Use `--verbose` to show all system calls, not only interesting ones:
 ```bash
 ./runtimexray trace --verbose /path/to/program
 ```
+For eBPF-based tracing (requires root):
+
+```bash
+sudo ./runtimexray trace --backend ebpf /path/to/program
+```
 
 For JSON output:
 

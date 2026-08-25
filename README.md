@@ -125,6 +125,8 @@ All subcommands support common options:
 - Timeout support (`--timeout <seconds>`)
 - Dynamic findings: sensitive file access, suspicious network connections, sensitive data writes
 - JSON output
+- **Tracing backend selection** – `--backend ptrace` (default) or `--backend ebpf`
+- eBPF backend requires root and a kernel with eBPF support.
 
 #### Memory scanning (`runtimexray mem`)
 
@@ -160,7 +162,6 @@ All subcommands support common options:
 
 - **Data lineage** – track sensitive data from source through transformations to sinks
 - **Network‑boundary detection** – identify unexpected outbound communication
-- **eBPF backend** – low‑overhead tracing using `libbpf`, harder to evade than `ptrace`
 - **AI explanations** – optional LLM integration to explain findings, always evidence‑first
 - **Additional binary formats** – PE (Windows), Mach‑O (macOS)
 - **Public benchmark** – run against popular open‑source projects
@@ -226,6 +227,14 @@ JSON output:
 ```bash
 ./runtimexray trace --timeout 5 --output-format json /bin/cat /etc/passwd
 ```
+
+### Trace with eBPF (requires root)
+
+```bash
+sudo ./runtimexray trace --backend ebpf --timeout 5 /bin/ls
+```
+
+The eBPF backend uses low‑overhead, hard‑to‑evade tracing. It requires root privileges and a kernel with eBPF support.
 
 ### Scan process memory for secrets
 
@@ -333,7 +342,6 @@ Planned areas include:
 * Additional binary formats such as PE and Mach‑O
 * General plugin architecture for custom analyzers
 * Optional AI‑assisted analysis and explanations
-* eBPF backend
 * Public benchmark
 * Web service
 

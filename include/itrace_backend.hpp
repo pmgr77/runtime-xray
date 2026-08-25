@@ -81,6 +81,8 @@ public:
 
 std::unique_ptr<ITraceBackend> create_default_tracer_backend();
 
+std::unique_ptr<ITraceBackend> create_ebpf_backend();
+
 } // namespace runtimexray
 
 #endif // RUNTIMEXRAY_ITRACE_BACKEND_HPP
