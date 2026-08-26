@@ -35,6 +35,8 @@ jobs:
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             SKIP_FLAGS="-DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
             BUILD_FLAGS="-DBUILD_EBPF_BACKEND=OFF"
+          else
+            BUILD_FLAGS="-DBUILD_EBPF_BACKEND=ON"
           fi
 
           docker run --rm --platform "$PLATFORM" --privileged \
@@ -50,6 +52,7 @@ jobs:
               if [ \"${{ matrix.arch }}\" = \"x86_64\" ]; then
                 apt-get install -y libbpf-dev clang libelf-dev zlib1g-dev xxd
               fi
+              rm -rf build
               cmake -B build -DCMAKE_BUILD_TYPE=Release \$BUILD_FLAGS \$SKIP_FLAGS
               cmake --build build -j\$(nproc)
               cd build
