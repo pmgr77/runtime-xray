@@ -35,6 +35,14 @@ if [ $status -ne 0 ]; then
     exit 1
 fi
 
+# ---- debug: print eBPF debug log if it exists ----
+if [ -f /tmp/ebpf_debug.log ]; then
+    echo "---- eBPF debug log ----"
+    cat /tmp/ebpf_debug.log
+    echo "---- end log ----"
+    rm -f /tmp/ebpf_debug.log   # clean up for next run
+fi
+
 # Check that we got some syscall output
 if echo "$output" | grep -q "syscall"; then
     exit 0

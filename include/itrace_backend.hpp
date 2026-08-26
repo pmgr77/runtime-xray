@@ -26,6 +26,7 @@ struct TraceConfig {
     std::vector<std::string> args;
     std::chrono::seconds timeout{0};
     TraceEventCallback callback;
+    bool debug = false;
 };
 
 /**

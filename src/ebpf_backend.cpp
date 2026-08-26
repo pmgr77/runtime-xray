@@ -220,7 +220,7 @@ public:
             }
         }
         // ----- end debug -----
-        
+
         // Cleanup eBPF resources
         ring_buffer__free(ring_buffer_);
         bpf_link__destroy(link_enter_);
@@ -299,8 +299,13 @@ private:
         }
 
         struct syscall_event* ev = static_cast<struct syscall_event*>(data);
-        // --- DEBUG: print to stderr when an event is received ---
-        fprintf(stderr, "DEBUG: event received, syscall %d\n", ev->syscall_id);
+        // Write to file - debug
+        static FILE* log = fopen("/tmp/ebpf_debug.log", "a");
+        if (log) {
+            fprintf(log, "handle_event: pid=%d, syscall=%d, entry=%d\n",
+                    ev->pid, ev->syscall_id, ev->is_entry);
+            fflush(log);
+        }
         // --- end debug ---        
         runtimexray::SyscallEvent event;
         event.pid = static_cast<pid_t>(ev->pid);
