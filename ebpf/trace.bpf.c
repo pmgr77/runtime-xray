@@ -43,10 +43,26 @@ struct {
     __type(key, __u32);
     __type(value, __u32);
 } pid_filter SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+} enter_counter SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+} exit_counter SEC(".maps");
 
 SEC("tracepoint/raw_syscalls/sys_enter")
 int trace_sys_enter(struct sys_enter_ctx *ctx) {
     __u32 zero = 0;
+    __u64 *cnt = bpf_map_lookup_elem(&enter_counter, &zero);
+    if (cnt) (*cnt)++;
+
     __u32 *target = bpf_map_lookup_elem(&pid_filter, &zero);
     if (!target) return 0;
 
@@ -72,6 +88,9 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
 SEC("tracepoint/raw_syscalls/sys_exit")
 int trace_sys_exit(struct sys_exit_ctx *ctx) {
     __u32 zero = 0;
+    __u64 *cnt = bpf_map_lookup_elem(&exit_counter, &zero);
+    if (cnt) (*cnt)++;
+
     __u32 *target = bpf_map_lookup_elem(&pid_filter, &zero);
     if (!target) return 0;
 
