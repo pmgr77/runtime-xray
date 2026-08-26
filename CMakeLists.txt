@@ -123,6 +123,7 @@ if(BUILD_EBPF_BACKEND)
         ${ELF_LIBRARY}
         ${ZLIB_LIBRARY}
     )
+    target_compile_definitions(runtimexray PRIVATE BUILD_EBPF_BACKEND=1)
 endif()
 
 target_link_libraries(runtimexray PRIVATE nlohmann_json::nlohmann_json)
