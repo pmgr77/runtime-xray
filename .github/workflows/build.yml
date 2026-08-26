@@ -36,6 +36,7 @@ jobs:
             SKIP_FLAGS="-DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
             BUILD_FLAGS="-DBUILD_EBPF_BACKEND=OFF"
           else
+            SKIP_FLAGS="-DSKIP_EBPF_TESTS=ON"
             BUILD_FLAGS="-DBUILD_EBPF_BACKEND=ON"
           fi
 

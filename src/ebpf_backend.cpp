@@ -198,29 +198,6 @@ public:
             // busy-wait until all currently available events are consumed
         }
 
-        // ----- DEBUG: read counter maps -----
-        __u32 zero = 0;
-        __u64 enter_val = 0, exit_val = 0;
-        if (bpf_map_enter_counter_) {
-            int err = bpf_map__lookup_elem(bpf_map_enter_counter_, &zero, sizeof(zero),
-                                        &enter_val, sizeof(enter_val), 0);
-            if (err == 0) {
-                std::cerr << "DEBUG: BPF enter_counter = " << enter_val << "\n";
-            } else {
-                std::cerr << "DEBUG: Failed to read enter_counter (err=" << err << ")\n";
-            }
-        }
-        if (bpf_map_exit_counter_) {
-            int err = bpf_map__lookup_elem(bpf_map_exit_counter_, &zero, sizeof(zero),
-                                        &exit_val, sizeof(exit_val), 0);
-            if (err == 0) {
-                std::cerr << "DEBUG: BPF exit_counter = " << exit_val << "\n";
-            } else {
-                std::cerr << "DEBUG: Failed to read exit_counter (err=" << err << ")\n";
-            }
-        }
-        // ----- end debug -----
-
         // Cleanup eBPF resources
         ring_buffer__free(ring_buffer_);
         bpf_link__destroy(link_enter_);
@@ -299,12 +276,14 @@ private:
         }
 
         struct syscall_event* ev = static_cast<struct syscall_event*>(data);
-        // Write to file - debug
-        static FILE* log = fopen("/tmp/ebpf_debug.log", "a");
-        if (log) {
-            fprintf(log, "handle_event: pid=%d, syscall=%d, entry=%d\n",
-                    ev->pid, ev->syscall_id, ev->is_entry);
-            fflush(log);
+        // ---- Conditional debug logging ----
+        if (getenv("EBPF_DEBUG")) {
+            static FILE* log = fopen("/tmp/ebpf_debug.log", "a");
+            if (log) {
+                fprintf(log, "handle_event: pid=%d, syscall=%d, entry=%d\n",
+                        ev->pid, ev->syscall_id, ev->is_entry);
+                fflush(log);
+            }
         }
         // --- end debug ---        
         runtimexray::SyscallEvent event;
