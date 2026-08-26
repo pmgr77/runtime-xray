@@ -11,15 +11,18 @@ if [ -z "$RUNTIMEXRAY_BIN" ]; then
     exit 125
 fi
 
-if [ "$(id -u)" -ne 0 ]; then
-    if ! sudo -n true 2>/dev/null; then
-        echo "Skipping eBPF timeout test: root or passwordless sudo required."
-        exit 125
-    fi
+# Determine if we need sudo
+if [ "$(id -u)" -eq 0 ]; then
+    RUN_PREFIX=""
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    RUN_PREFIX="sudo -n"
+else
+    echo "Skipping eBPF timeout JSON test: root or passwordless sudo required."
+    exit 125
 fi
 
 # Run a command that sleeps longer than the timeout
-OUTPUT=$(sudo -n "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 /bin/sleep 10 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 /bin/sleep 10 2>&1)
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then

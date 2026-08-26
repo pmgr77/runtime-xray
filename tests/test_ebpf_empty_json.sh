@@ -11,15 +11,18 @@ if [ -z "$RUNTIMEXRAY_BIN" ]; then
     exit 125
 fi
 
-if [ "$(id -u)" -ne 0 ]; then
-    if ! sudo -n true 2>/dev/null; then
-        echo "Skipping eBPF empty JSON test: root or passwordless sudo required."
-        exit 125
-    fi
+# Determine if we need sudo
+if [ "$(id -u)" -eq 0 ]; then
+    RUN_PREFIX=""
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    RUN_PREFIX="sudo -n"
+else
+    echo "Skipping eBPF empty JSON test: root or passwordless sudo required."
+    exit 125
 fi
 
 # Run a simple command that should not generate sensitive findings
-OUTPUT=$(sudo -n "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 --output-format json /bin/true 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 --output-format json /bin/true 2>&1)
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then

@@ -11,16 +11,18 @@ if [ -z "$RUNTIMEXRAY_BIN" ]; then
     exit 125
 fi
 
-# Check if root or passwordless sudo is available
-if [ "$(id -u)" -ne 0 ]; then
-    if ! sudo -n true 2>/dev/null; then
-        echo "Skipping eBPF JSON verbose test: root or passwordless sudo required."
-        exit 125
-    fi
+# Determine if we need sudo
+if [ "$(id -u)" -eq 0 ]; then
+    RUN_PREFIX=""
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    RUN_PREFIX="sudo -n"
+else
+    echo "Skipping eBPF verbose JSON test: root or passwordless sudo required."
+    exit 125
 fi
 
 # Run trace with eBPF, JSON, and verbose on curl (opens /etc/resolv.conf, /etc/hosts)
-OUTPUT=$(sudo -n "$RUNTIMEXRAY_BIN" trace --backend ebpf --verbose --timeout 5 --output-format json /usr/bin/curl https://example.com 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --verbose --timeout 5 --output-format json /usr/bin/curl https://example.com 2>&1)
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then
