@@ -24,7 +24,9 @@
 #include "commands/trace_command.hpp"
 #include "reporter.hpp"
 #include "syscall_names.hpp"
-#include "itrace_backend.hpp"
+#ifdef BUILD_EBPF_BACKEND
+#include "itrace_backend.hpp" // declares create_ebpf_backend()
+#endif // BUILD_EBPF_BACKEND
 #include "tachikoma.hpp"
 #include "finding.hpp"
 #include "analyzer_registry.hpp"
@@ -134,10 +136,15 @@ namespace runtimexray {
             full_args.push_back(program_);
             full_args.insert(full_args.end(), program_args_.begin(), program_args_.end());
 
-            // Prepare the tracing backend (currently only ptrace, but future ebpf).
+            // Prepare the tracing backend
             std::unique_ptr<ITraceBackend> backend;
             if (backend_name_ == "ebpf") {
+#ifdef BUILD_EBPF_BACKEND
                 backend = runtimexray::create_ebpf_backend();
+#else
+                std::cerr << "Error: eBPF backend not built. Recompile with -DBUILD_EBPF_BACKEND=ON.\n";
+                return 1;
+#endif
             } else {
                 backend = runtimexray::create_default_tracer_backend();
             }

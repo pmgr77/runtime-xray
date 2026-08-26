@@ -38,6 +38,7 @@ jobs:
           fi
 
           docker run --rm --platform "$PLATFORM" --privileged \
+            -v /sys/kernel/tracing:/sys/kernel/tracing \
             -e SKIP_FLAGS="$SKIP_FLAGS" \
             -e BUILD_FLAGS="$BUILD_FLAGS" \
             -v ${{ github.workspace }}:/workspace -w /workspace \
@@ -46,7 +47,6 @@ jobs:
               set -e
               apt-get update
               apt-get install -y build-essential cmake g++ git python3
-              # Install eBPF dependencies only for x86_64
               if [ \"${{ matrix.arch }}\" = \"x86_64\" ]; then
                 apt-get install -y libbpf-dev clang libelf-dev zlib1g-dev xxd
               fi
