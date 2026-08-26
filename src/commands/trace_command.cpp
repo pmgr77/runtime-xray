@@ -24,9 +24,7 @@
 #include "commands/trace_command.hpp"
 #include "reporter.hpp"
 #include "syscall_names.hpp"
-#ifdef BUILD_EBPF_BACKEND
 #include "itrace_backend.hpp" // declares create_ebpf_backend()
-#endif // BUILD_EBPF_BACKEND
 #include "tachikoma.hpp"
 #include "finding.hpp"
 #include "analyzer_registry.hpp"
