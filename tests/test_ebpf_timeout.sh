@@ -11,6 +11,8 @@ if [ -z "$RUNTIMEXRAY_BIN" ]; then
     exit 125
 fi
 
+set -x   # echo every command
+
 # Determine if we need sudo
 if [ "$(id -u)" -eq 0 ]; then
     RUN_PREFIX=""
