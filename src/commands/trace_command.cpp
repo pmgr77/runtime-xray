@@ -42,6 +42,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <optional>
 
 namespace {
     runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
@@ -131,6 +132,9 @@ namespace runtimexray {
         auto start_time = std::chrono::steady_clock::now();
 
         runtimexray::FindingList findings;
+        std::optional<nlohmann::json> extra;
+        bool timed_out = false;
+        std::string child_output;
 
         try {
             std::vector<std::string> full_args;
@@ -236,20 +240,22 @@ namespace runtimexray {
             };
 
             backend->trace(config);
-
-            // ---- Timeout handling (works for any backend) ----
-            if (backend->is_timed_out() && common.output_format != "json") {
-                std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
-            }
+            // Cache timeout status for later use
+            timed_out = backend->is_timed_out();
 
             // ---- Child output handling (works for any backend that saves it) ----
-            std::string child_output = backend->child_output_path();
+            child_output = backend->child_output_path();
             if (!child_output.empty()) {
-                if (common.output_format != "json") {
-                    std::cout << "\n[Child stdout/stderr saved to " << child_output << "]\n";
-                }
                 auto extra_findings = scan_child_output_for_secrets(child_output);
                 findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
+            }
+            // ---- Build extra JSON ----
+            if (common.output_format == "json") {
+                extra.emplace();
+                (*extra)["backend"] = backend_name_;
+                (*extra)["timeout_seconds"] = static_cast<int>(timeout_.count());
+                (*extra)["timed_out"] = backend->is_timed_out();
+                (*extra)["child_output"] = "Child stdout/stderr saved to " + child_output;
             }
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << '\n';
@@ -270,7 +276,7 @@ namespace runtimexray {
         ctx.duration_ms = duration_ms;
 
         if (common.output_format == "json") {
-            std::cout << Reporter::to_json(findings, ctx);
+            std::cout << Reporter::to_json(findings, ctx, extra.has_value() ? &*extra : nullptr);
         } else {
             if (!findings.empty()) {
                 std::cout << "\n== Dynamic Findings ==\n";
@@ -289,7 +295,17 @@ namespace runtimexray {
                     }, f.details);
                 }
             }
-            std::cout << "Trace command: " << program_ << " timeout=" << timeout_.count() << "\n";
+            // Print trace metadata
+            std::cout << "\nTrace metadata:\n";
+            std::cout << "  Backend: " << backend_name_ << "\n";
+            std::cout << "  Timeout: " << timeout_.count() << "s\n";
+            std::cout << "  Timed out: " << (timed_out ? "yes" : "no") << "\n";
+            std::cout << "  Child stdout/stderr saved to: " << child_output << "\n";
+            std::cout << "  Command: " << program_ << "\n";
+            // ---- Print timeout message (for text output) ----
+            if (timed_out) {
+                std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
+            }
         }
 
         return 0;

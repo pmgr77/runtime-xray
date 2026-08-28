@@ -98,18 +98,7 @@ namespace runtimexray {
         return out.str();
     }
 
-    std::string Reporter::to_json(const FindingList& findings, const ReportContext& context) {
-        nlohmann::json j;
-
-        j["schema_version"] = "1.0";
-        j["tool"] = context.tool_name;
-        j["tool_version"] = context.tool_version;
-        j["command"] = context.command;
-        j["target"] = context.target;
-        j["started_at"] = context.started_at;
-        j["duration_ms"] = context.duration_ms;
-
-        nlohmann::json findings_arr = nlohmann::json::array();
+    void Reporter::serialize_findings(const FindingList& findings, nlohmann::json& findings_arr) {
         for (const auto& f : findings) {
             nlohmann::json fj;
             fj["severity"] = severity_to_string(f.severity);
@@ -151,7 +140,22 @@ namespace runtimexray {
 
             findings_arr.push_back(fj);
         }
+    }
 
+    std::string Reporter::to_json(const FindingList& findings, const ReportContext& context,
+                                  const nlohmann::json* extra) {
+        nlohmann::json j;
+
+        j["schema_version"] = "1.1";
+        j["tool"] = context.tool_name;
+        j["tool_version"] = context.tool_version;
+        j["command"] = context.command;
+        j["target"] = context.target;
+        j["started_at"] = context.started_at;
+        j["duration_ms"] = context.duration_ms;
+
+        nlohmann::json findings_arr = nlohmann::json::array();
+        serialize_findings(findings, findings_arr);
         j["findings"] = findings_arr;
 
         // Summary
@@ -173,6 +177,12 @@ namespace runtimexray {
         j["summary"]["total"] = findings.size();
         for (const auto& [k, v] : by_severity) j["summary"]["by_severity"][k] = v;
         for (const auto& [k, v] : by_type) j["summary"]["by_type"][k] = v;
+
+        if (extra) {
+           for (auto& [key, value] : extra->items()) {
+                j[key] = value;
+            }
+        }
 
         return j.dump(4);
     }    

@@ -26,6 +26,7 @@
 #define RUNTIMEXRAY_REPORTER_HPP
 
 #include "finding.hpp"
+#include <nlohmann/json.hpp>
 #include <string>
 
 namespace runtimexray {
@@ -47,10 +48,12 @@ public:
     static std::string to_text(const FindingList& findings, bool verbose);
 
     // Generates a JSON report
-    static std::string to_json(const FindingList& findings, const ReportContext& context);
+    static std::string to_json(const FindingList& findings, const ReportContext& context, const nlohmann::json* extra = nullptr);
 
 private:
     static std::string severity_to_string(FindingSeverity severity);
+
+    static void serialize_findings(const FindingList& findings, nlohmann::json& findings_arr);
 };
 
 } // namespace runtimexray
