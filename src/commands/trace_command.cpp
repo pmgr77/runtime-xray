@@ -159,6 +159,7 @@ namespace runtimexray {
             config.args = full_args;
             config.timeout = timeout_;
             config.follow_forks = follow_forks_;
+            config.debug = common.verbose && (common.output_format != "json");
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
@@ -226,14 +227,14 @@ namespace runtimexray {
                     if (common.output_format != "json") {
                         std::cout << "syscall " << ev.syscall_number << ": "
                                 << syscall_name
-                                << " entry (pid=" << ev.pid << ") " 
+                                << " entry (pid=" << ev.pid << ", tid=" << ev.tid << ") "
                                 << extra << '\n';
                     }
                 } else {
                     if (common.output_format != "json") {
                         std::cout << "syscall " << ev.syscall_number << ": "
                                 << syscall_name
-                                << " exit (pid=" << ev.pid << ") = " 
+                                << " entry (pid=" << ev.pid << ", tid=" << ev.tid << ") "
                                 << ev.return_value << '\n';
                     }
                 }

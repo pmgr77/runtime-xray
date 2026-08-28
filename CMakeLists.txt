@@ -205,6 +205,19 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
     add_test(NAME check_ebpf_empty_json
              COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_empty_json.sh $<TARGET_FILE:runtimexray>)
     set_tests_properties(check_ebpf_empty_json PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+    # eBPF fork/thread tests
+    add_test(NAME check_ebpf_follow_forks
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+    set_tests_properties(check_ebpf_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
+
+    add_test(NAME check_ebpf_no_follow_forks
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_no_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+    set_tests_properties(check_ebpf_no_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
+
+    add_test(NAME check_ebpf_threads
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
+    set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)    
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)

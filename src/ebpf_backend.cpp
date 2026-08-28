@@ -24,6 +24,7 @@
 
 #include "itrace_backend.hpp"
 #include "trace_bpf_bytecode.h"
+#include "syscall_names.hpp"
 #include <bpf/libbpf.h>
 #include <cstring>
 #include <iostream>
@@ -45,6 +46,7 @@ namespace runtimexray {
 // Must match the layout used in the eBPF program.
 struct syscall_event {
     __u32 pid;
+    __u32 tid;
     __u32 syscall_id;
     __u64 args[6];
     __u64 ret;
@@ -76,6 +78,8 @@ public:
 
     int trace(const TraceConfig& config) override {
         // 1. Fork + exec the target program
+        follow_forks_ = config.follow_forks;
+        debug_enabled_ = config.debug;
         child_pid_ = fork();
         if (child_pid_ == -1) {
             throw std::runtime_error("fork failed: " + std::string(strerror(errno)));
@@ -134,10 +138,9 @@ public:
             std::cerr << "Warning: counter maps not found; debug disabled.\n";
         }
 
-        __u32 key = 0;
-        __u32 value = static_cast<__u32>(child_pid_);
-        if (bpf_map__update_elem(bpf_map_pid_filter_, &key, sizeof(key), &value, sizeof(value), BPF_ANY) != 0) {
-            bpf_object__close(bpf_object_);
+        __u32 key = static_cast<__u32>(child_pid_);
+        __u32 value = key;
+        if (bpf_map__update_elem(bpf_map_pid_filter_, &key, sizeof(key), &value, sizeof(value), BPF_ANY) != 0) {            bpf_object__close(bpf_object_);
             kill(child_pid_, SIGKILL);
             waitpid(child_pid_, nullptr, 0);
             throw std::runtime_error("Failed to set PID filter");
@@ -215,6 +218,42 @@ public:
 
 private:
 
+    void add_pid_to_filter(pid_t pid) {
+        __u32 key = static_cast<__u32>(pid);
+        __u32 value = key;
+        int err = bpf_map__update_elem(bpf_map_pid_filter_, &key, sizeof(key),
+                                       &value, sizeof(value), BPF_ANY);
+        if (err < 0 && debug_enabled_) {
+            std::cerr << "Warning: failed to add PID " << pid
+                      << " to eBPF filter: " << std::strerror(-err) << "\n";            
+        }
+    }
+
+    void handle_fork_event(const struct syscall_event* ev) {
+        const char* name = syscall_name(ev->syscall_id);
+        if (!follow_forks_) {
+            return;
+        }
+        if (ev->is_entry) {
+            return;
+        }
+        if (ev->ret <= 0) {
+            return;
+        }
+        bool is_fork_like = (strcmp(name, "fork") == 0 ||
+                             strcmp(name, "vfork") == 0 ||
+                             strcmp(name, "clone") == 0 ||
+                             strcmp(name, "clone3") == 0);
+
+        // Fallback: check syscall numbers directly (ARM64: clone=220, clone3=435)
+        if (!is_fork_like && (ev->syscall_id == 220 || ev->syscall_id == 435)) {
+            is_fork_like = true;
+        }
+
+        if (is_fork_like) {
+            add_pid_to_filter(static_cast<pid_t>(ev->ret));
+        }
+    }
     // Support functions for process memory reading (like Tachikoma)
 
     static std::vector<std::byte> read_process_memory_bytes(pid_t pid, uint64_t addr, size_t size) {
@@ -288,6 +327,7 @@ private:
         // --- end debug ---        
         runtimexray::SyscallEvent event;
         event.pid = static_cast<pid_t>(ev->pid);
+        event.tid = static_cast<pid_t>(ev->tid);
         event.syscall_number = ev->syscall_id;
         event.is_entry = (ev->is_entry != 0);
         event.arg0 = ev->args[0];
@@ -297,6 +337,7 @@ private:
         event.arg4 = ev->args[4];
         event.arg5 = ev->args[5];
         event.return_value = static_cast<long long>(ev->ret);
+        backend->handle_fork_event(ev);
 
         if (backend->callback_) {
             backend->callback_(event);
@@ -310,6 +351,8 @@ private:
     bool timed_out_ = false;
     std::string child_output_path_;
     TraceEventCallback callback_;
+    bool follow_forks_ = true;
+    bool debug_enabled_ = false;
 
     struct bpf_object* bpf_object_ = nullptr;
     struct bpf_program* bpf_program_enter_ = nullptr;

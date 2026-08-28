@@ -6,7 +6,8 @@
 #define MAX_ARGS 6
 
 struct syscall_event {
-    __u32 pid;
+    __u32 pid;   // tgid
+    __u32 tid;   // thread ID
     __u32 syscall_id;
     __u64 args[MAX_ARGS];
     __u64 ret;
@@ -38,8 +39,8 @@ struct {
 } events SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
     __type(key, __u32);
     __type(value, __u32);
 } pid_filter SEC(".maps");
@@ -63,11 +64,13 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
     __u64 *cnt = bpf_map_lookup_elem(&enter_counter, &zero);
     if (cnt) (*cnt)++;
 
-    __u32 *target = bpf_map_lookup_elem(&pid_filter, &zero);
-    if (!target) return 0;
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
+    __u32 tid = pid_tgid & 0xffffffff;
+
+    __u32 *target = bpf_map_lookup_elem(&pid_filter, &pid);
+    if (!target) return 0;
+
     if (*target != 0 && pid != *target)
         return 0;
 
@@ -76,6 +79,7 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
     if (!ev) return 0;
 
     ev->pid = pid;
+    ev->tid = tid;
     ev->syscall_id = ctx->id;
     ev->is_entry = 1;
     for (int i = 0; i < MAX_ARGS; i++)
@@ -91,11 +95,13 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
     __u64 *cnt = bpf_map_lookup_elem(&exit_counter, &zero);
     if (cnt) (*cnt)++;
 
-    __u32 *target = bpf_map_lookup_elem(&pid_filter, &zero);
-    if (!target) return 0;
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
+    __u32 tid = pid_tgid & 0xffffffff;
+
+    __u32 *target = bpf_map_lookup_elem(&pid_filter, &pid);
+    if (!target) return 0;
+
     if (*target != 0 && pid != *target)
         return 0;
 
@@ -104,6 +110,7 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
     if (!ev) return 0;
 
     ev->pid = pid;
+    ev->tid = tid;
     ev->syscall_id = ctx->id;
     ev->is_entry = 0;
     ev->ret = ctx->ret;

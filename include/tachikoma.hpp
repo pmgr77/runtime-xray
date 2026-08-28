@@ -43,6 +43,7 @@ struct SyscallEvent {
     unsigned long long arg0, arg1, arg2, arg3, arg4, arg5; ///< Arguments (simplified)
     long long return_value;      ///< Return value (valid on exit)
     pid_t pid;              ///< Process ID
+    pid_t tid;              ///< Thread ID
     bool is_entry;          ///< true = syscall entry, false = exit
 };
 

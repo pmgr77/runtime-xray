@@ -366,6 +366,7 @@ const char* syscall_name_x86_64(long num) {
         case 332: return "statx";
         case 333: return "io_pgetevents";
         case 334: return "rseq";
+        case 435: return "clone3";
         default: return "unknown";
     }
 }
@@ -655,6 +656,7 @@ const char* syscall_name_arm64(long num) {
         case 277: return "io_pgetevents";
         case 278: return "rseq";
         case 279: return "kexec_file_load";
+        case 435: return "clone3";
         default: return "unknown";
     }
 }
