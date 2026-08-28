@@ -149,6 +149,7 @@ target_compile_options(test_memory_scanner PRIVATE -Wall -Wextra)
 add_test(NAME check_memory_scanner COMMAND $<TARGET_FILE:test_memory_scanner>)
 
 add_subdirectory(tests/security_checks)
+add_subdirectory(tests/dynamic_analysis)
 
 # Dynamic helpers tests
 add_executable(test_dynamic_helpers
@@ -173,6 +174,19 @@ add_test(NAME check_analyzer_registry COMMAND test_analyzer_registry)
 add_test(NAME check_json_analyze
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
                  analyze $<TARGET_FILE:runtimexray> analyze $<TARGET_FILE:nx_enabled>)
+
+add_test(NAME check_trace_follow_forks
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+set_tests_properties(check_trace_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+add_test(NAME check_trace_no_follow_forks
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_no_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+set_tests_properties(check_trace_no_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+# Thread test
+add_test(NAME check_trace_threads
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
+set_tests_properties(check_trace_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
@@ -217,12 +231,6 @@ if(NOT SKIP_PTRACE_TESTS)
              COMMAND $<TARGET_FILE:test_memory_scanner_self> password=cmdline_secret_test)
     set_tests_properties(check_memory_scanner_self PROPERTIES
         ENVIRONMENT "TEST_SECRET=password=env_secret_test")
-
-    # Dynamic integration test binary
-    enable_language(C)
-    add_executable(dynamic_target tests/dynamic_analysis/dynamic_target.c)
-    set_target_properties(dynamic_target PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tests/dynamic_analysis)
-    target_compile_options(dynamic_target PRIVATE -O0)
 
     add_test(NAME check_xray_trace_smoke
              COMMAND $<TARGET_FILE:runtimexray> trace --verbose /bin/ls)

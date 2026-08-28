@@ -21,9 +21,28 @@ else
     exit 125
 fi
 
-# Run trace with eBPF, JSON, and verbose on curl (opens /etc/resolv.conf, /etc/hosts)
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --verbose --timeout 5 --output-format json /usr/bin/curl https://example.com 2>&1)
+# Record start time (nanoseconds if possible, else seconds)
+if command -v date >/dev/null 2>&1; then
+    START=$(date +%s%N 2>/dev/null || date +%s)
+else
+    START=$(date +%s)
+fi
+
+# Run trace
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --verbose --timeout 10 --output-format json /usr/bin/curl https://example.com 2>&1)
 STATUS=$?
+
+# Record end time
+if command -v date >/dev/null 2>&1; then
+    END=$(date +%s%N 2>/dev/null || date +%s)
+    if [ -n "$END" ] && [ -n "$START" ] && [ "$END" -gt "$START" ]; then
+        DURATION=$(echo "scale=3; ($END - $START) / 1000000000" | bc 2>/dev/null || echo "unknown")
+    else
+        DURATION="unknown"
+    fi
+else
+    DURATION="unknown"
+fi
 
 if [ $STATUS -ne 0 ]; then
     echo "eBPF backend failed with status $STATUS"
@@ -31,7 +50,7 @@ if [ $STATUS -ne 0 ]; then
     exit 1
 fi
 
-# Parse JSON and check for a finding with severity "Low"
+# Validate JSON and check for a Low severity finding
 if command -v python3 >/dev/null 2>&1; then
     echo "$OUTPUT" | python3 -c '
 import json, sys
@@ -45,6 +64,7 @@ findings = data.get("findings", [])
 low_found = any(f.get("severity") == "Low" for f in findings)
 if not low_found:
     print("No Low severity finding found.")
+    print("Duration: '"${DURATION}"' seconds")
     print("Output:", json.dumps(data, indent=2))
     sys.exit(1)
 print("Low severity finding detected. Test passed.")

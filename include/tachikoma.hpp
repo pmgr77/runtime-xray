@@ -27,6 +27,8 @@
 
 #include <string>
 #include <vector>
+#include <set>
+#include <map>
 #include <functional>
 #include <cstdint>
 #include <chrono>
@@ -80,6 +82,9 @@ public:
 
     const auto& timeout() const noexcept { return timeout_; }
 
+    // Enable/disable following forks
+    void set_follow_forks(bool follow);
+
     /**
     * @brief Reads a null-terminated string from the traced process memory.
     * @param address Virtual address of the string in the traced process.
@@ -121,9 +126,18 @@ private:
     bool timed_out_ = false;
     std::chrono::seconds timeout_{0};
     std::string child_output_path_;
+    bool follow_forks_ = true;
+    std::set<pid_t> traced_pids_;   // all processes currently traced
+    std::map<pid_t, bool> in_syscall_state_;
 
     void handle_syscall_stop(const SyscallCallback& cb, bool& in_syscall);
+
+    // Helper to handle ptrace events (fork, clone, etc.)
+    bool handle_ptrace_event(pid_t pid, int status, const SyscallCallback& cb);
+    // Process a syscall stop for a specific PID
+    void handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall);    
 };
+
 } // namespace runtimexray
 
 #endif // RUNTIMEXRAY_TACHIKOMA_HPP

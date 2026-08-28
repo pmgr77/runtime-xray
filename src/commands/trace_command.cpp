@@ -108,6 +108,10 @@ namespace runtimexray {
                     std::cerr << "Error: Invalid backend. Supported: ptrace, ebpf." << std::endl;
                     return false;
                 }
+            } else if (arg == "--follow-forks") {
+               follow_forks_ = true;
+            } else if (arg == "--no-follow-forks") {
+                follow_forks_ = false;
             } else if (program_.empty()) {
                 program_ = arg;
             } else {
@@ -150,6 +154,7 @@ namespace runtimexray {
             config.program = program_;
             config.args = full_args;
             config.timeout = timeout_;
+            config.follow_forks = follow_forks_;
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
@@ -293,11 +298,14 @@ namespace runtimexray {
     void TraceCommand::print_help() const
     {
         std::cout << "Usage: runtimexray trace [--verbose] [--min-severity <level>] "
-                 "[--timeout <seconds>] --backend <ptrace|ebpf> <program> [args...]\n";
+                 "[--timeout <seconds>] [--follow-forks | --no-follow-forks] "
+                 "--backend <ptrace|ebpf> <program> [args...]\n";
         std::cout << "Options:\n";
         std::cout << "  --verbose             Show all system calls, not just interesting ones.\n";
-        std::cout << "  --timeout <seconds>   Stop tracing after the specified time and report findings.\n";
         std::cout << "  --min-severity <level> Minimum severity for findings (Critical, High, Medium, Low, Info). Default: Medium.\n";
+        std::cout << "  --timeout <seconds>   Stop tracing after the specified time and report findings.\n";
+        std::cout << "  --follow-forks          Trace child processes (default: on).\n";
+        std::cout << "  --no-follow-forks       Do not trace child processes.\n";
         std::cout << "  --backend <ptrace|ebpf>  Select tracing backend (default: ptrace)\n";        
         std::cout << "  --help                Show this help message.\n";
     }

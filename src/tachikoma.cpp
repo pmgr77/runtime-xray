@@ -41,6 +41,8 @@
 #include <chrono>
 #include <algorithm>
 #include <sys/uio.h>   // for process_vm_readv and struct iovec
+#include <set>
+#include <map>
 
 #if defined(__aarch64__)
 #include <sys/uio.h>      // for struct iovec
@@ -162,6 +164,19 @@ namespace runtimexray {
                 running_ = false;
                 throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
             }
+            
+            // Set ptrace options to trace forks, vforks, clones, and exits
+            if (ptrace(PTRACE_SETOPTIONS, child_pid_, nullptr,
+                        PTRACE_O_TRACEFORK |
+                        PTRACE_O_TRACEVFORK |
+                        PTRACE_O_TRACECLONE |
+                        PTRACE_O_TRACEEXIT) == -1) {
+                throw std::runtime_error(std::string("PTRACE_SETOPTIONS failed: ") + std::strerror(errno));
+            }
+            
+            traced_pids_.insert(child_pid_);
+            in_syscall_state_[child_pid_] = false;
+            
             if (ptrace(PTRACE_SYSCALL, child_pid_, nullptr, nullptr) == -1) {
                 running_ = false;
                 throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: ") + std::strerror(errno));
@@ -170,9 +185,16 @@ namespace runtimexray {
     }
 
     Tachikoma::~Tachikoma() {
-        if (child_pid_ > 0 && running_) {
-            kill(child_pid_, SIGKILL);
-            waitpid(child_pid_, nullptr, 0);
+        // Kill all traced processes
+        for (pid_t p : traced_pids_) {
+            kill(p, SIGKILL);
+        }
+        // Reap all children to avoid zombies
+        while(!traced_pids_.empty()) {
+            pid_t p = waitpid(-1, nullptr, 0);
+            if (p > 0) {
+                traced_pids_.erase(p);
+            }
         }
     }
 
@@ -181,34 +203,48 @@ namespace runtimexray {
           running_(other.running_),
           timed_out_(other.timed_out_),
           timeout_(other.timeout_),
-          child_output_path_(std::move(other.child_output_path_)) {
+          child_output_path_(std::move(other.child_output_path_)),
+          follow_forks_(other.follow_forks_),
+          traced_pids_(std::move(other.traced_pids_)),
+          in_syscall_state_(std::move(other.in_syscall_state_)) {
         other.child_pid_ = -1;
         other.running_ = false;
         other.timed_out_ = false;
+        other.traced_pids_.clear();
+        other.in_syscall_state_.clear();
     }
 
     Tachikoma& Tachikoma::operator=(Tachikoma&& other) noexcept {
         if (this != &other) {
-            if (child_pid_ > 0 && running_) {
-                kill(child_pid_, SIGKILL);
-                waitpid(child_pid_, nullptr, 0);
+            // Clean up current resources
+            for (pid_t p : traced_pids_) {
+                kill(p, SIGKILL);
             }
+            while (!traced_pids_.empty()) {
+                waitpid(-1, nullptr, -1);
+            }
+
             child_pid_ = other.child_pid_;
             running_ = other.running_;
             timed_out_ = other.timed_out_;
             timeout_ = other.timeout_;
             child_output_path_ = std::move(other.child_output_path_);
+            follow_forks_ = other.follow_forks_;
+            traced_pids_ = std::move(other.traced_pids_);
+            in_syscall_state_ = std::move(other.in_syscall_state_);
 
             other.child_pid_ = -1;
             other.running_ = false;
             other.timed_out_ = false;
+            other.traced_pids_.clear();
+            other.in_syscall_state_.clear();
         }
         return *this;
     }
 
     std::string Tachikoma::read_string(uint64_t address, size_t max_len) const {
-        if (address == 0 || max_len == 0) {
-            return {};
+        if (address == 0 || max_len == 0 || child_pid_ <= 0) {
+            return std::string{};
         }
 
         std::string result;
@@ -245,8 +281,8 @@ namespace runtimexray {
 
     std::vector<std::byte> Tachikoma::read_memory(uint64_t address, size_t size) const {
         std::vector<std::byte> buffer(size);
-        if (address == 0) {
-            return {};
+        if (address == 0 || child_pid_ <= 0) {
+            return std::vector<std::byte>{};
         }
 
         struct iovec local;
@@ -265,12 +301,59 @@ namespace runtimexray {
         return buffer;
     }
 
-    void Tachikoma::handle_syscall_stop(const SyscallCallback& cb, bool& in_syscall) {
+    // ---------------------------------------------------------------------------
+    // Private helpers
+    // ---------------------------------------------------------------------------
+
+    // Handle a ptrace event (fork, clone, etc.)
+    bool Tachikoma::handle_ptrace_event(pid_t pid, int status, const SyscallCallback& cb) {
+        (void)status;
+        (void)cb;
+
+        unsigned long new_pid;
+        if (ptrace(PTRACE_GETEVENTMSG, pid, nullptr, &new_pid) == -1) {
+            return false;
+        }
+        pid_t child = static_cast<pid_t>(new_pid);
+
+        if (follow_forks_) {
+            // The child is already attached; just set options to trace its own forks
+            // Trace the child: set options and continue with PTRACE_SYSCALL
+            if (ptrace(PTRACE_SETOPTIONS, child, nullptr,
+                   PTRACE_O_TRACEFORK |
+                   PTRACE_O_TRACEVFORK |
+                   PTRACE_O_TRACECLONE |
+                   PTRACE_O_TRACEEXIT) == -1) {
+                throw std::runtime_error(std::string("PTRACE_SETOPTIONS on child failed: pid=") + std::to_string(child) + " " + std::strerror(errno));
+            }
+            traced_pids_.insert(child);
+            in_syscall_state_[child] = false;
+            // Continue the child
+            if (ptrace(PTRACE_SYSCALL, child, nullptr, nullptr) == -1) {
+                throw std::runtime_error(std::string("PTRACE_SYSCALL on child failed: pid=") + std::to_string(child) + " " + std::strerror(errno));
+            }
+        } else {
+            // Do NOT trace the child: continue it normally (untraced)
+            if (ptrace(PTRACE_DETACH, child, nullptr, nullptr) == -1) {
+                throw std::runtime_error(std::string("PTRACE_DETACH on child failed: pid=") + std::to_string(child) + " " + std::strerror(errno));
+            }
+            // Do NOT add child to traced_pids_ – it will not be waited for
+        }
+
+        // Continue the parent
+        if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
+            throw std::runtime_error(std::string("PTRACE_SYSCALL on parent failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
+        }
+        return true;
+    }
+
+    // Process a syscall stop for a specific PID
+    void Tachikoma::handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall) {
         // Read registers to get syscall number and ar
-        Registers regs = read_registers(child_pid_);
+        Registers regs = read_registers(pid);
 
         SyscallEvent ev;
-        ev.pid = child_pid_;
+        ev.pid = pid;
         ev.syscall_number = regs.syscall_number;
         ev.arg0 = regs.args[0];
         ev.arg1 = regs.args[1];
@@ -294,11 +377,15 @@ namespace runtimexray {
         }
 
         // Continue
-        if (ptrace(PTRACE_SYSCALL, child_pid_, nullptr, nullptr) == -1) {
+        if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
             running_ = false;
-            throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: ") + std::strerror(errno));
+            throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // Main tracing loop
+    // ---------------------------------------------------------------------------
 
     int Tachikoma::run(const SyscallCallback& cb) {
         if (!running_) {
@@ -306,47 +393,88 @@ namespace runtimexray {
         }
 
         int status;
-        bool in_syscall = false; // false = entry, true = exit
         timed_out_ = false;
-
         auto start_time = std::chrono::steady_clock::now();
 
-        while (running_) {
-            pid_t res = waitpid(child_pid_, &status, WNOHANG);
-            if (res == -1) {
+        // Loop until all traced processes have exited
+        while (!traced_pids_.empty() && running_) {
+            // Check timeout (relative to the start of the whole trace)
+            if (timeout_.count() > 0) {
+                auto now = std::chrono::steady_clock::now();
+                if ((now - start_time) >= timeout_) {
+                    // Kill all remaining processes
+                    for (pid_t p : traced_pids_) {
+                        kill(p, SIGKILL);
+                    }
+                    // Reap them
+                    while (!traced_pids_.empty()) {
+                        pid_t p = waitpid(-1, nullptr, 0);
+                        if (p > 0) {
+                            traced_pids_.erase(p);
+                        }
+                    }
+                    timed_out_ = true;
+                    return -2; // timeout code
+                }
+            }
+
+            // Wait for any traced process, non-blocking
+            pid_t pid = waitpid(-1, &status, __WALL | WNOHANG);
+            if (pid == -1) {
                 if (errno == EINTR) {
                     continue;
                 }
                 running_ = false;
-                throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
+                throw std::runtime_error(std::string("waitpid failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
             }
-
-            if (res == 0) {
-                // Child still running
-                if (timeout_.count() > 0) {
-                    auto now = std::chrono::steady_clock::now();
-                    if (now - start_time >= timeout_) {
-                        kill(child_pid_, SIGKILL);
-                        waitpid(child_pid_, nullptr, 0);
-                        running_ = false;
-                        timed_out_ = true;
-                        return -2; // timeout code
-                    }
-                }
+            if (pid == 0) {
+                // No event yet – sleep a bit to avoid busy-wait
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
+            // Process event for this pid
             if (WIFEXITED(status) || WIFSIGNALED(status)) {
-                running_ = false;
-                return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+                // Process terminated
+                traced_pids_.erase(pid);
+                in_syscall_state_.erase(pid);
+                if (traced_pids_.empty()) {
+                    running_ = false;
+                    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+                }
+                continue;                
             }
 
             if (WIFSTOPPED(status)) {
-                handle_syscall_stop(cb, in_syscall);
+                unsigned int event = static_cast<unsigned int>(status >> 16);
+                if (event == PTRACE_EVENT_FORK ||
+                    event == PTRACE_EVENT_VFORK ||
+                    event == PTRACE_EVENT_CLONE) {
+                    // New child created
+                    handle_ptrace_event(pid, status, cb);
+                    continue;
+                }
+
+                // Otherwise it's a syscall entry/exit stop
+                auto it = in_syscall_state_.find(pid);
+                if (it == in_syscall_state_.end()) {
+                    // Should not happen – initialize
+                    in_syscall_state_[pid] = false;
+                    it = in_syscall_state_.find(pid);
+                }
+                handle_syscall_stop(pid, cb, it->second);
             }
         }
+
         return 0;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Public setters
+    // ---------------------------------------------------------------------------
+
+    void Tachikoma::set_follow_forks(bool follow) {
+        follow_forks_ = follow;
     }
 
 } // namespace runtimexray

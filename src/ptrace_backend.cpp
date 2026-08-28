@@ -30,6 +30,7 @@ public:
     int trace(const TraceConfig& config) override {
         tracer_ = std::make_unique<Tachikoma>(config.program, config.args);
         tracer_->set_timeout(config.timeout);
+        tracer_->set_follow_forks(config.follow_forks);
         return tracer_->run(config.callback);
     }
 

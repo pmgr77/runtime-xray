@@ -55,6 +55,7 @@ namespace runtimexray
         std::string program_;
         std::vector<std::string> program_args_;
         std::string backend_name_ = "ptrace";
+        bool follow_forks_ = true;        
     };
 
 } // namespace runtimexray

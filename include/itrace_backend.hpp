@@ -27,6 +27,7 @@ struct TraceConfig {
     std::chrono::seconds timeout{0};
     TraceEventCallback callback;
     bool debug = false;
+    bool follow_forks = true;
 };
 
 /**
