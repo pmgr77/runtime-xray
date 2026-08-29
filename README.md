@@ -92,14 +92,18 @@ The following capabilities are available today, experimental, or planned.
 Single binary `runtimexray` with subcommands:
 
 - `analyze` – static ELF hardening checks and dangerous API detection
-- `trace` – dynamic ptrace‑based syscall tracing and evidence capture
+- `trace` – dynamic ptrace‑based or eBPF syscall tracing and evidence capture
 - `mem` – process memory scanning for secrets
 
 All subcommands support common options:
 
-- `--verbose`
-- `--min-severity <level>` (Critical, High, Medium, Low, Info)
-- `--output-format text|json`
+- `--report FILE` – write human‑readable report to file (default: stdout)
+- `--json FILE` – write JSON report to file
+- `--log-level LEVEL` – set log level (error, warn, info, debug, trace)
+- `--log-file FILE` – write runtime logs to file (default: stderr)
+- `--min-severity LEVEL` – filter findings (Critical, High, Medium, Low, Info)
+
+**Removed:** `--verbose`, `--output-format`, `--quiet` (replaced by the above).
 
 #### Static analysis (`runtimexray analyze`)
 
@@ -112,21 +116,24 @@ All subcommands support common options:
 - Stack canary detection
 - Dangerous API/import detection with CWE references
 - Severity filtering
-- JSON output
+- JSON report via `--json FILE`
+- Text report via `--report FILE`
 
 #### Dynamic tracing (`runtimexray trace`)
 
 - Linux `ptrace`‑based syscall tracing on x86_64 and ARM64
+- eBPF backend (`--backend ebpf`) for low‑overhead tracing
 - Syscall name mapping and filtering of interesting events
 - File path reading for `open` / `openat`
 - Network address parsing for `connect` / `sendto`
 - `write` buffer reading (first 4 KB)
 - Child stdout/stderr capture and scanning for sensitive keywords
 - Timeout support (`--timeout <seconds>`)
+- Fork/thread following (`--follow-forks` / `--no-follow-forks`)
 - Dynamic findings: sensitive file access, suspicious network connections, sensitive data writes
-- JSON output
-- **Tracing backend selection** – `--backend ptrace` (default) or `--backend ebpf`
-- eBPF backend requires root and a kernel with eBPF support.
+- JSON report via `--json FILE`
+- Text report via `--report FILE`
+- Runtime logs via `--log-level` / `--log-file`
 
 #### Memory scanning (`runtimexray mem`)
 
@@ -135,10 +142,11 @@ All subcommands support common options:
   - password‑like strings
   - private key markers (PEM)
   - other sensitive patterns
-- `--max-pages <N>` option to limit the number of scanned pages
+- `--max-pages <N>` option to limit scanned pages
 - `--max-pages 0` skips page scanning and only checks cmdline/environ
 - Reports number of scanned pages
-- JSON output
+- JSON report via `--json FILE`
+- Text report via `--report FILE`
 
 #### Extensible analyzers
 
@@ -149,7 +157,7 @@ All subcommands support common options:
 
 #### Tests
 
-- Comprehensive CTest suite (40+ tests)
+- Comprehensive CTest suite (47+ tests)
 - Regression and integration tests for static checks, dynamic tracing, memory scanning, JSON output, and analyzer registry
 - Runs on x86_64 and ARM64 via GitHub Actions
 
@@ -195,37 +203,36 @@ cmake --build .
 ### Analyze an ELF binary
 
 ```bash
+# Human-readable report to stdout
 ./runtimexray analyze /bin/ls
+
+# Human-readable report to file
+./runtimexray analyze --report report.txt /bin/ls
+
+# JSON report to file
+./runtimexray analyze --json report.json /bin/ls
+
+# Both text and JSON
+./runtimexray analyze --report report.txt --json report.json /bin/ls
 ```
 
-Use `--verbose` to see all findings, including informational hardening checks:
+To see all hardening details (including Info-level findings), use `--min-severity Info`:
 
 ```bash
-./runtimexray analyze --verbose /bin/ls
-```
-
-JSON output:
-
-```bash
-./runtimexray analyze --output-format json /bin/ls
+./runtimexray analyze --min-severity Info /bin/ls
 ```
 
 ### Trace a process dynamically
 
 ```bash
+# Human-readable report to stdout
 ./runtimexray trace --timeout 5 /usr/bin/curl https://example.com
-```
 
-Use `--verbose` to show all system calls:
+# JSON report
+./runtimexray trace --json trace.json --timeout 5 /bin/cat /etc/passwd
 
-```bash
-./runtimexray trace --verbose /bin/ls
-```
-
-JSON output:
-
-```bash
-./runtimexray trace --timeout 5 --output-format json /bin/cat /etc/passwd
+# Show all syscalls (via debug logs)
+./runtimexray trace --log-level debug /bin/ls
 ```
 
 ### Trace with eBPF (requires root)
@@ -240,19 +247,28 @@ The eBPF backend uses low‑overhead, hard‑to‑evade tracing. It requires roo
 
 ```bash
 ./runtimexray mem <pid>
-```
 
-Limit pages:
-
-```bash
+# Limit pages or skip page scanning
 ./runtimexray mem --max-pages 500 <pid>
 ./runtimexray mem --max-pages 0 <pid>   # only cmdline and environment
+
+# JSON report
+./runtimexray mem --json mem.json <pid>
 ```
 
-JSON output:
+### Logging and diagnostics
+
+RuntimeXRay keeps three streams separate:
+
+- **Findings** → stdout (or `--report FILE` / `--json FILE`)
+- **Runtime logs** → stderr (or `--log-file FILE`) with levels
+- **Syscall traces** → logs (with `--log-level debug`)
+
+Example:
 
 ```bash
-./runtimexray mem --output-format json <pid>
+# Everything separated
+./runtimexray trace --json report.json --log-level debug --log-file debug.log /bin/ls
 ```
 
 ---
@@ -299,7 +315,7 @@ RuntimeXRay is being developed around a layered analysis architecture:
       │ Static        │             │ Dynamic       │
       │ Collector     │             │ Collector     │
       │               │             │               │
-      │ ELF metadata  │             │ ptrace        │
+      │ ELF metadata  │             │ ptrace/eBPF   │
       │ Hardening     │             │ syscalls      │
       │ Imports       │             │ memory        │
       └───────┬───────┘             └───────┬───────┘
@@ -370,7 +386,7 @@ Areas that are particularly interesting include:
 
 * ELF and binary analysis
 * Linux process tracing
-* `ptrace`
+* `ptrace` / eBPF
 * memory analysis
 * security research
 * data‑flow analysis

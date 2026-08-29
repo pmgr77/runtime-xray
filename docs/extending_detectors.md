@@ -2,6 +2,8 @@
 
 RuntimeXRay uses a registry of analyzers. You can add your own custom analyzers, remove built‑in ones, or temporarily disable them without modifying the core code.
 
+All custom analyzers produce `Finding` objects that are automatically merged into the final report (text or JSON) by the `Reporter`. Severity filtering (`--min-severity`) applies uniformly to all findings, including those from custom analyzers.
+
 ## Built-in analyzers
 
 The following analyzers are registered automatically:
@@ -121,5 +123,6 @@ for (const auto& n : names) {
 - The registry is a singleton; thread safety is not yet guaranteed, but it is safe for single‑threaded CLI use.
 - If you disable an analyzer, it will not be called for any evidence.
 - Each analyzer is responsible for checking the evidence type it supports (using `std::get_if`).
+- Findings produced by custom analyzers are handled by the same `Reporter` used for built‑in findings; they appear in the text and JSON reports and respect `--min-severity` filtering.
 
 This design allows RuntimeXRay to be extended without modifying the core library.

@@ -49,6 +49,12 @@
             border-left: 4px solid #2563eb;
             border-radius: 0.25rem;
         }
+        .status code {
+            background: #f3f4f6;
+            padding: 0.1rem 0.3rem;
+            border-radius: 0.2rem;
+            font-size: 0.9rem;
+        }
         .links {
             margin-top: 2rem;
         }
@@ -64,6 +70,12 @@
         }
         .badge {
             margin: 1rem 0;
+        }
+        ul {
+            padding-left: 1.2rem;
+        }
+        ul li {
+            margin-bottom: 0.3rem;
         }
     </style>
 </head>
@@ -100,16 +112,51 @@
     </div>
 
     <div class="status">
-        <strong>Available today:</strong><br>
-        • <code>runtimexray analyze</code> — ELF hardening checks and dangerous API detection<br>
-        • <code>runtimexray trace</code> — dynamic ptrace-based syscall tracing<br>
-        • <code>runtimexray mem</code> — process memory scanning for secrets<br>
-        • <code>--output-format json</code> on all subcommands<br>
+        <strong>✅ Available today:</strong><br><br>
+
+        <strong>Unified CLI</strong><br>
+        <code>runtimexray analyze</code> – ELF hardening checks and dangerous API detection<br>
+        <code>runtimexray trace</code> – dynamic syscall tracing (<code>ptrace</code> or <code>ebpf</code>)<br>
+        <code>runtimexray mem</code> – process memory scanning for secrets<br><br>
+
+        <strong>Common options (all subcommands)</strong><br>
+        <code>--report FILE</code> – human‑readable report (default: stdout)<br>
+        <code>--json FILE</code> – JSON report<br>
+        <code>--log-level LEVEL</code> – <code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code><br>
+        <code>--log-file FILE</code> – write logs to file (default: stderr)<br>
+        <code>--min-severity LEVEL</code> – <code>Critical</code>, <code>High</code>, <code>Medium</code>, <code>Low</code>, <code>Info</code><br>
+        <em>(Removed: <code>--verbose</code>, <code>--output-format</code>, <code>--quiet</code> — replaced by the above)</em><br><br>
+
+        <strong>Dynamic tracing features</strong><br>
+        • Fork/thread following (<code>--follow-forks</code> / <code>--no-follow-forks</code>)<br>
+        • Timeout support (<code>--timeout &lt;sec&gt;</code>)<br>
+        • eBPF backend (<code>--backend ebpf</code>) – low‑overhead, requires root<br>
+        • Sensitive file, network, and write detection<br><br>
+
+        <strong>Memory scanning</strong><br>
+        • <code>/proc/&lt;pid&gt;/cmdline</code> and <code>/proc/&lt;pid&gt;/environ</code><br>
+        • Password‑like strings and private key markers<br>
+        • <code>--max-pages</code> to limit scan<br><br>
+
+        <strong>Extensibility</strong><br>
         • <code>AnalyzerRegistry</code> – add custom analyzers without touching core code<br>
-        • Built-in analyzers: hardening, dangerous APIs, sensitive files, network, memory secrets<br>
-        <br>
-        <strong>Experimental:</strong> runtime correlation, richer evidence combination, eBPF backend (requires root)<br>
-        <strong>Planned:</strong> data lineage, network-boundary detection, AI explanations, dynamic analyzer loading (.so)
+        • Built‑in analyzers: hardening, dangerous APIs, sensitive files, network, memory secrets<br><br>
+
+        <strong>Tests</strong><br>
+        • 47+ CTest tests, runs on x86_64 and ARM64 (GitHub Actions)<br><br>
+
+        <strong>🧪 Experimental</strong><br>
+        • Runtime correlation of static and dynamic evidence<br>
+        • eBPF process‑attach (planned)<br><br>
+
+        <strong>📋 Planned</strong><br>
+        • Data lineage (track sensitive data from source to sink)<br>
+        • Network‑boundary detection<br>
+        • AI explanations (evidence‑first)<br>
+        • PE / Mach‑O support<br>
+        • Web service / interactive demo<br>
+        • HTML reports<br>
+        • Dynamic plugin loading (<code>.so</code>)
     </div>
 
     <div class="badge">

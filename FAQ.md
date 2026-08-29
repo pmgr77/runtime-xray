@@ -150,8 +150,33 @@ If you *are* a reverse engineer, RuntimeXRay can be a quick first pass to highli
 ## Do I need an AI API key to use RuntimeXRay?
 
 No, the AI analyst is **optional**.  
-The core engine works entirely offline and produces structured results (JSON and plain text; HTML planned).  
+The core engine works entirely offline and produces structured results (text and JSON; HTML planned).  
 If you provide an API key (e.g., DeepSeek), RuntimeXRay can generate **human‑readable explanations** for each finding, but this is a bonus layer, not a requirement.
+
+---
+
+## What are the CLI options for controlling output and logging?
+
+RuntimeXRay keeps three streams separate:
+
+- **Findings** – human‑readable (stdout or `--report FILE`) and JSON (`--json FILE`).
+- **Runtime logs** – diagnostics, warnings, errors (stderr or `--log-file FILE`) with levels (`--log-level LEVEL`).
+- **Syscall traces** – included in debug logs (`--log-level debug`).
+
+Examples:
+
+```bash
+# Human‑readable findings + normal logs
+runtimexray trace /bin/ls
+
+# JSON report only (no stdout)
+runtimexray trace --json report.json /bin/ls
+
+# Everything separated
+runtimexray trace --json report.json --log-level debug --log-file debug.log /bin/ls
+```
+
+**Removed:** `--verbose`, `--output-format`, `--quiet` – their functionality is now covered by the above options.
 
 ---
 
@@ -160,6 +185,7 @@ If you provide an API key (e.g., DeepSeek), RuntimeXRay can generate **human‑r
 The current MVP is designed for **controlled lab/sandbox environments**.  
 Production analysis is out of scope for now, because tracing and memory inspection can affect performance and stability.  
 An experimental eBPF backend (`--backend ebpf`) is now available for low‑overhead tracing, but production use is still limited. We plan to enhance it with process attach and function‑level tracing (uprobes) in the future.
+
 ---
 
 ## How do I report a security vulnerability in RuntimeXRay itself?

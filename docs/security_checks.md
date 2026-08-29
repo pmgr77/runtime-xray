@@ -90,11 +90,10 @@ Canary: Enabled
 
 ## Output Filtering
 
-By default, RuntimeXRay shows findings with severity **Medium and higher** (Critical, High, Medium). Use:
-- `--min-severity High` to show only High and Critical.
-- `--min-severity Info` or `--verbose` to show all findings including Low/Info.
+Findings are filtered by severity. The default is **Medium and higher** (Critical, High, Medium). Use:
 
-*Note: `--min-severity=High` (equals form) is also supported.*
+- `--min-severity High` – show only High and Critical.
+- `--min-severity Info` – show all findings (including Low and Info).
 
 ---
 
@@ -145,7 +144,7 @@ Dangerous API usage:
 
 ## Dynamic Analysis Findings
 
-In addition to static binary checks, RuntimeXRay can observe a running process using `ptrace` (via the **Tachikoma** component) and generate findings from system call activity.
+In addition to static binary checks, RuntimeXRay can observe a running process using `ptrace` (via **Tachikoma**) or the **eBPF** backend (`--backend ebpf`) and generate findings from system call activity.
 
 Currently implemented dynamic findings include:
 
@@ -159,24 +158,23 @@ These findings are still experimental and should be interpreted as indicators of
 ### How to run dynamic analysis
 
 ```bash
+# Basic tracing (ptrace backend)
 ./runtimexray trace /path/to/program
-```
-Use `--verbose` to show all system calls, not only interesting ones:
 
-```bash
-./runtimexray trace --verbose /path/to/program
-```
-For eBPF-based tracing (requires root):
+# Show syscall traces (via debug logs)
+./runtimexray trace --log-level debug /path/to/program
 
-```bash
+# eBPF backend (requires root, low overhead)
 sudo ./runtimexray trace --backend ebpf /path/to/program
+
+# JSON report
+./runtimexray trace --json report.json /path/to/program
+
+# Human‑readable report
+./runtimexray trace --report report.txt /path/to/program
 ```
 
-For JSON output:
-
-```bash
-./runtimexray trace --output-format json /path/to/program
-```
+**Removed:** `--verbose` and `--output-format` – use `--log-level debug` for syscalls and `--json` / `--report` for output.
 
 ---
 
@@ -198,6 +196,10 @@ Findings include:
 - **Private key blocks** (PEM markers) in memory
 
 Use `--max-pages` to limit the number of pages scanned, or `--max-pages 0` to skip page scanning entirely and only check cmdline/environ.
+
+```bash
+./runtimexray mem --json report.json --max-pages 500 <pid>
+```
 
 ---
 
@@ -234,4 +236,16 @@ These examples illustrate that even modern, well-protected services can include 
 
 ---
 
-*Last updated: 2026-08-24*
+## Output and Logging Overview
+
+RuntimeXRay keeps three independent streams:
+
+- **Findings** – human‑readable (stdout or `--report FILE`) and JSON (`--json FILE`).
+- **Runtime logs** – diagnostics, warnings, errors, syscall traces (with `--log-level debug`) – sent to stderr or `--log-file FILE`.
+- **Syscall traces** – logged via `Logger` at `Debug` level; they never appear in the findings report.
+
+This design ensures that JSON output remains valid and that logs can be captured separately for debugging.
+
+---
+
+*Last updated: 2026-08-29*

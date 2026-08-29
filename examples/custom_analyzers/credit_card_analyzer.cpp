@@ -52,7 +52,7 @@ runtimexray::FindingList CreditCardAnalyzer::analyze(const runtimexray::Evidence
                 ++end;
             }
             if (digits >= 13 && digits <= 19) {
-                std::string card = chunk.substr(pos, digits);
+                std::string card = chunk.substr(pos, static_cast<std::size_t>(digits));
                 findings.emplace_back(
                     runtimexray::FindingSeverity::High,
                     "Credit card number found in memory",

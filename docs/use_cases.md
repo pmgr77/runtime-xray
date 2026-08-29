@@ -6,6 +6,8 @@ This document demonstrates practical scenarios where custom analyzers add signif
 - **Solution:** A custom `IAnalyzer` implementation.
 - **Value:** The business or security outcome.
 
+All custom analyzers automatically integrate with RuntimeXRay’s reporter: their findings appear in both the human‑readable text report (`--report FILE`) and the JSON report (`--json FILE`), and respect severity filtering (`--min-severity`). Runtime logs (including diagnostic output) are independent via `--log-level` / `--log-file`.
+
 ---
 
 ## 1. Financial Compliance: Credit Card Number Detector
@@ -229,23 +231,12 @@ public:
 #include <ianalyzer.hpp>
 #include <evidence.hpp>
 #include <finding.hpp>
-
-#include <string>
-
-// External HTTP client. In this example we use cpr, but you can replace it with
-// libcurl, Boost.Beast, or any other library of your choice.
-#include <cpr/cpr.h>
+#include <nlohmann/json.hpp>
+#include <cpr/cpr.h>   // or any HTTP client
 
 namespace {
 
-/**
- * @brief Sends a snippet to an LLM API and returns the explanation text.
- *
- * Replace the URL, model name, and API key with your own values.
- * In production, store the API key in an environment variable or secure config.
- */
 std::string call_ai_explainer(const std::string& snippet) {
-    // Build the request body as JSON.
     nlohmann::json request_body = {
         {"model", "deepseek-chat"},
         {"messages", nlohmann::json::array({
@@ -255,7 +246,6 @@ std::string call_ai_explainer(const std::string& snippet) {
         {"temperature", 0.2}
     };
 
-    // Send the request to the LLM API.
     cpr::Response response = cpr::Post(
         cpr::Url{"https://api.deepseek.com/v1/chat/completions"},
         cpr::Header{{"Authorization", "Bearer " + std::getenv("DEEPSEEK_API_KEY")}},
@@ -263,7 +253,6 @@ std::string call_ai_explainer(const std::string& snippet) {
     );
 
     if (response.status_code == 200) {
-        // Parse the JSON response and extract the assistant's message.
         nlohmann::json response_json = nlohmann::json::parse(response.text);
         if (response_json.contains("choices") && !response_json["choices"].empty()) {
             return response_json["choices"][0]["message"]["content"];
@@ -287,7 +276,6 @@ public:
     runtimexray::FindingList analyze(const runtimexray::Evidence& evidence) const override {
         runtimexray::FindingList findings;
         if (auto* mem = std::get_if<runtimexray::MemoryChunkEvidence>(&evidence)) {
-            // Only process chunks that are likely to contain a secret.
             if (mem->chunk.find("password") != std::string::npos ||
                 mem->chunk.find("secret") != std::string::npos) {
                 std::string explanation = call_ai_explainer(mem->chunk);
@@ -316,5 +304,7 @@ public:
 ## Summary
 
 These use cases illustrate how the open analyzer interface turns RuntimeXRay into a flexible platform rather than a fixed tool. Users can address specific industry, regulatory, or organisational needs without waiting for upstream changes.
+
+All custom analyzers are seamlessly integrated into the report pipeline: they produce `Finding` objects that are automatically included in both the human‑readable text report (`--report FILE`) and the JSON report (`--json FILE`). The `--min-severity` filter applies uniformly to all findings, and runtime logs (`--log-level` / `--log-file`) remain separate, so diagnostics never pollute the output.
 
 For more examples, see the [Extending Detectors](extending_detectors.md) document.
