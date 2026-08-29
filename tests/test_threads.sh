@@ -21,7 +21,7 @@ else
     RUN_PREFIX=""
 fi
 
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --timeout 2 "$THREAD_TEST_BIN" 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --log-level debug --timeout 2 "$THREAD_TEST_BIN" 2>&1)
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
     echo "Trace failed with status $STATUS"

@@ -27,23 +27,13 @@ jobs:
       - name: Build and Test
         run: |
           PLATFORM=${{ matrix.arch == 'arm64' && 'linux/arm64' || 'linux/amd64' }}
-
-          # Default flags
-          SKIP_FLAGS=""
-          BUILD_FLAGS=""
-
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            SKIP_FLAGS="-DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
-            BUILD_FLAGS="-DBUILD_EBPF_BACKEND=OFF"
+              CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_EBPF_BACKEND=OFF -DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
           else
-            SKIP_FLAGS="-DSKIP_EBPF_TESTS=ON"
-            BUILD_FLAGS="-DBUILD_EBPF_BACKEND=ON"
+              CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_EBPF_BACKEND=ON -DSKIP_EBPF_TESTS=ON"
           fi
 
-          docker run --rm --platform "$PLATFORM" --privileged \
-            -v /sys/kernel/tracing:/sys/kernel/tracing \
-            -e SKIP_FLAGS="$SKIP_FLAGS" \
-            -e BUILD_FLAGS="$BUILD_FLAGS" \
+          docker run --rm --platform "$PLATFORM" \
             -v ${{ github.workspace }}:/workspace -w /workspace \
             ubuntu:24.04 \
             bash -c "
@@ -53,8 +43,7 @@ jobs:
               if [ \"${{ matrix.arch }}\" = \"x86_64\" ]; then
                 apt-get install -y libbpf-dev clang libelf-dev zlib1g-dev xxd
               fi
-              rm -rf build
-              cmake -B build -DCMAKE_BUILD_TYPE=Release \$BUILD_FLAGS \$SKIP_FLAGS
+              cmake -B build $CMAKE_FLAGS
               cmake --build build -j\$(nproc)
               cd build
               ctest --output-on-failure

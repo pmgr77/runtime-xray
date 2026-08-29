@@ -5,7 +5,7 @@ JSON output validation script for RuntimeXRay CLI.
 Usage: json_validation.py <expected_command> <runtimexray_binary> <subcommand> [args...]
 
 The script constructs and runs:
-    <runtimexray_binary> <subcommand> --output-format json [args...]
+    <runtimexray_binary> <subcommand> --json /dev/stdout [args...]
 
 It validates that the output is valid JSON and contains required fields.
 Exits with 0 on success, 1 on failure.
@@ -25,9 +25,9 @@ def main():
     subcommand = sys.argv[3]
     args = sys.argv[4:]
 
-    command = [runtimexray_bin, subcommand, "--output-format", "json"] + args
+    command = [runtimexray_bin, subcommand, "--json", "/dev/stdout"] + args
 
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     if result.returncode != 0:
         print(f"Command failed with exit code {result.returncode}")
         print(f"stderr: {result.stderr}")

@@ -21,7 +21,7 @@ else
     RUN_PREFIX=""
 fi
 
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --no-follow-forks --timeout 5 "$FORK_TEST_BIN" 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --no-follow-forks --timeout 5 --log-level debug "$FORK_TEST_BIN" 2>&1)
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
     echo "eBPF trace failed with status $STATUS"

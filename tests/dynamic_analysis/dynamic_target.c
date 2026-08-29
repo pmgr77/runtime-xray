@@ -8,7 +8,7 @@
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
 
- // Copyright 2026 Peter Magram
+// Copyright 2026 Peter Magram
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

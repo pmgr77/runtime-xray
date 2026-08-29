@@ -45,7 +45,7 @@ std::string current_iso8601_utc();
 class Reporter {
 public:
     // Generates a human-readable text report
-    static std::string to_text(const FindingList& findings, bool verbose);
+    static std::string to_text(const FindingList& findings, const ReportContext& context, const nlohmann::json* extra = nullptr);
 
     // Generates a JSON report
     static std::string to_json(const FindingList& findings, const ReportContext& context, const nlohmann::json* extra = nullptr);

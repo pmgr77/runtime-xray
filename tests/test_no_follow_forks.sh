@@ -22,7 +22,7 @@ else
 fi
 
 # Run trace with --no-follow-forks
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --no-follow-forks --timeout 2 "$FORK_TEST_BIN" 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --no-follow-forks --log-level debug --timeout 2 "$FORK_TEST_BIN" 2>&1)
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
     echo "Trace failed with status $STATUS"

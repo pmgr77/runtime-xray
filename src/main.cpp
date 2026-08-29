@@ -26,6 +26,7 @@
 #include "commands/analyze_command.hpp"
 #include "commands/trace_command.hpp"
 #include "commands/mem_command.hpp"
+#include "logger.hpp"
 
 #include <iostream>
 #include <memory>
@@ -75,6 +76,7 @@ int main(int argc, char* argv[]) {
     if (!parse_global_options(args, common_opts, specific_args)) {
         return 1; // Error message already printed
     }
+    Logger::init(runtimexray::parse_log_level(common_opts.log_level), common_opts.log_file);
 
     // Pass specific args to the command
     ICommand& cmd = *it->second;

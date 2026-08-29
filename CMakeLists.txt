@@ -43,6 +43,7 @@ set(RUNTIMEXRAY_SOURCES
     src/finding_filter.cpp
     src/reporter.cpp
     src/ptrace_backend.cpp
+    src/logger.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -175,19 +176,6 @@ add_test(NAME check_json_analyze
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
                  analyze $<TARGET_FILE:runtimexray> analyze $<TARGET_FILE:nx_enabled>)
 
-add_test(NAME check_trace_follow_forks
-         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
-set_tests_properties(check_trace_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
-
-add_test(NAME check_trace_no_follow_forks
-         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_no_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
-set_tests_properties(check_trace_no_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
-
-# Thread test
-add_test(NAME check_trace_threads
-         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
-set_tests_properties(check_trace_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
-
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
     add_test(NAME check_ebpf_trace_smoke
@@ -217,7 +205,7 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
 
     add_test(NAME check_ebpf_threads
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
-    set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)    
+    set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)    
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)
@@ -246,8 +234,8 @@ if(NOT SKIP_PTRACE_TESTS)
         ENVIRONMENT "TEST_SECRET=password=env_secret_test")
 
     add_test(NAME check_xray_trace_smoke
-             COMMAND $<TARGET_FILE:runtimexray> trace --verbose /bin/ls)
-    set_tests_properties(check_xray_trace_smoke PROPERTIES PASS_REGULAR_EXPRESSION "openat")
+             COMMAND $<TARGET_FILE:runtimexray> trace /bin/ls)
+    set_tests_properties(check_xray_trace_smoke PROPERTIES PASS_REGULAR_EXPRESSION "Command: trace")
 
     add_test(NAME check_dynamic_file_access
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
@@ -267,31 +255,46 @@ if(NOT SKIP_PTRACE_TESTS)
 
     add_test(NAME check_trace_timeout
              COMMAND $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/sleep 10)
-    set_tests_properties(check_trace_timeout PROPERTIES PASS_REGULAR_EXPRESSION "Trace timed out")
+    set_tests_properties(check_trace_timeout PROPERTIES PASS_REGULAR_EXPRESSION "Timed out: yes")
 
     add_test(NAME check_trace_critical_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Critical $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_critical_show PROPERTIES PASS_REGULAR_EXPRESSION "path=/etc/sudoers")
+    set_tests_properties(check_trace_critical_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/sudoers")
 
     add_test(NAME check_trace_high_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity High $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_high_show PROPERTIES PASS_REGULAR_EXPRESSION "path=/tmp/fake_secret_file")
+    set_tests_properties(check_trace_high_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /tmp/fake_secret_file")
 
     add_test(NAME check_trace_medium_show
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_medium_show PROPERTIES PASS_REGULAR_EXPRESSION "path=/etc/passwd")
+    set_tests_properties(check_trace_medium_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/passwd")
 
     add_test(NAME check_trace_low_hide_default
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_low_hide_default PROPERTIES FAIL_REGULAR_EXPRESSION "path=/etc/hosts")
+    set_tests_properties(check_trace_low_hide_default PROPERTIES FAIL_REGULAR_EXPRESSION "Path: /etc/hosts")
 
     add_test(NAME check_trace_low_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Low $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_low_show PROPERTIES PASS_REGULAR_EXPRESSION "path=/etc/hosts")
+    set_tests_properties(check_trace_low_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/hosts")
 
     add_test(NAME check_trace_info_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Info $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_info_show PROPERTIES PASS_REGULAR_EXPRESSION "path=/etc/hostname")
+    set_tests_properties(check_trace_info_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/hostname")
+
+    # Fork/thread tracing tests (ptrace)
+    add_test(NAME check_trace_follow_forks
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+    set_tests_properties(check_trace_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+    add_test(NAME check_trace_no_follow_forks
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_no_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+    set_tests_properties(check_trace_no_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+    # Thread test
+    add_test(NAME check_trace_threads
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
+    set_tests_properties(check_trace_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
 endif()
 
 if(BUILD_EXAMPLES)

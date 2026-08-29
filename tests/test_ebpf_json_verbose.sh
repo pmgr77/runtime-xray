@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regression test for eBPF JSON verbose output.
-# Ensures that findings with Low severity are included when --verbose is used.
+# Ensures that findings with Low severity are included when --log-level debug is used.
 # Skips (exit code 125) if eBPF is not available or permissions are insufficient.
 
 set -e
@@ -29,7 +29,7 @@ else
 fi
 
 # Run trace
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --verbose --timeout 10 --output-format json /usr/bin/curl https://example.com 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --log-level debug --timeout 10 --min-severity Low --json /dev/stdout /usr/bin/curl https://example.com)
 STATUS=$?
 
 # Record end time

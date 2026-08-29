@@ -30,6 +30,8 @@
 #include "analyzer_registry.hpp"
 #include "evidence.hpp"
 #include "finding_filter.hpp"
+#include "logger.hpp"
+#include "finding_reporter.hpp"
 #include "dynamic_analysis.hpp"
 #include <iostream>
 #include <string>
@@ -72,11 +74,92 @@ namespace {
             }
         }
         return results;
-    }    
+    }
+
+    void handle_syscall_open(
+        const char *syscall_name,
+        std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        std::string& extra_info,
+        runtimexray::FindingList& findings,
+        const runtimexray::SyscallEvent& ev)
+    {
+        uint64_t path_addr = (std::strcmp(syscall_name, "open") == 0) ? ev.arg0 : ev.arg1;
+        std::string path = backend->read_string(path_addr);
+        if (!path.empty()) {
+            extra_info = " path=\"" + path + "\"";
+            runtimexray::FileAccessEvidence fe{path, 0, ev.pid};
+            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
+            findings.insert(findings.end(), res.begin(), res.end());
+        }
+    }
+    
+    void handle_syscall_connect(
+        std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        std::string& extra_info,
+        runtimexray::FindingList& findings,
+        const runtimexray::SyscallEvent& ev) 
+    {
+        uint64_t sockaddr_ptr = ev.arg1;
+        uint64_t addrlen = ev.arg2;
+        if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
+            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
+            auto parsed = runtimexray::parse_sockaddr(bytes);
+            if (parsed.valid) {
+                extra_info = " addr=" + parsed.ip + ":" + std::to_string(parsed.port);
+                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
+                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
+                findings.insert(findings.end(), res.begin(), res.end());
+            }                            
+        }
+    }
+
+    void handle_syscall_sendto(
+        std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        std::string& extra_info,
+        runtimexray::FindingList& findings,
+        const runtimexray::SyscallEvent& ev)
+    {
+        // sendto: arg4 – dest_addr, arg5 – addrlen (x86_64: r8, r9)
+        uint64_t sockaddr_ptr = ev.arg4;
+        uint64_t addrlen = ev.arg5;
+        if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
+            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
+            auto parsed = runtimexray::parse_sockaddr(bytes);
+            if (parsed.valid) {
+                extra_info = " dest addr=" + parsed.ip + ":" + std::to_string(parsed.port);
+                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
+                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
+                findings.insert(findings.end(), res.begin(), res.end());
+            }                            
+        }
+    }
+
+    void handle_syscall_write(
+        std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        std::string& extra_info,
+        runtimexray::FindingList& findings,
+        const runtimexray::SyscallEvent& ev)
+    {
+        uint64_t fd = ev.arg0;
+        uint64_t buf_ptr = ev.arg1;
+        uint64_t count = ev.arg2;
+        if (buf_ptr > 0 && count > 0 && count <= 4096) {
+            auto bytes = backend->read_memory(buf_ptr, static_cast<size_t>(count));
+            if (!bytes.empty()) {
+                std::string data_str = runtimexray::sanitize_data(bytes);
+                extra_info = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
+                runtimexray::MemoryChunkEvidence mce{data_str, "write_data", ev.pid};
+                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+                findings.insert(findings.end(), res.begin(), res.end());                                
+            }
+        }
+    }
 };
 
 namespace runtimexray {
 
+
+    
     bool TraceCommand::parse_specific_args(const std::vector<std::string> &args) {
         program_.clear();
         program_args_.clear();
@@ -133,7 +216,6 @@ namespace runtimexray {
 
         runtimexray::FindingList findings;
         std::optional<nlohmann::json> extra;
-        bool timed_out = false;
         std::string child_output;
 
         try {
@@ -159,111 +241,74 @@ namespace runtimexray {
             config.args = full_args;
             config.timeout = timeout_;
             config.follow_forks = follow_forks_;
-            config.debug = common.verbose && (common.output_format != "json");
+            config.debug = Logger::is_enabled(LogLevel::Debug);
+
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
 
-                if (!common.verbose && !runtimexray::is_interesting_syscall(num)) {
+                if (!Logger::is_enabled(LogLevel::Debug) && 
+                    !runtimexray::is_interesting_syscall(num)) {
                     return; // skip non-interesting syscalls
                 }
 
                 const char *syscall_name = runtimexray::syscall_name(static_cast<long>(ev.syscall_number));
-                std::string extra;
+                std::string extra_info;
 
                 if (ev.is_entry) {
                     if (std::strcmp(syscall_name, "open") == 0 || std::strcmp(syscall_name,"openat") == 0) {
-                        uint64_t path_addr = (std::strcmp(syscall_name, "open") == 0) ? ev.arg0 : ev.arg1;
-                        std::string path = backend->read_string(path_addr);
-                        if (!path.empty()) {
-                            extra = " path=\"" + path + "\"";
-                            runtimexray::FileAccessEvidence fe{path, 0, ev.pid};
-                            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
-                            findings.insert(findings.end(), res.begin(), res.end());
-                        }
+                        handle_syscall_open(syscall_name, backend, extra_info, findings, ev);
                     } else if (std::strcmp(syscall_name, "connect") == 0) {
-                        uint64_t sockaddr_ptr = ev.arg1;
-                        uint64_t addrlen = ev.arg2;
-                        if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-                            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
-                            auto parsed = runtimexray::parse_sockaddr(bytes);
-                            if (parsed.valid) {
-                                extra = " addr=" + parsed.ip + ":" + std::to_string(parsed.port);
-                                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
-                                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
-                                findings.insert(findings.end(), res.begin(), res.end());
-                            }                            
-                        }
+                        handle_syscall_connect(backend, extra_info, findings, ev);
                     } else if (std::strcmp(syscall_name, "sendto") == 0) {
-                        // sendto: arg4 – dest_addr, arg5 – addrlen (x86_64: r8, r9)
-                        uint64_t sockaddr_ptr = ev.arg4;
-                        uint64_t addrlen = ev.arg5;
-                        if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-                            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
-                            auto parsed = runtimexray::parse_sockaddr(bytes);
-                            if (parsed.valid) {
-                                extra = " dest addr=" + parsed.ip + ":" + std::to_string(parsed.port);
-                                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
-                                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
-                                findings.insert(findings.end(), res.begin(), res.end());
-                            }                            
-                        }
+                        handle_syscall_sendto(backend, extra_info, findings, ev);
                     }  else if (std::strcmp(syscall_name, "write") == 0) {
-                        uint64_t fd = ev.arg0;
-                        uint64_t buf_ptr = ev.arg1;
-                        uint64_t count = ev.arg2;
-                        if (buf_ptr > 0 && count > 0 && count <= 4096) {
-                            auto bytes = backend->read_memory(buf_ptr, static_cast<size_t>(count));
-                            if (!bytes.empty()) {
-                                std::string data_str = runtimexray::sanitize_data(bytes);
-                                extra = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
-                                runtimexray::MemoryChunkEvidence mce{data_str, "write_data", ev.pid};
-                                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-                                findings.insert(findings.end(), res.begin(), res.end());                                
-                            }
-                        }
+                        handle_syscall_write(backend, extra_info, findings, ev);
                     }
 
-                    if (common.output_format != "json") {
-                        std::cout << "syscall " << ev.syscall_number << ": "
-                                << syscall_name
-                                << " entry (pid=" << ev.pid << ", tid=" << ev.tid << ") "
-                                << extra << '\n';
+                    // Log the syscall entry (if debug or interesting)
+                    if (Logger::is_enabled(LogLevel::Debug) || runtimexray::is_interesting_syscall(num)) {
+                        std::string line = "syscall " + std::to_string(ev.syscall_number) + ": " +
+                                            syscall_name +
+                                            " entry (pid=" + std::to_string(ev.pid) + 
+                                            ", tid=" + std::to_string(ev.tid) + ") " +
+                                            extra_info;
+                        Logger::log(LogLevel::Debug, line);
                     }
                 } else {
-                    if (common.output_format != "json") {
-                        std::cout << "syscall " << ev.syscall_number << ": "
-                                << syscall_name
-                                << " entry (pid=" << ev.pid << ", tid=" << ev.tid << ") "
-                                << ev.return_value << '\n';
+                    // Syscall exit – only log if debug is enabled
+                    if (Logger::is_enabled(LogLevel::Debug)) {
+                        std::string line = "syscall " + std::to_string(ev.syscall_number) + ": " +
+                                            syscall_name +
+                                            " entry (pid=" + std::to_string(ev.pid) +
+                                            ", tid=" + std::to_string(ev.tid) + ") " +
+                                            std::to_string(ev.return_value);
+                        Logger::log(LogLevel::Debug, line);
                     }
                 }
             };
 
             backend->trace(config);
-            // Cache timeout status for later use
-            timed_out = backend->is_timed_out();
-
             // ---- Child output handling (works for any backend that saves it) ----
             child_output = backend->child_output_path();
+
             if (!child_output.empty()) {
                 auto extra_findings = scan_child_output_for_secrets(child_output);
                 findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
             }
-            // ---- Build extra JSON ----
-            if (common.output_format == "json") {
-                extra.emplace();
-                (*extra)["backend"] = backend_name_;
-                (*extra)["timeout_seconds"] = static_cast<int>(timeout_.count());
-                (*extra)["timed_out"] = backend->is_timed_out();
-                (*extra)["child_output"] = "Child stdout/stderr saved to " + child_output;
-            }
+
+            // Build extra JSON metadata (for JSON reporter)
+            extra.emplace();
+            (*extra)["backend"] = backend_name_;
+            (*extra)["timeout_seconds"] = static_cast<int>(timeout_.count());
+            (*extra)["timed_out"] = backend->is_timed_out();
+            (*extra)["child_output"] = "Child stdout/stderr saved to " + child_output;
         } catch (const std::exception& e) {
-            std::cerr << "Error: " << e.what() << '\n';
+            Logger::log(LogLevel::Error, std::string("Trace failed: ") + e.what());
             return 1;
         }
 
-        runtimexray::filter_findings(findings, common.min_severity, common.verbose);
+        runtimexray::filter_findings(findings, common.min_severity, false);
 
         auto end_time = std::chrono::steady_clock::now();
         int duration_ms = static_cast<int>(
@@ -276,54 +321,52 @@ namespace runtimexray {
         ctx.started_at = runtimexray::current_iso8601_utc();
         ctx.duration_ms = duration_ms;
 
-        if (common.output_format == "json") {
-            std::cout << Reporter::to_json(findings, ctx, extra.has_value() ? &*extra : nullptr);
+        // ---- Create reporter based on options ----
+        std::unique_ptr<FindingReporter> reporter;
+        std::ofstream file_out;
+        if (!common.json_file.empty()) {
+            file_out.open(common.json_file);
+            if (!file_out) {
+                Logger::log(LogLevel::Error, "Could not open JSON file: " + common.json_file);
+                return 1;
+            }
+            reporter = std::make_unique<JsonFindingReporter>(file_out);
+            Logger::log(LogLevel::Info, "Writing JSON report to " + common.json_file);
+        } else if (!common.report_file.empty()) {
+            file_out.open(common.report_file);
+            if (!file_out) {
+                Logger::log(LogLevel::Error, "Could not open report file: " + common.report_file);
+                return 1;
+            }
+            reporter = std::make_unique<TextFindingReporter>(file_out);
+            Logger::log(LogLevel::Info, "Writing text report to " + common.report_file);
         } else {
-            if (!findings.empty()) {
-                std::cout << "\n== Dynamic Findings ==\n";
-                for (const auto& f : findings) {
-                    std::visit([&](const auto& details) {
-                        using T = std::decay_t<decltype(details)>;
-                        if constexpr (std::is_same_v<T, runtimexray::NetworkConnectionDetails>) {
-                            std::cout << " - " << f.description << " (" << details.remote_addr << ":" << details.port << ")\n";
-                        } else if constexpr (std::is_same_v<T, runtimexray::SensitiveDataWriteDetails>) {
-                            std::cout << " - " << f.description << " data=\"" << details.data_snippet << "\"\n";
-                        } else if constexpr (std::is_same_v<T, runtimexray::SensitiveFileAccessDetails>) {
-                            std::cout << " - " << f.description << " path=" << details.path << "\n";
-                        } else {
-                            std::cout << " - " << f.description << "\n";
-                        }
-                    }, f.details);
-                }
-            }
-            // Print trace metadata
-            std::cout << "\nTrace metadata:\n";
-            std::cout << "  Backend: " << backend_name_ << "\n";
-            std::cout << "  Timeout: " << timeout_.count() << "s\n";
-            std::cout << "  Timed out: " << (timed_out ? "yes" : "no") << "\n";
-            std::cout << "  Child stdout/stderr saved to: " << child_output << "\n";
-            std::cout << "  Command: " << program_ << "\n";
-            // ---- Print timeout message (for text output) ----
-            if (timed_out) {
-                std::cout << "\n[Trace timed out after " << timeout_.count() << " seconds]\n";
-            }
+            reporter = std::make_unique<TextFindingReporter>(std::cout);
         }
+
+        // Pass extra metadata to the reporter
+        reporter->report(findings, ctx, extra.has_value() ? &*extra : nullptr);
 
         return 0;
     }
 
     void TraceCommand::print_help() const
     {
-        std::cout << "Usage: runtimexray trace [--verbose] [--min-severity <level>] "
-                 "[--timeout <seconds>] [--follow-forks | --no-follow-forks] "
-                 "--backend <ptrace|ebpf> <program> [args...]\n";
+        std::cout << "Usage: runtimexray trace [--report FILE] [--json FILE] "
+                  << "[--log-level LEVEL] [--log-file FILE] [--min-severity LEVEL] "
+                  << "[--timeout SECONDS] [--follow-forks|--no-follow-forks] "
+                  << "--backend ptrace|ebpf <program> [args...]\n";
         std::cout << "Options:\n";
-        std::cout << "  --verbose             Show all system calls, not just interesting ones.\n";
-        std::cout << "  --min-severity <level> Minimum severity for findings (Critical, High, Medium, Low, Info). Default: Medium.\n";
-        std::cout << "  --timeout <seconds>   Stop tracing after the specified time and report findings.\n";
-        std::cout << "  --follow-forks          Trace child processes (default: on).\n";
-        std::cout << "  --no-follow-forks       Do not trace child processes.\n";
-        std::cout << "  --backend <ptrace|ebpf>  Select tracing backend (default: ptrace)\n";        
-        std::cout << "  --help                Show this help message.\n";
+        std::cout << "  --report FILE         Write human-readable report to FILE (default: stdout)\n";
+        std::cout << "  --json FILE           Write JSON report to FILE\n";
+        std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
+        std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
+        std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
+        std::cout << "  --timeout SECONDS     Stop tracing after SECONDS\n";
+        std::cout << "  --follow-forks        Trace child processes (default)\n";
+        std::cout << "  --no-follow-forks     Do not trace child processes\n";
+        std::cout << "  --backend BACKEND     Select tracing backend (ptrace or ebpf, default: ptrace)\n";
+        std::cout << "  --help                Show this help\n";
     }
+
 } // namespace runtimexray

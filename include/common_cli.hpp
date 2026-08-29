@@ -35,9 +35,11 @@ namespace runtimexray {
  * @brief Options shared by all subcommands.
  */
 struct CommonOptions {
-    bool verbose = false; 
+    std::string report_file;          // human-readable report file (empty = stdout)
+    std::string json_file;            // JSON report file (empty = no JSON output)
+    std::string log_level = "info";   // error, warn, info, debug, trace
+    std::string log_file;             // log file (empty = stderr)
     FindingSeverity min_severity = FindingSeverity::Medium;
-    std::string output_format = "text"; // future extension: "json", "xml", etc.
 };
 
 /**
@@ -51,7 +53,9 @@ struct CommonOptions {
  * @param remaining Arguments not recognised as global options.
  * @return true on success, false on invalid global option.
  */
-bool parse_global_options(const std::vector<std::string>& args, CommonOptions& opts, std::vector<std::string>& remaining);
+bool parse_global_options(const std::vector<std::string>& args,
+                            CommonOptions& opts,
+                            std::vector<std::string>& remaining);
 
 } // namespace runtimexray
 

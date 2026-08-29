@@ -27,7 +27,7 @@ if ! $RUN_PREFIX cat /sys/kernel/tracing/available_filter_functions >/dev/null 2
 fi
 
 # Run the trace with eBPF backend for a short time on /bin/ls
-output=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 /bin/ls 2>&1)
+output=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 --log-level debug /bin/ls 2>&1)
 status=$?
 if [ $status -ne 0 ]; then
     echo "eBPF backend failed with status $status"

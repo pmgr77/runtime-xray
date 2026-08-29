@@ -21,7 +21,7 @@ else
     RUN_PREFIX=""
 fi
 
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --follow-forks --timeout 5 "$FORK_TEST_BIN" 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --follow-forks --log-level debug --timeout 5 "$FORK_TEST_BIN" 2>&1)
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
     echo "eBPF trace failed with status $STATUS"
@@ -29,7 +29,15 @@ if [ $STATUS -ne 0 ]; then
     exit 1
 fi
 
-PIDS=$(echo "$OUTPUT" | grep -o "pid=[0-9]*" | sed 's/pid=//' | sort -u)
+# Extract PIDs from debug logs:
+# - Parent PID from execve entry: "syscall=221 name=execve is_entry=1 ret=0" (then later ret=0, but we need the actual PID)
+#   Actually, the parent PID is not in that line; it's in the "execve exit" line with ret=0? No, ret=0 is the return value.
+#   Better: use the getpid syscall: "handle_fork_event: syscall=172 name=getpid is_entry=0 ret=291563" -> ret is the PID.
+#   Or use the clone exit: "handle_fork_event: syscall=220 name=clone is_entry=0 ret=291564" -> ret is the child PID.
+# Extract all ret values from getpid exit and clone exit, and also from other syscalls that return PID? Simpler: use the parent's getpid exit.
+# We'll extract any number that appears after "ret=" in lines that contain "getpid" or "clone" and is_entry=0.
+
+PIDS=$(echo "$OUTPUT" | grep -E "handle_fork_event: syscall=(172|220) name=(getpid|clone) is_entry=0" | grep -o "ret=[0-9]*" | sed 's/ret=//' | sort -u)
 COUNT=$(echo "$PIDS" | wc -l)
 
 if [ $COUNT -ge 2 ]; then

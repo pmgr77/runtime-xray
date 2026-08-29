@@ -61,38 +61,130 @@ namespace runtimexray {
         return "Unknown";
     }
 
-    std::string Reporter::to_text(const FindingList& findings, bool /*verbose*/) {
+    std::string Reporter::to_text(const FindingList& findings,
+                                const ReportContext& context,
+                                const nlohmann::json* extra) {
         std::ostringstream out;
+
+        // ---- Header ----
+        out << "RuntimeXRay Analysis\n";
+        out << "=====================\n";
+        out << "Tool:    " << context.tool_name << " v" << context.tool_version << "\n";
+        out << "Command: " << context.command << "\n";
+        out << "Target:  " << context.target << "\n";
+        out << "Started: " << context.started_at << "\n";
+        out << "Duration: " << context.duration_ms << " ms\n";
+
+        // ---- Extra trace metadata (if present) ----
+        if (extra) {
+            if (extra->contains("backend"))
+                out << "Backend: " << (*extra)["backend"].get<std::string>() << "\n";
+            if (extra->contains("timeout_seconds"))
+                out << "Timeout: " << (*extra)["timeout_seconds"].get<int>() << "s\n";
+            if (extra->contains("timed_out"))
+                out << "Timed out: " << ((*extra)["timed_out"].get<bool>() ? "yes" : "no") << "\n";
+            if (extra->contains("child_output"))
+                out << "Child output: " << (*extra)["child_output"].get<std::string>() << "\n";
+            if (extra->contains("follow_forks"))
+                out << "Follow forks: " << ((*extra)["follow_forks"].get<bool>() ? "yes" : "no") << "\n";
+        }
+
+        out << "\n";
+
         if (findings.empty()) {
             out << "No findings.\n";
             return out.str();
         }
 
-        for (const auto& f : findings) {
-            out << severity_to_string(f.severity) << ": " << f.description << "\n";
-            std::visit([&](const auto& details) {
-                using T = std::decay_t<decltype(details)>;
-                if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
-                    out << "    Feature: " << details.feature << ", Status: " << details.status << "\n";
-                } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
-                    out << "    API: " << details.api
-                        << ", CWE: " << details.cwe_id
-                        << ", Recommendation: " << details.recommendation << "\n";
-                } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
-                    out << "    Path: " << details.path
-                        << ", Reason: " << details.reason << "\n";
-                } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
-                    out << "    Remote: " << details.remote_addr << ":" << details.port
-                        << ", Reason: " << details.reason << "\n";
-                } else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
-                    out << "    Data: " << details.data_snippet
-                        << ", Reason: " << details.reason << "\n";
-                } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                    out << "    Type: " << details.secret_type
-                        << ", Location: " << details.location
-                        << ", Snippet: " << details.snippet << "\n";
+        // ---- Command-specific formatting ----
+        if (context.command == "analyze") {
+            // --- Hardening checks ---
+            out << ">  Hardening checks:\n";
+            bool has_hardening = false;
+            for (const auto& f : findings) {
+                if (std::holds_alternative<HardeningFindingDetails>(f.details)) {
+                    const auto& details = std::get<HardeningFindingDetails>(f.details);
+                    out << "    " << details.feature << ": " << details.status << "\n";
+                    has_hardening = true;
                 }
-            }, f.details);
+            }
+            if (!has_hardening) {
+                out << "    No findings at this severity level.\n";
+            }
+
+            // --- Dangerous API usage ---
+            bool has_api = false;
+            for (const auto& f : findings) {
+                if (std::holds_alternative<DangerousApiFindingDetails>(f.details)) {
+                    const auto& details = std::get<DangerousApiFindingDetails>(f.details);
+                    if (!has_api) {
+                        out << ">  Dangerous API usage:\n";
+                        has_api = true;
+                    }
+                    out << "    Dangerous API: " << details.api
+                        << " (reason: " << details.reason
+                        << ", recommendation: " << details.recommendation
+                        << ", cwe: " << details.cwe_id << ")\n";
+                }
+            }
+            if (!has_api) {
+                out << "    No dangerous API usage found.\n";
+            }
+        } else if (context.command == "mem") {
+            // ---- Memory scanning specific output ----
+            if (findings.empty()) {
+                out << "No sensitive data found in memory of PID " << context.target << ".\n";
+            } else {
+                size_t pages_scanned = 0;
+                if (extra && extra->contains("pages_scanned")) {
+                    pages_scanned = (*extra)["pages_scanned"].get<size_t>();
+                }
+                out << "Found " << findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
+                for (const auto& f : findings) {
+                    std::visit([&](const auto& details) {
+                        using T = std::decay_t<decltype(details)>;
+                        if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
+                            out << " - " << f.description
+                                << " data=\"" << details.data_snippet << "\"\n";
+                        } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
+                            out << " - " << f.description
+                                << " type=" << details.secret_type
+                                << " location=" << details.location
+                                << " data=\"" << details.snippet << "\"\n";
+                        } else {
+                            out << " - " << f.description << "\n";
+                        }
+                    }, f.details);
+                }
+            }
+        } else {
+            out << "Findings (" << findings.size() << "):\n";
+            for (const auto& f : findings) {
+                out << "  [" << severity_to_string(f.severity) << "] " << f.description << "\n";
+                std::visit([&](const auto& details) {
+                    using T = std::decay_t<decltype(details)>;
+                    if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
+                        out << "      Feature: " << details.feature << ", Status: " << details.status << "\n";
+                    } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
+                        out << "      API: " << details.api
+                            << ", CWE: " << details.cwe_id
+                            << ", Recommendation: " << details.recommendation << "\n";
+                    } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
+                        out << "      Path: " << details.path
+                            << ", Reason: " << details.reason << "\n";
+                    } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
+                        out << "      Remote: " << details.remote_addr << ":" << details.port
+                            << ", Reason: " << details.reason << "\n";
+                    } else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
+                        out << "      Data: " << details.data_snippet
+                            << ", Reason: " << details.reason << "\n";
+                    } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
+                        out << "      Type: " << details.secret_type
+                            << ", Location: " << details.location
+                            << ", Snippet: " << details.snippet << "\n";
+                    }
+                }, f.details);
+            }
         }
 
         return out.str();

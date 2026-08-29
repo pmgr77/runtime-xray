@@ -7,7 +7,8 @@
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
-// Copyright 2026 Peter Magram
+
+ // Copyright 2026 Peter Magram
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +24,8 @@
 
 #include "commands/analyze_command.hpp"
 #include "reporter.hpp"
+#include "finding_reporter.hpp"
+#include "logger.hpp"
 
 #include <iostream>
 #include <chrono>
@@ -60,13 +63,14 @@ namespace runtimexray
 
         ElfMetadata metadata;
         FindingList findings;
+
         try {
             findings = runtimexray::analyze_binary(binary_path_,
                                                common.min_severity,
-                                               common.verbose,
+                                               false,
                                                &metadata);
         } catch (const std::exception& e) {
-            std::cerr << "Error: " << e.what() << '\n';
+            Logger::log(LogLevel::Error, std::string("Analysis failed: ") + e.what());
             return 1;
         }
 
@@ -75,55 +79,52 @@ namespace runtimexray
             std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
         );
 
-        if (common.output_format == "json") {
-            ReportContext ctx;
-            ctx.command     = "analyze";
-            ctx.target      = binary_path_;
-            ctx.started_at  = current_iso8601_utc();
-            ctx.duration_ms = duration_ms;
-            std::cout << Reporter::to_json(findings, ctx);
-        } else {
-            std::cout << ">  Hardening checks:\n";
-            bool has_hardening = false;
-            for (const auto& f : findings) {
-                if (std::holds_alternative<HardeningFindingDetails>(f.details)) {
-                    const auto& details = std::get<HardeningFindingDetails>(f.details);
-                    std::cout << "    " << details.feature << ": " << details.status << '\n';
-                    has_hardening = true;
-                }
-            }
-            if (!has_hardening) {
-                std::cout << "    No findings at this severity level.\n";
-            }
+        ReportContext ctx;
+        ctx.command = "analyze";
+        ctx.target = binary_path_;
+        ctx.started_at = runtimexray::current_iso8601_utc();
+        ctx.duration_ms = duration_ms;
+        
+        // ---- Create reporter ----
+        std::unique_ptr<FindingReporter> reporter;
+        std::ofstream file_out;
 
-            bool has_api = false;
-            for (const auto& f : findings) {
-                if (std::holds_alternative<DangerousApiFindingDetails>(f.details)) {
-                    const auto& details = std::get<DangerousApiFindingDetails>(f.details);
-                    if (!has_api) {
-                        std::cout << ">  Dangerous API usage:\n";
-                        has_api = true;
-                    }
-                    std::cout << "    Dangerous API: " << details.api
-                            << " (reason: " << details.reason
-                            << ", recommendation: " << details.recommendation
-                            << ", cwe: " << details.cwe_id << ")\n";
-                }
+        if (!common.json_file.empty()) {
+            file_out.open(common.json_file);
+            if (!file_out) {
+                Logger::log(LogLevel::Error, "Could not open JSON file: " + common.json_file);
+                return 1;
             }
+            reporter = std::make_unique<JsonFindingReporter>(file_out);
+            Logger::log(LogLevel::Info, "Writing JSON report to " + common.json_file);
+        } else if (!common.report_file.empty()) {
+            file_out.open(common.report_file);
+            if (!file_out) {
+                Logger::log(LogLevel::Error, "Could not open report file: " + common.report_file);
+                return 1;
+            }
+            reporter = std::make_unique<TextFindingReporter>(file_out);
+            Logger::log(LogLevel::Info, "Writing text report to " + common.report_file);
+        } else {
+            reporter = std::make_unique<TextFindingReporter>(std::cout);
         }
+
+        reporter->report(findings, ctx, nullptr); // no extra metadata for analyze
         return 0;
     }
 
     void AnalyzeCommand::print_help() const
     {
-        // << "RuntimeXRay - Security posture analyzer for ELF binaries\n\n"
-        std::cout << "Usage: runtimexray analyze [--verbose] [--min-severity <level>] <binary>\n";
-        std::cout << "Options:\n"
-            << "  --min-severity <level>  Show findings at or above severity level.\n"
-            << "                          Levels: Critical, High, Medium, Low, Info\n"
-            << "                          Default: Medium\n"
-            << "  --verbose               Show all findings (equivalent to --min-severity=Info)\n"
-            << "  --help                  Show this help message\n";
+        std::cout << "Usage: runtimexray analyze [--report FILE] [--json FILE] "
+                  << "[--log-level LEVEL] [--log-file FILE] [--min-severity LEVEL] "
+                  << "<binary>\n";
+        std::cout << "Options:\n";
+        std::cout << "  --report FILE         Write human-readable report to FILE (default: stdout)\n";
+        std::cout << "  --json FILE           Write JSON report to FILE\n";
+        std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
+        std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
+        std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
+        std::cout << "  --help                Show this help\n";
     }
 
 } // namespace runtimexray

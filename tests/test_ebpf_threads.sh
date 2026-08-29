@@ -21,8 +21,8 @@ else
     RUN_PREFIX=""
 fi
 
-# Run with --verbose to capture all syscalls (including those from child thread)
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --follow-forks --verbose --timeout 5 "$THREAD_TEST_BIN" 2>&1)
+# Run with --log-level debug to capture all syscalls (including those from child thread)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --follow-forks --log-level debug --timeout 10 "$THREAD_TEST_BIN" 2>&1)
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
     echo "eBPF trace failed with status $STATUS"

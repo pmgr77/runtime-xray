@@ -24,6 +24,7 @@
 
 #include "itrace_backend.hpp"
 #include "trace_bpf_bytecode.h"
+#include "logger.hpp"
 #include "syscall_names.hpp"
 #include <bpf/libbpf.h>
 #include <cstring>
@@ -138,6 +139,15 @@ public:
             std::cerr << "Warning: counter maps not found; debug disabled.\n";
         }
 
+        bpf_map_clone_exit_counter_ = bpf_object__find_map_by_name(bpf_object_, "clone_exit_counter");
+        if (!bpf_map_clone_exit_counter_) {
+            std::cerr << "Warning: clone_exit_counter map not found; debug disabled.\n";
+        }
+        bpf_map_ringbuf_reserve_fail_ = bpf_object__find_map_by_name(bpf_object_, "ringbuf_reserve_fail");
+        if (!bpf_map_ringbuf_reserve_fail_) {
+            std::cerr << "Warning: ringbuf_reserve_fail map not found; debug disabled.\n";
+        }        
+
         __u32 key = static_cast<__u32>(child_pid_);
         __u32 value = key;
         if (bpf_map__update_elem(bpf_map_pid_filter_, &key, sizeof(key), &value, sizeof(value), BPF_ANY) != 0) {            bpf_object__close(bpf_object_);
@@ -201,6 +211,22 @@ public:
             // busy-wait until all currently available events are consumed
         }
 
+        // ---- Debug: read counters ----
+        if (debug_enabled_) {
+            if (bpf_map_clone_exit_counter_) {
+                __u32 zero = 0;
+                __u64 clone_count = 0;
+                if (bpf_map__lookup_elem(bpf_map_clone_exit_counter_, &zero, sizeof(zero), &clone_count, sizeof(clone_count), 0) == 0)
+                    Logger::log(LogLevel::Debug, "BPF clone_exit_counter = " + std::to_string(clone_count));
+            }
+            if (bpf_map_ringbuf_reserve_fail_) {
+                __u32 zero = 0;
+                __u64 fail_count = 0;
+                if (bpf_map__lookup_elem(bpf_map_ringbuf_reserve_fail_, &zero, sizeof(zero), &fail_count, sizeof(fail_count), 0) == 0)
+                    Logger::log(LogLevel::Debug, "BPF ringbuf_reserve_fail = " + std::to_string(fail_count));
+            }
+        }
+        
         // Cleanup eBPF resources
         ring_buffer__free(ring_buffer_);
         bpf_link__destroy(link_enter_);
@@ -219,18 +245,28 @@ public:
 private:
 
     void add_pid_to_filter(pid_t pid) {
+        Logger::log(LogLevel::Debug, "Adding PID " + std::to_string(pid) + " to eBPF filter");
+
         __u32 key = static_cast<__u32>(pid);
         __u32 value = key;
         int err = bpf_map__update_elem(bpf_map_pid_filter_, &key, sizeof(key),
                                        &value, sizeof(value), BPF_ANY);
         if (err < 0 && debug_enabled_) {
             std::cerr << "Warning: failed to add PID " << pid
-                      << " to eBPF filter: " << std::strerror(-err) << "\n";            
+                      << " to eBPF filter: " << std::strerror(-err) << "\n";
+            Logger::log(LogLevel::Error, "Failed to add PID " + std::to_string(pid) +
+                        " to eBPF filter: " + std::strerror(-err));
+        } else {
+            Logger::log(LogLevel::Debug, "Successfully added PID " + std::to_string(pid));
         }
     }
 
     void handle_fork_event(const struct syscall_event* ev) {
         const char* name = syscall_name(ev->syscall_id);
+        Logger::log(LogLevel::Debug, "handle_fork_event: syscall=" + std::to_string(ev->syscall_id) +
+                    " name=" + name + " is_entry=" + std::to_string(ev->is_entry) +
+                    " ret=" + std::to_string(ev->ret));
+        
         if (!follow_forks_) {
             return;
         }
@@ -251,6 +287,7 @@ private:
         }
 
         if (is_fork_like) {
+            Logger::log(LogLevel::Debug, "Fork-like syscall detected, adding PID " + std::to_string(ev->ret));
             add_pid_to_filter(static_cast<pid_t>(ev->ret));
         }
     }
@@ -361,6 +398,8 @@ private:
     struct bpf_map* bpf_map_events_ = nullptr;
     struct bpf_map* bpf_map_enter_counter_ = nullptr;
     struct bpf_map* bpf_map_exit_counter_ = nullptr;
+    struct bpf_map* bpf_map_clone_exit_counter_ = nullptr;
+    struct bpf_map* bpf_map_ringbuf_reserve_fail_ = nullptr;
     struct bpf_link* link_enter_ = nullptr;
     struct bpf_link* link_exit_ = nullptr;
     struct ring_buffer* ring_buffer_ = nullptr;

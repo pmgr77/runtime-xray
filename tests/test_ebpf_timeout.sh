@@ -33,8 +33,8 @@ if [ $STATUS -ne 0 ]; then
     exit 1
 fi
 
-# Check for timeout message (only printed in non-JSON mode)
-if echo "$OUTPUT" | grep -q "Trace timed out"; then
+# Check for timeout indication in metadata
+if echo "$OUTPUT" | grep -q "Timed out: yes"; then
     exit 0
 else
     echo "Timeout message not found"
