@@ -44,6 +44,7 @@ set(RUNTIMEXRAY_SOURCES
     src/reporter.cpp
     src/ptrace_backend.cpp
     src/logger.cpp
+    src/lineage_analyzer.cpp
 )
 
 # ---------------------------------------------------------------------------

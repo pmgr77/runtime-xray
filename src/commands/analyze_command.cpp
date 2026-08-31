@@ -109,7 +109,8 @@ namespace runtimexray
             reporter = std::make_unique<TextFindingReporter>(std::cout);
         }
 
-        reporter->report(findings, ctx, nullptr); // no extra metadata for analyze
+        Report r{std::move(ctx), std::move(findings), std::nullopt};
+        reporter->report(r, nullptr); // no extra metadata for analyze
         return 0;
     }
 

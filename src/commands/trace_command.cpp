@@ -33,6 +33,7 @@
 #include "logger.hpp"
 #include "finding_reporter.hpp"
 #include "dynamic_analysis.hpp"
+#include "lineage_analyzer.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -218,6 +219,8 @@ namespace runtimexray {
         std::optional<nlohmann::json> extra;
         std::string child_output;
 
+        runtimexray::LineageAnalyzer lineage_analyzer;
+
         try {
             std::vector<std::string> full_args;
             full_args.reserve(1 + program_args_.size());
@@ -236,6 +239,9 @@ namespace runtimexray {
             } else {
                 backend = runtimexray::create_default_tracer_backend();
             }
+
+            lineage_analyzer.set_backend(backend.get());
+
             TraceConfig config;
             config.program = program_;
             config.args = full_args;
@@ -244,6 +250,9 @@ namespace runtimexray {
             config.debug = Logger::is_enabled(LogLevel::Debug);
 
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
+                // Also feed to lineage analyzer
+                lineage_analyzer.on_syscall_event(ev);
+
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
 
@@ -289,6 +298,7 @@ namespace runtimexray {
             };
 
             backend->trace(config);
+
             // ---- Child output handling (works for any backend that saves it) ----
             child_output = backend->child_output_path();
 
@@ -343,9 +353,21 @@ namespace runtimexray {
         } else {
             reporter = std::make_unique<TextFindingReporter>(std::cout);
         }
+        // After trace, produce the graph
+        auto graph = lineage_analyzer.produce_graph();
 
+        Logger::log(LogLevel::Debug, "lineage_graph observations = " + std::to_string(graph.observations.size()));
+        Logger::log(LogLevel::Debug, "lineage_graph edges = " + std::to_string(graph.edges.size()));        
+        if (graph.observations.empty()) {
+            Logger::log(LogLevel::Debug, "lineage graph is EMPTY");
+        } else {
+            Logger::log(LogLevel::Debug, "lineage graph is NOT EMPTY");
+        }
+
+        // Build the report
+        Report r{std::move(ctx), std::move(findings), std::move(graph)};
         // Pass extra metadata to the reporter
-        reporter->report(findings, ctx, extra.has_value() ? &*extra : nullptr);
+        reporter->report(r, extra.has_value() ? &*extra : nullptr);
 
         return 0;
     }

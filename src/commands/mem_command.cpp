@@ -124,8 +124,9 @@ namespace runtimexray
         }
 
         // ---- Generate report ----
+        Report r{std::move(ctx), std::move(findings), std::nullopt};
         // Pass extra metadata (pages_scanned, max_pages) in JSON, but for text it's ignored.
-        reporter->report(findings, ctx, &extra);
+        reporter->report(r, &extra);
 
         return 0;
     }

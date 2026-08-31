@@ -43,7 +43,7 @@ public:
      * @param ctx Report context (command, target, timings, etc.).
      * @param extra Optional extra JSON metadata (e.g., trace backend, timeout).
      */
-    virtual void report(const FindingList& findings, const ReportContext& ct, const nlohmann::json* extra) = 0;
+    virtual void report(const Report& r, const nlohmann::json* extra) = 0;
 };
 
 /**
@@ -52,8 +52,8 @@ public:
 class TextFindingReporter : public FindingReporter {
 public:
     explicit TextFindingReporter(std::ostream& out) : out_(out) {}
-    void report(const FindingList& findings, const ReportContext& ctx, const nlohmann::json* extra) override {
-        out_ << Reporter::to_text(findings, ctx, extra);
+    void report(const Report& r, const nlohmann::json* extra) override {
+        out_ << Reporter::to_text(r, extra);
     }
 private:
     std::ostream& out_;
@@ -65,8 +65,8 @@ private:
 class JsonFindingReporter : public FindingReporter {
 public:
     explicit JsonFindingReporter(std::ostream& out) : out_(out) {}
-    void report(const FindingList& findings, const ReportContext& ctx, const nlohmann::json* extra) override {
-        out_ << Reporter::to_json(findings, ctx, extra);
+    void report(const Report& r, const nlohmann::json* extra) override {
+        out_ << Reporter::to_json(r, extra);
     }
 private:
     std::ostream& out_;    

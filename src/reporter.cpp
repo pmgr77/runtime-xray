@@ -35,6 +35,16 @@
 
 namespace runtimexray {
 
+    static const char* relation_to_string(RelationType rel) {
+        switch (rel) {
+            case RelationType::Chronological: return "chronological";
+            case RelationType::Causality:     return "causality";
+            case RelationType::DataFlow:      return "dataflow";
+            case RelationType::Calls:         return "calls";
+            default: return "unknown";
+        }
+    }
+
     std::string current_iso8601_utc() {
         auto now = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
@@ -61,19 +71,17 @@ namespace runtimexray {
         return "Unknown";
     }
 
-    std::string Reporter::to_text(const FindingList& findings,
-                                const ReportContext& context,
-                                const nlohmann::json* extra) {
+    std::string Reporter::to_text(const Report& r, const nlohmann::json* extra) {
         std::ostringstream out;
 
         // ---- Header ----
         out << "RuntimeXRay Analysis\n";
         out << "=====================\n";
-        out << "Tool:    " << context.tool_name << " v" << context.tool_version << "\n";
-        out << "Command: " << context.command << "\n";
-        out << "Target:  " << context.target << "\n";
-        out << "Started: " << context.started_at << "\n";
-        out << "Duration: " << context.duration_ms << " ms\n";
+        out << "Tool:    " << r.context.tool_name << " v" << r.context.tool_version << "\n";
+        out << "Command: " << r.context.command << "\n";
+        out << "Target:  " << r.context.target << "\n";
+        out << "Started: " << r.context.started_at << "\n";
+        out << "Duration: " << r.context.duration_ms << " ms\n";
 
         // ---- Extra trace metadata (if present) ----
         if (extra) {
@@ -91,99 +99,128 @@ namespace runtimexray {
 
         out << "\n";
 
-        if (findings.empty()) {
-            out << "No findings.\n";
-            return out.str();
-        }
-
         // ---- Command-specific formatting ----
-        if (context.command == "analyze") {
-            // --- Hardening checks ---
-            out << ">  Hardening checks:\n";
-            bool has_hardening = false;
-            for (const auto& f : findings) {
-                if (std::holds_alternative<HardeningFindingDetails>(f.details)) {
-                    const auto& details = std::get<HardeningFindingDetails>(f.details);
-                    out << "    " << details.feature << ": " << details.status << "\n";
-                    has_hardening = true;
-                }
-            }
-            if (!has_hardening) {
-                out << "    No findings at this severity level.\n";
-            }
-
-            // --- Dangerous API usage ---
-            bool has_api = false;
-            for (const auto& f : findings) {
-                if (std::holds_alternative<DangerousApiFindingDetails>(f.details)) {
-                    const auto& details = std::get<DangerousApiFindingDetails>(f.details);
-                    if (!has_api) {
-                        out << ">  Dangerous API usage:\n";
-                        has_api = true;
+        if (!r.findings.empty()) {
+            if (r.context.command == "analyze") {
+                // --- Hardening checks ---
+                out << ">  Hardening checks:\n";
+                bool has_hardening = false;
+                for (const auto& f : r.findings) {
+                    if (std::holds_alternative<HardeningFindingDetails>(f.details)) {
+                        const auto& details = std::get<HardeningFindingDetails>(f.details);
+                        out << "    " << details.feature << ": " << details.status << "\n";
+                        has_hardening = true;
                     }
-                    out << "    Dangerous API: " << details.api
-                        << " (reason: " << details.reason
-                        << ", recommendation: " << details.recommendation
-                        << ", cwe: " << details.cwe_id << ")\n";
                 }
-            }
-            if (!has_api) {
-                out << "    No dangerous API usage found.\n";
-            }
-        } else if (context.command == "mem") {
-            // ---- Memory scanning specific output ----
-            if (findings.empty()) {
-                out << "No sensitive data found in memory of PID " << context.target << ".\n";
-            } else {
-                size_t pages_scanned = 0;
-                if (extra && extra->contains("pages_scanned")) {
-                    pages_scanned = (*extra)["pages_scanned"].get<size_t>();
+                if (!has_hardening) {
+                    out << "    No findings at this severity level.\n";
                 }
-                out << "Found " << findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
-                for (const auto& f : findings) {
+
+                // --- Dangerous API usage ---
+                bool has_api = false;
+                for (const auto& f : r.findings) {
+                    if (std::holds_alternative<DangerousApiFindingDetails>(f.details)) {
+                        const auto& details = std::get<DangerousApiFindingDetails>(f.details);
+                        if (!has_api) {
+                            out << ">  Dangerous API usage:\n";
+                            has_api = true;
+                        }
+                        out << "    Dangerous API: " << details.api
+                            << " (reason: " << details.reason
+                            << ", recommendation: " << details.recommendation
+                            << ", cwe: " << details.cwe_id << ")\n";
+                    }
+                }
+                if (!has_api) {
+                    out << "    No dangerous API usage found.\n";
+                }
+            } else if (r.context.command == "mem") {
+                // ---- Memory scanning specific output ----
+                if (r.findings.empty()) {
+                    out << "No sensitive data found in memory of PID " << r.context.target << ".\n";
+                } else {
+                    size_t pages_scanned = 0;
+                    if (extra && extra->contains("pages_scanned")) {
+                        pages_scanned = (*extra)["pages_scanned"].get<size_t>();
+                    }
+                    out << "Found " << r.findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
+                    for (const auto& f : r.findings) {
+                        std::visit([&](const auto& details) {
+                            using T = std::decay_t<decltype(details)>;
+                            if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
+                                out << " - " << f.description
+                                    << " data=\"" << details.data_snippet << "\"\n";
+                            } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
+                                out << " - " << f.description
+                                    << " type=" << details.secret_type
+                                    << " location=" << details.location
+                                    << " data=\"" << details.snippet << "\"\n";
+                            } else {
+                                out << " - " << f.description << "\n";
+                            }
+                        }, f.details);
+                    }
+                }
+            } else { // Generic (trace)
+                out << "Findings (" << r.findings.size() << "):\n";
+                for (const auto& f : r.findings) {
+                    out << "  [" << severity_to_string(f.severity) << "] " << f.description << "\n";
                     std::visit([&](const auto& details) {
                         using T = std::decay_t<decltype(details)>;
-                        if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
-                            out << " - " << f.description
-                                << " data=\"" << details.data_snippet << "\"\n";
+                        if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
+                            out << "      Feature: " << details.feature << ", Status: " << details.status << "\n";
+                        } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
+                            out << "      API: " << details.api
+                                << ", CWE: " << details.cwe_id
+                                << ", Recommendation: " << details.recommendation << "\n";
+                        } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
+                            out << "      Path: " << details.path
+                                << ", Reason: " << details.reason << "\n";
+                        } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
+                            out << "      Remote: " << details.remote_addr << ":" << details.port
+                                << ", Reason: " << details.reason << "\n";
+                        } else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
+                            out << "      Data: " << details.data_snippet
+                                << ", Reason: " << details.reason << "\n";
                         } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                            out << " - " << f.description
-                                << " type=" << details.secret_type
-                                << " location=" << details.location
-                                << " data=\"" << details.snippet << "\"\n";
-                        } else {
-                            out << " - " << f.description << "\n";
+                            out << "      Type: " << details.secret_type
+                                << ", Location: " << details.location
+                                << ", Snippet: " << details.snippet << "\n";
                         }
                     }, f.details);
                 }
             }
         } else {
-            out << "Findings (" << findings.size() << "):\n";
-            for (const auto& f : findings) {
-                out << "  [" << severity_to_string(f.severity) << "] " << f.description << "\n";
-                std::visit([&](const auto& details) {
-                    using T = std::decay_t<decltype(details)>;
-                    if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
-                        out << "      Feature: " << details.feature << ", Status: " << details.status << "\n";
-                    } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
-                        out << "      API: " << details.api
-                            << ", CWE: " << details.cwe_id
-                            << ", Recommendation: " << details.recommendation << "\n";
-                    } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
-                        out << "      Path: " << details.path
-                            << ", Reason: " << details.reason << "\n";
-                    } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
-                        out << "      Remote: " << details.remote_addr << ":" << details.port
-                            << ", Reason: " << details.reason << "\n";
-                    } else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
-                        out << "      Data: " << details.data_snippet
-                            << ", Reason: " << details.reason << "\n";
-                    } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                        out << "      Type: " << details.secret_type
-                            << ", Location: " << details.location
-                            << ", Snippet: " << details.snippet << "\n";
+            out << "No findings.\n";
+        }
+
+        // ---- Lineage Graph ----
+        if (r.lineage_graph.has_value()) {
+            const auto& graph = r.lineage_graph.value();
+            out << "\nLineage Graph:\n";
+            out << "  Summary: " << graph.summary << "\n";
+            out << "  Observations (" << graph.observations.size() << "):\n";
+            for (size_t i = 0; i < graph.observations.size(); ++i) {
+                const auto& obs = graph.observations[i];
+                out << "    [" << i << "] ";
+                if (obs.type == ObservationType::Event) {
+                    out << "Event: " << obs.syscall_name;
+                    if (obs.syscall_name == "process") {
+                        out << " (PID " << obs.pid << ")";
+                    } else {
+                        out << " (PID " << obs.pid << ", TID " << obs.tid << ")";
                     }
-                }, f.details);
+                } else if (obs.type == ObservationType::Data) {
+                    out << "Data: " << obs.data_type << " = " << obs.data_snippet;
+                }
+                out << "\n";
+            }
+            out << "  Edges (" << graph.edges.size() << "):\n";
+            for (const auto& edge : graph.edges) {
+                out << "    " << edge.from_index << " -> " << edge.to_index
+                    << " [" << relation_to_string(edge.relation) << "]";
+                if (!edge.details.empty()) out << " (" << edge.details << ")";
+                out << "\n";
             }
         }
 
@@ -234,26 +271,25 @@ namespace runtimexray {
         }
     }
 
-    std::string Reporter::to_json(const FindingList& findings, const ReportContext& context,
-                                  const nlohmann::json* extra) {
+    std::string Reporter::to_json(const Report& r, const nlohmann::json* extra) {
         nlohmann::json j;
 
         j["schema_version"] = "1.1";
-        j["tool"] = context.tool_name;
-        j["tool_version"] = context.tool_version;
-        j["command"] = context.command;
-        j["target"] = context.target;
-        j["started_at"] = context.started_at;
-        j["duration_ms"] = context.duration_ms;
+        j["tool"] = r.context.tool_name;
+        j["tool_version"] = r.context.tool_version;
+        j["command"] = r.context.command;
+        j["target"] = r.context.target;
+        j["started_at"] = r.context.started_at;
+        j["duration_ms"] = r.context.duration_ms;
 
         nlohmann::json findings_arr = nlohmann::json::array();
-        serialize_findings(findings, findings_arr);
+        serialize_findings(r.findings, findings_arr);
         j["findings"] = findings_arr;
 
         // Summary
         std::map<std::string, int> by_severity;
         std::map<std::string, int> by_type;
-        for (const auto& f : findings) {
+        for (const auto& f : r.findings) {
             by_severity[severity_to_string(f.severity)]++;
             std::visit([&](const auto& details) {
                 using T = std::decay_t<decltype(details)>;
@@ -266,7 +302,7 @@ namespace runtimexray {
             }, f.details);
         }
 
-        j["summary"]["total"] = findings.size();
+        j["summary"]["total"] = r.findings.size();
         for (const auto& [k, v] : by_severity) j["summary"]["by_severity"][k] = v;
         for (const auto& [k, v] : by_type) j["summary"]["by_type"][k] = v;
 
@@ -276,7 +312,16 @@ namespace runtimexray {
             }
         }
 
+        if (r.lineage_graph.has_value()) {
+            nlohmann::json lineage_json;
+            const auto& graph = r.lineage_graph.value();
+            lineage_json["summary"] = graph.summary;
+            // Serialize observations and edges (we'll need to convert to JSON)
+            // ...
+            j["lineage"] = lineage_json;
+        }
+
         return j.dump(4);
-    }    
+    }
 
 } // namespace runtimexray

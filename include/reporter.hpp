@@ -26,11 +26,13 @@
 #define RUNTIMEXRAY_REPORTER_HPP
 
 #include "finding.hpp"
+#include "lineage.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
+#include <optional>
 
 namespace runtimexray {
-    
+
 struct ReportContext {
     std::string tool_name = "runtimexray";
     std::string tool_version = "0.1.0";
@@ -40,15 +42,21 @@ struct ReportContext {
     int duration_ms = 0;
 };
 
+struct Report {
+    ReportContext context;
+    FindingList findings;
+    std::optional<LineageGraph> lineage_graph;
+};
+
 std::string current_iso8601_utc();
 
 class Reporter {
 public:
     // Generates a human-readable text report
-    static std::string to_text(const FindingList& findings, const ReportContext& context, const nlohmann::json* extra = nullptr);
+    static std::string to_text(const Report& r, const nlohmann::json* extra = nullptr);
 
     // Generates a JSON report
-    static std::string to_json(const FindingList& findings, const ReportContext& context, const nlohmann::json* extra = nullptr);
+    static std::string to_json(const Report& r, const nlohmann::json* extra = nullptr);
 
 private:
     static std::string severity_to_string(FindingSeverity severity);

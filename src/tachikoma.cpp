@@ -354,7 +354,7 @@ namespace runtimexray {
 
         SyscallEvent ev;
         ev.pid = pid;
-        ev.tid = pid;
+        ev.tid = pid; // ptrace traces individual threads
         ev.syscall_number = regs.syscall_number;
         ev.arg0 = regs.args[0];
         ev.arg1 = regs.args[1];
