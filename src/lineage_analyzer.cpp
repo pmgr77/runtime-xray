@@ -24,6 +24,7 @@
 
 #include "lineage_analyzer.hpp"
 #include "syscall_names.hpp"
+#include "logger.hpp"
 #include <cstring>
 #include <chrono>
 
@@ -84,6 +85,10 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid,
 }
 
 void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
+    Logger::log(LogLevel::Debug, "on_syscall_event: pid=" + std::to_string(ev.pid) +
+                 " syscall=" + std::to_string(ev.syscall_number) +
+                 " entry=" + std::to_string(ev.is_entry));
+    
     pid_t pid = ev.pid;
     // We need to pass tid from SyscallEvent; we'll need to extend it
     pid_t tid = ev.tid;
@@ -123,6 +128,11 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         // Store pending entry for exit pairing
         pending_entry_[pid][tid] = sys_idx;
 
+        // If this is an execve entry, capture the program name immediately.
+        if (obs.syscall_name == "execve") {
+            handle_execve_entry(ev);
+        }
+        
     } else {
         // Syscall exit
         auto& pending_map = pending_entry_[pid];
@@ -172,21 +182,56 @@ void LineageAnalyzer::handle_fork_exit(const SyscallEvent& ev) {
     add_edge(parent_idx, child_idx, RelationType::Causality, "fork created child");
 }
 
+void LineageAnalyzer::handle_execve_entry(const SyscallEvent& ev) {
+    if (!backend_) {
+        Logger::log(LogLevel::Debug, "No backend set for LineageAnalyzer; cannot read execve path.");
+        return;
+    }
+    uint64_t path_addr = ev.arg0;
+    std::string path = backend_->read_string(path_addr);
+    if (path.empty()) {
+        Logger::log(LogLevel::Debug, "handle_execve_entry: read_string returned empty for address 0x" + std::to_string(path_addr));
+        return;
+    }
+    Logger::log(LogLevel::Debug, "handle_execve_entry: path = " + path);
+    auto it = process_node_map_.find(ev.pid);
+    if (it != process_node_map_.end()) {
+        observations_[it->second].program_name = path;
+        Logger::log(LogLevel::Debug, "Updated process node with program name (from execve entry): " + path);
+    } else {
+        Logger::log(LogLevel::Debug, "Process node not found for PID " + std::to_string(ev.pid));
+    }
+}
+
 void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
     // Execve succeeded if return_value == 0
-    if (ev.return_value != 0) return;
-    if (!backend_) return;
+    if (ev.return_value != 0) {
+        Logger::log(LogLevel::Debug, "execve failed, return=" + std::to_string(ev.return_value));
+        return;
+    }
+    if (!backend_) {
+        Logger::log(LogLevel::Debug, "No backend set for LineageAnalyzer; cannot read execve path.");
+        return;
+    }
 
     // arg0 is the path pointer
     uint64_t path_addr = ev.arg0;
     std::string path = backend_->read_string(path_addr);
-    if (!path.empty()) {
+    if (path.empty()) {
+        Logger::log(LogLevel::Debug, "handle_execve_exit: read_string returned empty for address 0x" + std::to_string(path_addr));
+    } else {
+        Logger::log(LogLevel::Debug, "handle_execve_exit: path = " + path);
         // Update the process node's program name
         auto it = process_node_map_.find(ev.pid);
         if (it != process_node_map_.end()) {
             observations_[it->second].program_name = path;
+            Logger::log(LogLevel::Debug, "Updated process node with program name");
+        } else {
+            Logger::log(LogLevel::Debug, "Process node not found for PID " + std::to_string(ev.pid));
         }
     }
+    // Note: Execve exit may not always be delivered; we rely on the entry handler for the program name.
+    // The exit handler is kept as a fallback for debugging.    
 }
 
 void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {

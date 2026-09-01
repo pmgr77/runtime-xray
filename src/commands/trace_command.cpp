@@ -239,7 +239,7 @@ namespace runtimexray {
             } else {
                 backend = runtimexray::create_default_tracer_backend();
             }
-
+            // Set backend in lineage analyzer
             lineage_analyzer.set_backend(backend.get());
 
             TraceConfig config;

@@ -296,6 +296,10 @@ if(NOT SKIP_PTRACE_TESTS)
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
     set_tests_properties(check_trace_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
+    add_test(NAME check_capture_program_name
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_program_name.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:exec_echo_test>)
+    set_tests_properties(check_capture_program_name PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
 endif()
 
 if(BUILD_EXAMPLES)
