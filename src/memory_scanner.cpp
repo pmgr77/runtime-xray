@@ -25,6 +25,7 @@
 #include "memory_scanner.hpp"
 #include "analyzer_registry.hpp"
 #include "evidence.hpp"
+#include "logger.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -33,6 +34,8 @@
 #include <sstream>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <cerrno>
 
 namespace runtimexray {
 
@@ -82,6 +85,10 @@ std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
 
     std::string line;
     while (std::getline(maps, line)) {
+        // Log every line from maps (for debugging)
+        Logger::log(LogLevel::Debug, "Maps line: " + line);
+
+        // Try to parse the line manually to handle any format
         std::istringstream iss(line);
         uint64_t start, end;
         char dash;
@@ -90,17 +97,23 @@ std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
         std::string rest;
 
         if (!(iss >> std::hex >> start >> dash >> end >> perms >> offset)) {
+            Logger::log(LogLevel::Debug, "Failed to parse maps line: " + line);
             continue;
         }
 
-        // The rest of the line contains device, inode, and optional pathname.
+        // Read the rest (device, inode, pathname)
         std::getline(iss, rest);
-        rest.erase(0, rest.find_first_not_of(" \t"));
-        std::string pathname = rest;
+        size_t pos = rest.find_first_not_of(" \t");
+        if (pos != std::string::npos) {
+            rest.erase(0, pos);
+        }
+
+        // Log every region (including non-readable)
+        Logger::log(LogLevel::Debug, "Maps entry: 0x" + std::to_string(start) + " - 0x" + std::to_string(end) + " (" + perms + ")");        
 
         // Only include regions that are readable.
         if (perms[0] == 'r') {
-            regions.push_back({start, end, perms, pathname});
+            regions.push_back({start, end, perms, rest});
         }
     }
     return regions;
@@ -126,6 +139,14 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
         return; // No readable regions or failed to read maps
     }
 
+    // Compute total pages
+    size_t total_pages = 0;
+    for (const auto& region : regions) {
+        total_pages += (region.end - region.start) / 4096;
+    }
+    Logger::log(LogLevel::Debug, "Total readable pages: " + std::to_string(total_pages) +
+               ", max_pages: " + std::to_string(max_pages));
+
     constexpr size_t chunk_size = 4096;
     std::vector<std::byte> buffer(chunk_size);
     size_t found = 0;
@@ -136,6 +157,8 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
             break;
         }
         uint64_t address = region.start;
+        Logger::log(LogLevel::Debug, "Scanning region 0x" + std::to_string(address) +
+                   " - 0x" + std::to_string(region.end) + " (" + region.perms + ")");        
         while (address < region.end && found < max_findings && scanned < max_pages) {
             size_t to_read = std::min<size_t>(chunk_size, region.end - address);
 
@@ -149,16 +172,27 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
 
             ssize_t n = process_vm_readv(pid, &local, 1, &remote, 1, 0);
             if (n <= 0) {
+                Logger::log(LogLevel::Debug, "process_vm_readv failed at 0x" + std::to_string(address) +
+                " errno=" + std::to_string(errno) + " (" + std::strerror(errno) + ")");
                 address += 4096; // skip inaccessible page
                 ++scanned;
+                if (scanned % 100 == 0) {
+                    Logger::log(LogLevel::Debug, "Scanned " + std::to_string(scanned) + " pages (skipped)");
+                }                
                 continue;
             }
 
             ++scanned;
+            if (scanned % 100 == 0) {
+                Logger::log(LogLevel::Debug, "Scanned " + std::to_string(scanned) + " pages (read ok)");
+            }
 
             std::string chunk(reinterpret_cast<char*>(buffer.data()), static_cast<size_t>(n));
+            if (chunk.find("password=") != std::string::npos) {
+                Logger::log(LogLevel::Debug, "Found 'password=' in chunk at 0x" + std::to_string(address));
+            }
             // Create evidence and send to registry
-            MemoryChunkEvidence ev{chunk, "memory", pid};
+            MemoryChunkEvidence ev{chunk, "memory", pid, address};
             FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
             for (const auto& f : results) {
                 if (found >= max_findings) break;
@@ -185,7 +219,7 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     size_t found = 0;
     for (const auto& arg : args) {
         // Create evidence from this argument string.
-        MemoryChunkEvidence ev{arg, "cmdline", pid};
+        MemoryChunkEvidence ev{arg, "cmdline", pid, 0};
         FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
         for (const auto& f : results) {
             if (found >= max_findings) {
@@ -207,7 +241,7 @@ void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     size_t found = 0;
     for (const auto& var : env_vars) {
         // Create evidence from this environment variable string.
-        MemoryChunkEvidence ev{var, "environment", pid};
+        MemoryChunkEvidence ev{var, "environment", pid, 0};
         FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
         for (const auto& f : results) {
             if (found >= max_findings) {
@@ -249,6 +283,10 @@ void scan_process_for_secrets(pid_t pid, FindingList& findings,
     if (pages_scanned) {
         *pages_scanned = scanned;
     }
+}
+
+std::string get_process_name(pid_t pid) {
+    return read_proc_file(pid, "comm");
 }
 
 } // namespace runtimexray

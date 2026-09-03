@@ -17,6 +17,9 @@ target_link_libraries(thread_test pthread)
 add_executable(exec_echo_test exec_echo_test.c)
 target_compile_options(exec_echo_test PRIVATE -O0)
 
+add_executable(secret_holder secret_holder.c)
+target_compile_options(secret_holder PRIVATE -O0)
+
 # Optionally, set output directory
-set_target_properties(dynamic_target fork_test thread_test exec_echo_test PROPERTIES
+set_target_properties(dynamic_target fork_test thread_test exec_echo_test secret_holder PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

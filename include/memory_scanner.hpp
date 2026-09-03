@@ -88,6 +88,13 @@ namespace runtimexray {
                                  size_t max_findings = 50,
                                  size_t max_pages = 1000,
                                  size_t* pages_scanned = nullptr);
+
+    /**
+     * @brief Get the process name (comm) for a given PID.
+     * @param pid Process ID.
+     * @return Process name (or empty string on failure).
+     */
+    std::string get_process_name(pid_t pid);
 } // namespace runtimexray
 
 #endif // RUNTIMEXRAY_MEMORY_SCANNER_HPP

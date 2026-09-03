@@ -64,9 +64,10 @@ struct NetworkEvidence {
  * @brief Describes a chunk of memory that was read and may contain secrets.
  */
 struct MemoryChunkEvidence {
-    std::string chunk;      // already sanitised printable fragment
-    std::string location;   // "cmdline", "environment", "memory"
+    std::string chunk;          // already sanitised printable fragment
+    std::string location;       // "cmdline", "environment", "memory"
     pid_t pid;
+    uintptr_t address = 0;      // memory address where the secret was found
 };
 
 /**

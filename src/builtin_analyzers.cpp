@@ -465,7 +465,7 @@ public:
                     FindingSeverity::High,
                     "Sensitive data found in memory",
                     "Potential secret in memory: " + keyword,
-                    MemorySecretFindingDetails{snippet, keyword, m->location}
+                    MemorySecretFindingDetails{snippet, keyword, m->location, m->address}
                 );
             }
         }
@@ -488,7 +488,7 @@ public:
                     FindingSeverity::High,
                     "Sensitive data found in memory",
                     "Private key detected in process memory.",
-                    MemorySecretFindingDetails{snippet, "private_key", m->location}
+                    MemorySecretFindingDetails{snippet, "private_key", m->location, m->address}
                 );
             }
         }

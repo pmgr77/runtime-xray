@@ -27,6 +27,7 @@
 #include "finding_filter.hpp"
 #include "logger.hpp"
 #include "finding_reporter.hpp"
+#include "lineage.hpp"
 #include <iostream>
 #include <chrono>
 namespace runtimexray
@@ -79,17 +80,68 @@ namespace runtimexray
         // ---- Scan process memory ----
         try {
             runtimexray::scan_process_for_secrets(pid_, findings, 50, max_pages_, &pages_scanned);
+            Logger::log(LogLevel::Info, "Scanned " + std::to_string(pages_scanned) + " pages for PID " + std::to_string(pid_));
+            // -- debug --
+            Logger::log(LogLevel::Info, "Starting mem scan for PID " + std::to_string(pid_));
+            auto regions = get_readable_regions(pid_);
+            Logger::log(LogLevel::Info, "Found " + std::to_string(regions.size()) + " readable regions");
+            for (const auto& region : regions) {
+                Logger::log(LogLevel::Debug, "Region: 0x" + std::to_string(region.start) + " - 0x" + std::to_string(region.end) + " (" + region.perms + ")");
+            }
+            // end of debug
             runtimexray::filter_findings(findings, common.min_severity, false);
         } catch (const std::exception& e) {
             Logger::log(LogLevel::Error, std::string("Memory scan failed: ") + e.what());
             return 1;
         }
-
+        
         auto end_time = std::chrono::steady_clock::now();
         int duration_ms = static_cast<int>(
             std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
         );
 
+        // ---- Build lineage graph ----
+        LineageGraph graph;
+        graph.summary = "Memory scan for PID " + std::to_string(pid_) + " completed";
+
+        // Process node
+        Observation proc_obs;
+        proc_obs.type = ObservationType::Event;
+        proc_obs.syscall_name = "process";
+        proc_obs.pid = pid_;
+        proc_obs.tid = pid_;
+        proc_obs.start_time = start_time;
+        proc_obs.end_time = end_time;
+        proc_obs.program_name = runtimexray::get_process_name(pid_);
+        size_t proc_idx = graph.observations.size();
+        graph.observations.push_back(proc_obs);
+        
+        // Data nodes for memory secrets
+        for (const auto& f: findings) {
+            if (auto* details = std::get_if<MemorySecretFindingDetails>(&f.details)) {
+                Observation data_obs;
+                data_obs.type = ObservationType::Data;
+                data_obs.data_type = details->secret_type;
+                data_obs.data_snippet = details->snippet;
+                data_obs.address = details->address;
+                data_obs.size = details->snippet.size();
+                data_obs.pid = pid_;
+                data_obs.tid = pid_;
+                data_obs.start_time = start_time;
+                data_obs.end_time = end_time;
+                size_t data_idx = graph.observations.size();
+                graph.observations.push_back(data_obs);
+
+                // Edge: process -> data
+                LineageEdge edge;
+                edge.from_index = proc_idx;
+                edge.to_index = data_idx;
+                edge.relation = RelationType::StaticAssociated;
+                edge.details = "Memory secret found";
+                graph.edges.push_back(edge);
+            }
+        }
+        
         ReportContext ctx;
         ctx.command = "mem";
         ctx.target = std::to_string(pid_);
@@ -124,7 +176,7 @@ namespace runtimexray
         }
 
         // ---- Generate report ----
-        Report r{std::move(ctx), std::move(findings), std::nullopt};
+        Report r{std::move(ctx), std::move(findings), std::move(graph)};
         // Pass extra metadata (pages_scanned, max_pages) in JSON, but for text it's ignored.
         reporter->report(r, &extra);
 

@@ -37,10 +37,11 @@ namespace runtimexray {
 
     static const char* relation_to_string(RelationType rel) {
         switch (rel) {
-            case RelationType::Chronological: return "chronological";
-            case RelationType::Causality:     return "causality";
-            case RelationType::DataFlow:      return "dataflow";
-            case RelationType::Calls:         return "calls";
+            case RelationType::Chronological:       return "chronological";
+            case RelationType::Causality:           return "causality";
+            case RelationType::DataFlow:            return "dataflow";
+            case RelationType::Calls:               return "calls";
+            case RelationType::StaticAssociated:    return "static_associated";
             default: return "unknown";
         }
     }

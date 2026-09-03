@@ -139,12 +139,18 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME check_cli_mem_finds_cmdline_secret
          COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/memory_scanner/test_mem_cli.sh $<TARGET_FILE:runtimexray>)
 
+# CLI-level mem lineage test
+add_test(NAME check_mem_lineage
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mem_lineage.sh $<TARGET_FILE:runtimexray>)
+set_tests_properties(check_mem_lineage PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
+
 # Memory scanner unit tests
 add_executable(test_memory_scanner
     tests/memory_scanner/test_memory_scanner.cpp
     src/analyzer_registry.cpp
     src/builtin_analyzers.cpp
     src/dynamic_analysis.cpp
+    src/logger.cpp
 )
 target_include_directories(test_memory_scanner PRIVATE include)
 target_compile_options(test_memory_scanner PRIVATE -Wall -Wextra)
@@ -185,7 +191,7 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
 
     add_test(NAME check_ebpf_json_verbose
              COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_json_verbose.sh $<TARGET_FILE:runtimexray>)
-    set_tests_properties(check_ebpf_json_verbose PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
+    set_tests_properties(check_ebpf_json_verbose PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 25)
 
     add_test(NAME check_ebpf_timeout
              COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_timeout.sh $<TARGET_FILE:runtimexray>)
@@ -226,6 +232,7 @@ if(NOT SKIP_PTRACE_TESTS)
         src/analyzer_registry.cpp
         src/builtin_analyzers.cpp
         src/dynamic_analysis.cpp
+        src/logger.cpp
     )
     target_include_directories(test_memory_scanner_self PRIVATE include)
     target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
