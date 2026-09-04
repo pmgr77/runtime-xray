@@ -9,6 +9,16 @@ if [ -z "$RUNTIMEXRAY_BIN" ]; then
     exit 125
 fi
 
+# Determine if we need sudo
+if [ "$(id -u)" -eq 0 ]; then
+    RUN_PREFIX=""
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    RUN_PREFIX="sudo -n"
+else
+    echo "Skipping mem lineage test: root or passwordless sudo required."
+    exit 125
+fi
+
 # Find secret_holder binary
 SCRIPT_DIR=$(dirname "$0")
 BUILD_DIR="${SCRIPT_DIR}/../build"
@@ -25,7 +35,7 @@ PID=$!
 sleep 2
 
 # Run mem with debug logs and capture output
-OUTPUT=$(sudo "$RUNTIMEXRAY_BIN" mem --log-level debug --max-pages 5000 --json /dev/stdout $PID 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --log-level debug --max-pages 5000 --json /dev/stdout $PID 2>&1)
 STATUS=$?
 kill $PID 2>/dev/null || true
 
