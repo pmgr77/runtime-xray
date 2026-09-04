@@ -331,45 +331,10 @@ namespace runtimexray {
         ctx.started_at = runtimexray::current_iso8601_utc();
         ctx.duration_ms = duration_ms;
 
-        // ---- Create reporter based on options ----
-        std::unique_ptr<FindingReporter> reporter;
-        std::ofstream file_out;
-        if (!common.json_file.empty()) {
-            file_out.open(common.json_file);
-            if (!file_out) {
-                Logger::log(LogLevel::Error, "Could not open JSON file: " + common.json_file);
-                return 1;
-            }
-            reporter = std::make_unique<JsonFindingReporter>(file_out);
-            Logger::log(LogLevel::Info, "Writing JSON report to " + common.json_file);
-        } else if (!common.report_file.empty()) {
-            file_out.open(common.report_file);
-            if (!file_out) {
-                Logger::log(LogLevel::Error, "Could not open report file: " + common.report_file);
-                return 1;
-            }
-            reporter = std::make_unique<TextFindingReporter>(file_out);
-            Logger::log(LogLevel::Info, "Writing text report to " + common.report_file);
-        } else {
-            reporter = std::make_unique<TextFindingReporter>(std::cout);
-        }
         // After trace, produce the graph
         auto graph = lineage_analyzer.produce_graph();
 
-        Logger::log(LogLevel::Debug, "lineage_graph observations = " + std::to_string(graph.observations.size()));
-        Logger::log(LogLevel::Debug, "lineage_graph edges = " + std::to_string(graph.edges.size()));        
-        if (graph.observations.empty()) {
-            Logger::log(LogLevel::Debug, "lineage graph is EMPTY");
-        } else {
-            Logger::log(LogLevel::Debug, "lineage graph is NOT EMPTY");
-        }
-
-        // Build the report
-        Report r{std::move(ctx), std::move(findings), std::move(graph)};
-        // Pass extra metadata to the reporter
-        reporter->report(r, extra.has_value() ? &*extra : nullptr);
-
-        return 0;
+        return report_findings(common, std::move(ctx), std::move(findings), std::move(graph), extra.has_value() ? &*extra : nullptr) ? 0 : 1;
     }
 
     void TraceCommand::print_help() const

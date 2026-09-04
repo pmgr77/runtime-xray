@@ -153,34 +153,7 @@ namespace runtimexray
         extra["pages_scanned"] = pages_scanned;
         extra["max_pages"] = static_cast<int>(max_pages_);
 
-        // ---- Create reporter based on options ----
-        std::unique_ptr<FindingReporter> reporter;
-        std::ofstream file_out;
-
-        if (!common.json_file.empty()) {
-            file_out.open(common.json_file);
-            if (!file_out) {
-                Logger::log(LogLevel::Error, "Could not open JSON file: " + common.json_file);
-                return 1;                
-            }
-            reporter = std::make_unique<JsonFindingReporter>(file_out);
-        } else if (!common.report_file.empty()) {
-            file_out.open(common.report_file);
-            if (!file_out) {
-                Logger::log(LogLevel::Error, "Could not open report file: " + common.report_file);
-                return 1;                
-            }
-            reporter = std::make_unique<TextFindingReporter>(file_out);
-        } else {
-            reporter = std::make_unique<TextFindingReporter>(std::cout);
-        }
-
-        // ---- Generate report ----
-        Report r{std::move(ctx), std::move(findings), std::move(graph)};
-        // Pass extra metadata (pages_scanned, max_pages) in JSON, but for text it's ignored.
-        reporter->report(r, &extra);
-
-        return 0;
+        return report_findings(common, std::move(ctx), std::move(findings), std::move(graph), &extra) ? 0 : 1;
     }
 
     void MemCommand::print_help() const {

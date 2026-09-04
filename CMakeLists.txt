@@ -42,6 +42,7 @@ set(RUNTIMEXRAY_SOURCES
     src/builtin_analyzers.cpp
     src/finding_filter.cpp
     src/reporter.cpp
+    src/finding_reporter.cpp
     src/ptrace_backend.cpp
     src/logger.cpp
     src/lineage_analyzer.cpp

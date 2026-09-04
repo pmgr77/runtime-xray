@@ -25,7 +25,7 @@ def main():
     subcommand = sys.argv[3]
     args = sys.argv[4:]
 
-    command = [runtimexray_bin, subcommand, "--json", "/dev/stdout"] + args
+    command = [runtimexray_bin, subcommand, "--json", "/dev/stdout", "--report", "/dev/null"] + args
 
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     if result.returncode != 0:

@@ -35,7 +35,7 @@ PID=$!
 sleep 2
 
 # Run mem with debug logs and capture output
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --log-level debug --max-pages 5000 --json /dev/stdout $PID 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --log-level debug --max-pages 5000 --report report.txt --json report.json $PID 2>&1)
 STATUS=$?
 kill $PID 2>/dev/null || true
 

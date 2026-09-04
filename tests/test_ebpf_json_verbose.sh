@@ -29,7 +29,7 @@ else
 fi
 
 # Run trace
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --log-level debug --timeout 15 --min-severity Low --json /dev/stdout /usr/bin/curl https://example.com)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --log-level debug --timeout 15 --min-severity Low --json /dev/stdout --report /dev/null /usr/bin/curl https://example.com)
 STATUS=$?
 
 # Record end time

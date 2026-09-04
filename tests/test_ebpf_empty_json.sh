@@ -22,7 +22,7 @@ else
 fi
 
 # Run a simple command that should not generate sensitive findings
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 --json /dev/stdout /bin/true)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 --json /dev/stdout --report /dev/null /bin/true)
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then

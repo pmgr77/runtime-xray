@@ -29,7 +29,7 @@ def main():
     time.sleep(0.5)  # give it time to start
 
     # Run runtimexray mem with JSON output
-    mem_cmd = [runtimexray_bin, "mem", "--json", "/dev/stdout", str(pid)]
+    mem_cmd = [runtimexray_bin, "mem", "--json", "/dev/stdout", "--report", "/dev/null", str(pid)]
     result = subprocess.run(mem_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     if result.returncode != 0:
         print(f"Mem command failed with exit code {result.returncode}")

@@ -26,6 +26,7 @@
 
 #include "finding.hpp"
 #include "reporter.hpp"
+#include "common_cli.hpp"
 #include <ostream>
 
 namespace runtimexray {
@@ -71,6 +72,12 @@ public:
 private:
     std::ostream& out_;    
 };
+
+bool report_findings(const CommonOptions &common,
+        ReportContext ctx,
+        FindingList findings,
+        std::optional<LineageGraph> lineage_graph,
+        const nlohmann::json* extra);
 
 } // namespace runtimexray
 
