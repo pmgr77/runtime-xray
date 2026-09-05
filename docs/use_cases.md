@@ -6,7 +6,7 @@ This document demonstrates practical scenarios where custom analyzers add signif
 - **Solution:** A custom `IAnalyzer` implementation.
 - **Value:** The business or security outcome.
 
-All custom analyzers automatically integrate with RuntimeXRay’s reporter: their findings appear in both the human‑readable text report (`--report FILE`) and the JSON report (`--json FILE`), and respect severity filtering (`--min-severity`). Runtime logs (including diagnostic output) are independent via `--log-level` / `--log-file`.
+All custom analyzers automatically integrate with RuntimeXRay’s reporter: their findings appear in both the human‑readable text report (`--report FILE`) and the JSON report (`--json FILE`), and respect severity filtering (`--min-severity`). Runtime logs (including diagnostic output) are independent via `--log-level` / `--log-file`. Custom analyzers must follow the secret-redaction contract and must not log raw secrets.
 
 ---
 
@@ -220,11 +220,13 @@ public:
 
 ---
 
-## 5. AI‑Assisted Explanation Post‑Processor
+## 5. Future AI‑Assisted Explanation Post‑Processor
 
 **Problem:** Security reports are often too technical for non‑expert stakeholders. An AI layer can translate findings into plain language.
 
-**Solution:** Implement an analyzer that sends suspicious memory snippets to an LLM and returns a new Finding with the AI‑generated explanation.
+**Status:** Planned, not currently integrated. Do not send raw memory chunks or
+secret snippets to an external LLM by default. A future implementation must
+send only explicitly approved, redacted evidence and require explicit opt-in.
 
 {% raw %}
 ```cpp

@@ -4,6 +4,13 @@ RuntimeXRay uses a registry of analyzers. You can add your own custom analyzers,
 
 All custom analyzers produce `Finding` objects that are automatically merged into the final report (text or JSON) by the `Reporter`. Severity filtering (`--min-severity`) applies uniformly to all findings, including those from custom analyzers.
 
+Memory-secret findings have a stricter contract: keep the exact value in
+`raw_secret`, keep debugging context in `raw_snippet`, and compute the
+fingerprint from the exact value only. Reports redact these fields by default;
+custom analyzers must never log raw values. The aggregate initializer examples
+below are illustrative and should be adapted to the current structure in
+`include/finding.hpp`.
+
 ## Built-in analyzers
 
 The following analyzers are registered automatically:

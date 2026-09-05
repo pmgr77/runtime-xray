@@ -146,14 +146,16 @@ Dangerous API usage:
 
 In addition to static binary checks, RuntimeXRay can observe a running process using `ptrace` (via **Tachikoma**) or the **eBPF** backend (`--backend ebpf`) and generate findings from system call activity.
 
-Currently implemented dynamic findings include:
+Currently implemented dynamic observations include:
 
 - **Sensitive file access** – detects attempts to open known sensitive files (e.g., `/etc/shadow`, `~/.ssh/id_rsa`, `~/.aws/credentials`).
 - **Suspicious network connection** – flags connections to sensitive ports (22, 3389, 445, 1433, etc.).
-- **Sensitive data written** – identifies writes containing strings like `password=`, `api_key=`, `secret=`, `token=`.
+- **Sensitive data written** – inspects eligible write buffers (bounded to 4 KB) for strings like `password=`, `api_key=`, `secret=`, `token=`.
 - **Sensitive data in child output** – scans the captured stdout/stderr of the traced process for the same patterns.
 
-These findings are still experimental and should be interpreted as indicators of potentially risky behaviour, not as definitive exploits.
+These observations are heuristic and experimental. They should be interpreted as
+indicators of potentially risky behaviour, not as proof of an exploit or a
+complete source-to-sink data flow.
 
 ### How to run dynamic analysis
 
@@ -181,6 +183,11 @@ sudo ./runtimexray trace --backend ebpf /path/to/program
 ## Memory Analysis Findings
 
 RuntimeXRay can also scan the memory of a running process to detect secrets and sensitive data.
+
+Secret values are redacted in reports by default. Use `--show-secrets` only for
+deliberate local debugging; raw values in runtime logs require both that option
+and debug/trace logging. HMAC fingerprints are intended to correlate repeated
+observations within one execution without printing the value.
 
 Available via:
 

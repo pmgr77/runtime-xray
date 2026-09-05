@@ -21,6 +21,11 @@ The CLA is managed by **[cla-assistant.io](https://cla-assistant.io)**. When you
 - C++17 standard.
 - Follow existing formatting (a `.clang-format` will be provided).
 - Write meaningful comments and documentation.
+- Never commit real credentials, private keys, or customer data. Use clearly
+  synthetic test values.
+- Review generated reports and logs before attaching them to issues or pull
+  requests; keep secret values redacted and do not enable `--show-secrets` in
+  normal CI.
 
 ## Reporting bugs
 
