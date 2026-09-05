@@ -34,8 +34,8 @@ export ENV_SECRET="password=env345"
 PID=$!
 sleep 2
 
-# Run mem with debug logs and capture output
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --log-level debug --max-pages 5000 --report report.txt --json report.json $PID 2>&1)
+# Run mem with JSON output to stdout and suppress text
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --json /dev/stdout --report /dev/null --max-pages 5000 $PID 2>&1)
 STATUS=$?
 kill $PID 2>/dev/null || true
 
@@ -45,8 +45,8 @@ if [ $STATUS -ne 0 ]; then
     exit 1
 fi
 
-# Check for any of the secrets (all start with "password=")
-if echo "$OUTPUT" | grep -q "password="; then
+# Check for redacted secret in lineage graph
+if echo "$OUTPUT" | grep -q "<redacted>"; then
     echo "Lineage graph contains data observation."
     exit 0
 else
