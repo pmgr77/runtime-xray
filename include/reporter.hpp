@@ -27,6 +27,7 @@
 
 #include "finding.hpp"
 #include "lineage.hpp"
+
 #include <nlohmann/json.hpp>
 #include <string>
 #include <optional>
@@ -42,10 +43,16 @@ struct ReportContext {
     int duration_ms = 0;
 };
 
+struct ReportingOptions {
+    bool show_secrets = false; // If true, include raw secret values in the report (use with caution)
+    // Future options: max_snippet_len, redaction_placeholder, etc.
+};
+
 struct Report {
     ReportContext context;
     FindingList findings;
     std::optional<LineageGraph> lineage_graph;
+    ReportingOptions report_opts;
 };
 
 std::string current_iso8601_utc();
@@ -61,7 +68,7 @@ public:
 private:
     static std::string severity_to_string(FindingSeverity severity);
 
-    static void serialize_findings(const FindingList& findings, nlohmann::json& findings_arr);
+    static void serialize_findings(const FindingList& findings, nlohmann::json& findings_arr, const ReportingOptions& opts);
 };
 
 } // namespace runtimexray

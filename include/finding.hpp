@@ -76,10 +76,13 @@ struct SensitiveDataWriteDetails {
 };
 
 struct MemorySecretFindingDetails {
-    std::string snippet;        // extracted fragment
-    std::string secret_type;    // e.g., "password", "private_key"
-    std::string location;       // "memory", "cmdline", "environment"
-    uintptr_t address = 0;      // memory address where the secret was found
+    std::string raw_secret;       // Exact extracted value
+    std::string raw_snippet;      // Surrounding debugging context (max ~256 chars)
+    std::string fingerprint;      // HMAC‑SHA256 of raw_secret only
+    std::string secret_type;        // e.g., "password", "private_key"
+    size_t secret_length = 0;              // size of the secret in bytes
+    std::string location;           // e.g., "memory", "cmdline", "environment"
+    uintptr_t address = 0;          // memory address where the secret was found
 };
 
 // Variant type for all possible finding details

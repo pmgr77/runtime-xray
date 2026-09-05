@@ -33,6 +33,7 @@ namespace runtimexray {
 LogLevel Logger::current_level_ = LogLevel::Info;
 std::unique_ptr<std::ofstream> Logger::file_stream_;
 std::mutex Logger::mutex_;
+bool Logger::show_secrets_ = false;
 
 // Helper to convert string to LogLevel
 LogLevel parse_log_level(const std::string& s) {
@@ -54,8 +55,9 @@ static std::string log_level_to_str(LogLevel level) {
     }
 }
 
-void Logger::init(LogLevel level, const std::string& file) {
+void Logger::init(LogLevel level, const std::string& file, bool show_secrets) {
     current_level_ = level;
+    show_secrets_ = show_secrets;
     if (!file.empty()) {
         file_stream_ = std::make_unique<std::ofstream>(file); 
     }
@@ -73,6 +75,16 @@ void Logger::log(LogLevel level, const std::string& msg) {
     *out << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S")
          << " [" << level_str << "] " << msg << "\n";
     out->flush();
+}
+
+void Logger::log_sensitive(LogLevel level,
+                           const std::string& safe_message,
+                           const std::string& sensitive_message) {
+    if (!is_enabled(level)) {
+        return;
+    }
+    bool disclosure_allowed = show_secrets_ && (level == LogLevel::Debug || level == LogLevel::Trace);
+    log(level, disclosure_allowed ? sensitive_message : safe_message);
 }
 
 bool Logger::is_enabled(LogLevel level) {

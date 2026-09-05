@@ -119,12 +119,27 @@ namespace runtimexray
         // Data nodes for memory secrets
         for (const auto& f: findings) {
             if (auto* details = std::get_if<MemorySecretFindingDetails>(&f.details)) {
+                std::string snippet_for_graph;
+                if (common.show_secrets) {
+                    // Show raw snippet (includes the secret)
+                    snippet_for_graph = details->raw_snippet;
+                } else {
+                    // Redact the secret within the snippet
+                    snippet_for_graph = details->raw_snippet;
+                    if (!details->raw_secret.empty()) {
+                        size_t pos = 0;
+                        while ((pos = snippet_for_graph.find(details->raw_secret, pos)) != std::string::npos) {
+                            snippet_for_graph.replace(pos, details->raw_secret.size(), "<redacted>");
+                            pos += 9; // length of "<redacted>"
+                        }
+                    }
+                }
                 Observation data_obs;
                 data_obs.type = ObservationType::Data;
                 data_obs.data_type = details->secret_type;
-                data_obs.data_snippet = details->snippet;
+                data_obs.data_snippet = snippet_for_graph;
                 data_obs.address = details->address;
-                data_obs.size = details->snippet.size();
+                data_obs.size = details->raw_secret.size();
                 data_obs.pid = pid_;
                 data_obs.tid = pid_;
                 data_obs.start_time = start_time;
@@ -166,6 +181,7 @@ namespace runtimexray
         std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
         std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
         std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
+        std::cout << "  --show-secrets         Show raw secret values in reports (default: hidden)\n";
         std::cout << "  --max-pages N         Maximum number of memory pages to scan (default: 1000)\n";
         std::cout << "                        0 = skip page scanning, only check cmdline/environ\n";
         std::cout << "  --help                Show this help\n";

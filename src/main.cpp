@@ -76,8 +76,10 @@ int main(int argc, char* argv[]) {
     if (!parse_global_options(args, common_opts, specific_args)) {
         return 1; // Error message already printed
     }
-    Logger::init(runtimexray::parse_log_level(common_opts.log_level), common_opts.log_file);
-
+    Logger::init(runtimexray::parse_log_level(common_opts.log_level), 
+        common_opts.log_file, 
+        common_opts.show_secrets);
+    
     // Pass specific args to the command
     ICommand& cmd = *it->second;
     if (!cmd.parse_specific_args(specific_args)) {

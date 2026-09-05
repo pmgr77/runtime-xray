@@ -211,7 +211,15 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
 
 void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findings) {
     std::string cmdline = read_proc_file(pid, "cmdline");
-    Logger::log(LogLevel::Debug, "scan_cmdline_for_secrets: cmdline = " + cmdline);
+    if (Logger::is_enabled(LogLevel::Debug)) {
+        std::string preview = cmdline.size() > 20 ? cmdline.substr(0, 10) + "..." : cmdline;
+        Logger::log_sensitive(
+            LogLevel::Debug,
+            "scan_cmdline_for_secrets: cmdline length = " + std::to_string(cmdline.size()) +
+                ", preview = " + preview,
+            "scan_cmdline_for_secrets: cmdline = " + cmdline
+        );
+    }
     if (cmdline.empty()) {
         return;
     }

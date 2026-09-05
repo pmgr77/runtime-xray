@@ -73,6 +73,20 @@ private:
     std::ostream& out_;    
 };
 
+/**
+ * @brief Centralised report generation function.
+ *
+ * Creates and writes both JSON and text reports based on CommonOptions
+ * and ReportingOptions.
+ *
+ * @param common Global CLI options.
+ * @param ctx Report context.
+ * @param findings List of findings.
+ * @param lineage_graph Optional lineage graph.
+ * @param extra Optional extra JSON metadata.
+ * @param report_opts Reporting policy (show_secrets).
+ * @return true on success, false on error.
+ */
 bool report_findings(const CommonOptions &common,
         ReportContext ctx,
         FindingList findings,

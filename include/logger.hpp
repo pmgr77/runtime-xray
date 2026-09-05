@@ -60,8 +60,9 @@ public:
      * @brief Initialise the logger with a minimum level and optional file.
      * @param level Minimum level to log.
      * @param file Path to log file (empty = stderr).
+     * @param show_secrets If true, log sensitive data; otherwise redact.
      */
-    static void init(LogLevel level, const std::string& file = "");
+    static void init(LogLevel level, const std::string& file = "", bool show_secrets = false);
 
     /**
      * @brief Log a message at a given level.
@@ -69,6 +70,16 @@ public:
      * @param msg Message to log.
      */
     static void log(LogLevel level, const std::string& msg);
+
+    /**
+     * @brief Log a sensitive message at a given level.
+     * @param level Severity level.
+     * @param safe_message Message to log (safe version).
+     * @param sensitive_message Message to log (sensitive version).
+     */
+    static void log_sensitive(LogLevel level,
+                              const std::string& safe_message,
+                              const std::string& sensitive_message);
 
     /**
      * @brief Check if a level is enabled.
@@ -81,6 +92,7 @@ private:
     static LogLevel current_level_;
     static std::unique_ptr<std::ofstream> file_stream_;
     static std::mutex mutex_;
+    static bool show_secrets_;
 };
     
 } // namespace runtimexray

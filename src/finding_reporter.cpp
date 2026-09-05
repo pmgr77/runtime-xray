@@ -25,6 +25,7 @@
 #include "finding_reporter.hpp"
 #include "logger.hpp"
 #include "common_cli.hpp"
+#include <sys/stat.h>
 
 namespace runtimexray {
 
@@ -67,7 +68,25 @@ namespace runtimexray {
             Logger::log(LogLevel::Info, "Writing text report to stdout");
         }
 
-        Report r{std::move(ctx), std::move(findings), std::move(lineage_graph)};
+        ReportingOptions report_opts;
+        report_opts.show_secrets = common.show_secrets;
+
+        // Print warning if secrets will be exposed
+        if (report_opts.show_secrets) {
+            Logger::log(LogLevel::Warning, "Report may contain sensitive values (--show-secrets enabled)");
+        }
+
+        // Set file permissions if raw secrets are written
+        if (report_opts.show_secrets) {
+            if (!common.json_file.empty()) {
+                chmod(common.json_file.c_str(), 0600);
+            }
+            if (!common.report_file.empty()) {
+                chmod(common.report_file.c_str(), 0600);
+            }
+        }
+
+        Report r{std::move(ctx), std::move(findings), std::move(lineage_graph), std::move(report_opts)};
         if (json_reporter) {
             json_reporter->report(r, extra);
         }

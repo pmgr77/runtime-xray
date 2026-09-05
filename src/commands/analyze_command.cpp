@@ -84,7 +84,7 @@ namespace runtimexray
         ctx.target = binary_path_;
         ctx.started_at = runtimexray::current_iso8601_utc();
         ctx.duration_ms = duration_ms;
-        
+
         return report_findings(common, std::move(ctx), std::move(findings), std::nullopt, nullptr) ? 0 : 1;
     }
 
@@ -99,6 +99,7 @@ namespace runtimexray
         std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
         std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
         std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
+        std::cout << "  --show-secrets         Show raw secret values in reports (default: hidden)\n";
         std::cout << "  --help                Show this help\n";
     }
 

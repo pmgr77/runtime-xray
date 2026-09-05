@@ -46,6 +46,7 @@ set(RUNTIMEXRAY_SOURCES
     src/ptrace_backend.cpp
     src/logger.cpp
     src/lineage_analyzer.cpp
+    src/secret_fingerprinter.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -131,6 +132,9 @@ endif()
 
 target_link_libraries(runtimexray PRIVATE nlohmann_json::nlohmann_json)
 
+find_package(OpenSSL REQUIRED)
+target_link_libraries(runtimexray PRIVATE OpenSSL::Crypto)
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -139,6 +143,18 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # CLI-level mem test
 add_test(NAME check_cli_mem_finds_cmdline_secret
          COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/memory_scanner/test_mem_cli.sh $<TARGET_FILE:runtimexray>)
+
+add_test(NAME check_cli_mem_show_secrets
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/memory_scanner/test_mem_show_secrets.sh $<TARGET_FILE:runtimexray>)
+
+# SecretFingerprinter unit test
+add_executable(test_secret_fingerprinter
+    tests/unit/test_secret_fingerprinter.cpp
+    src/secret_fingerprinter.cpp
+)
+target_link_libraries(test_secret_fingerprinter PRIVATE OpenSSL::Crypto)
+target_include_directories(test_secret_fingerprinter PRIVATE include)
+add_test(NAME check_secret_fingerprinter COMMAND $<TARGET_FILE:test_secret_fingerprinter>)
 
 # CLI-level mem lineage test
 add_test(NAME check_mem_lineage
@@ -152,9 +168,11 @@ add_executable(test_memory_scanner
     src/builtin_analyzers.cpp
     src/dynamic_analysis.cpp
     src/logger.cpp
+    src/secret_fingerprinter.cpp
 )
 target_include_directories(test_memory_scanner PRIVATE include)
 target_compile_options(test_memory_scanner PRIVATE -Wall -Wextra)
+target_link_libraries(test_memory_scanner PRIVATE OpenSSL::Crypto)
 add_test(NAME check_memory_scanner COMMAND $<TARGET_FILE:test_memory_scanner>)
 
 add_subdirectory(tests/security_checks)
@@ -174,9 +192,12 @@ add_executable(test_analyzer_registry
     tests/analyzer_registry/test_analyzer_registry.cpp
     src/analyzer_registry.cpp
     src/builtin_analyzers.cpp
+    src/secret_fingerprinter.cpp
+    src/logger.cpp
 )
 target_include_directories(test_analyzer_registry PRIVATE include)
 target_compile_options(test_analyzer_registry PRIVATE -Wall -Wextra)
+target_link_libraries(test_analyzer_registry PRIVATE OpenSSL::Crypto)
 add_test(NAME check_analyzer_registry COMMAND test_analyzer_registry)
 
 # JSON validation for analyze
@@ -234,9 +255,11 @@ if(NOT SKIP_PTRACE_TESTS)
         src/builtin_analyzers.cpp
         src/dynamic_analysis.cpp
         src/logger.cpp
+        src/secret_fingerprinter.cpp
     )
     target_include_directories(test_memory_scanner_self PRIVATE include)
     target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
+    target_link_libraries(test_memory_scanner_self PRIVATE OpenSSL::Crypto)
     add_test(NAME check_memory_scanner_self
              COMMAND $<TARGET_FILE:test_memory_scanner_self> password=cmdline_secret_test)
     set_tests_properties(check_memory_scanner_self PROPERTIES

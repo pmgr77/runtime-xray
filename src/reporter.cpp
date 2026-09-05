@@ -23,7 +23,7 @@
 // limitations under the License.
 
 #include "reporter.hpp"
-
+#include "finding_reporter.hpp"
 #include <nlohmann/json.hpp>
 
 #include <iostream>
@@ -70,6 +70,20 @@ namespace runtimexray {
             default: return "Unknown";
         }
         return "Unknown";
+    }
+
+    // Redact all occurrences of a secret in a snippet
+    static std::string redact_secret(const std::string& snippet, const std::string& secret) {
+        if (secret.empty()) {
+            return snippet;
+        }
+        std::string result = snippet;
+        size_t pos = 0;
+        while ((pos = result.find(secret, pos)) != std::string::npos) {
+            result.replace(pos, secret.size(), "<redacted>");
+            pos+=9; // lenght of "<redacted>"
+        }
+        return result;
     }
 
     std::string Reporter::to_text(const Report& r, const nlohmann::json* extra) {
@@ -152,10 +166,22 @@ namespace runtimexray {
                                 out << " - " << f.description
                                     << " data=\"" << details.data_snippet << "\"\n";
                             } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                                out << " - " << f.description
-                                    << " type=" << details.secret_type
-                                    << " location=" << details.location
-                                    << " data=\"" << details.snippet << "\"\n";
+                                out << " - " << f.description;
+                                out << " type=" << details.secret_type;
+                                out << " location=" << details.location;
+                                if (details.address != 0) {
+                                    out << " address: 0x" << std::hex << details.address << std::dec;
+                                }
+                                out << " length: " << details.secret_length;
+                                out << " fingerprint: " << details.fingerprint;
+                                if (r.report_opts.show_secrets) {
+                                    out << " value: " << details.raw_secret;
+                                    out << " context: " << details.raw_snippet;
+                                } else {
+                                    out << " value: <redacted>";
+                                    std::string redacted_snippet = redact_secret(details.raw_snippet, details.raw_secret);
+                                    out << " context: " << redacted_snippet;
+                                } 
                             } else {
                                 out << " - " << f.description << "\n";
                             }
@@ -186,7 +212,13 @@ namespace runtimexray {
                         } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
                             out << "      Type: " << details.secret_type
                                 << ", Location: " << details.location
-                                << ", Snippet: " << details.snippet << "\n";
+                                << ", Length: " << details.secret_length
+                                << ", Fingerprint: " << details.fingerprint << "\n";
+                            if (r.report_opts.show_secrets) {
+                                out << "      Value: " << details.raw_secret << "\n";
+                            } else {
+                                out << "      Value: <redacted>\n";
+                            }
                         }
                     }, f.details);
                 }
@@ -235,7 +267,7 @@ namespace runtimexray {
         return out.str();
     }
 
-    void Reporter::serialize_findings(const FindingList& findings, nlohmann::json& findings_arr) {
+    void Reporter::serialize_findings(const FindingList& findings, nlohmann::json& findings_arr, const ReportingOptions& opts) {
         for (const auto& f : findings) {
             nlohmann::json fj;
             fj["severity"] = severity_to_string(f.severity);
@@ -271,7 +303,18 @@ namespace runtimexray {
                     fj["type"] = "memory_secret";
                     fj["details"]["secret_type"] = details.secret_type;
                     fj["details"]["location"] = details.location;
-                    fj["details"]["snippet"] = details.snippet;
+                    if (details.address != 0) fj["address"] = details.address;
+                    fj["length"] = details.secret_length;
+                    fj["fingerprint"] = details.fingerprint;
+                    if (opts.show_secrets) {
+                        fj["value"] = details.raw_secret;
+                        fj["snippet"] = details.raw_snippet;
+                        fj["secret_exposed"] = true;
+                    } else {
+                        fj["value"] = nullptr;
+                        fj["snippet"] = redact_secret(details.raw_snippet, details.raw_secret);
+                        fj["secret_exposed"] = false;
+                    }
                 }
             }, f.details);
 
@@ -291,7 +334,7 @@ namespace runtimexray {
         j["duration_ms"] = r.context.duration_ms;
 
         nlohmann::json findings_arr = nlohmann::json::array();
-        serialize_findings(r.findings, findings_arr);
+        serialize_findings(r.findings, findings_arr, r.report_opts);
         j["findings"] = findings_arr;
 
         // Summary

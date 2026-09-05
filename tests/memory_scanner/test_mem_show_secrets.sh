@@ -1,4 +1,6 @@
 #!/bin/sh
+# Test that --show-secrets reveals the raw secret value
+
 RUNTIMEXRAY_BIN="$1"
 if [ -z "$RUNTIMEXRAY_BIN" ]; then
     echo "Usage: $0 <path-to-runtimexray>"
@@ -16,7 +18,7 @@ trap 'kill $pid 2>/dev/null' EXIT
 
 sleep 0.5   # give it a moment to appear in /proc
 
-output="$("$RUNTIMEXRAY_BIN" mem "$pid" 2>&1)"
+output="$("$RUNTIMEXRAY_BIN" mem --show-secrets "$pid" 2>&1)"
 status=$?
 if [ $status -ne 0 ]; then
     echo "runtimexray mem exited with status $status"
@@ -24,11 +26,11 @@ if [ $status -ne 0 ]; then
     exit 1
 fi
 
-# Check that the secret was detected (redacted or not)
-if echo "$output" | grep -q "<redacted>"; then
+# Check that the raw secret appears in the output
+if echo "$output" | grep -q "$SECRET"; then
     exit 0
 else
-    echo "Secret not found in output (redacted):"
+    echo "Raw secret not found with --show-secrets:"
     echo "$output"
     exit 1
 fi

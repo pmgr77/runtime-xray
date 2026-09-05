@@ -89,7 +89,7 @@ public:
          if (child_pid_ == 0) {
             // Child: redirect stdout/stderr to a file
             child_output_path_ = "/tmp/runtimexray_ebpf_child_" + std::to_string(getpid()) + ".log";
-            int fd = open(child_output_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            int fd = open(child_output_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
             if (fd >= 0) {
                 dup2(fd, STDOUT_FILENO);
                 dup2(fd, STDERR_FILENO);

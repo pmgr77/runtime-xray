@@ -28,15 +28,20 @@
 #include "evidence.hpp"
 #include "finding.hpp"
 #include "elf_parser.hpp"
+#include "secret_fingerprinter.hpp"
+#include "logger.hpp"
 
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 
 namespace runtimexray {
 
 
 namespace {
+
 // ---------------------------------------------------------------------------
 // Helper functions for dangerous API detection
 // ---------------------------------------------------------------------------
@@ -209,10 +214,15 @@ std::optional<ApiRiskInfo> get_api_risk(const std::string& name) {
 
     return std::nullopt;
 }
+struct PasswordMatch {
+    std::string keyword;
+    std::string value;     // exact secret
+    std::string snippet;   // surrounding context
+};
 
 // Password detector logic (moved from old PasswordDetector)
-std::vector<std::pair<std::string, std::string>> detect_password_matches(const std::string& chunk) {
-    std::vector<std::pair<std::string, std::string>> results; // (keyword, snippet)
+std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
+    std::vector<PasswordMatch> results;
     static const std::vector<std::string> keywords = {
         "password", "passwd", "pwd", "pass", "pswd",
         "password_hash", "password_salt", "password_encrypted",
@@ -222,6 +232,7 @@ std::vector<std::pair<std::string, std::string>> detect_password_matches(const s
     for (const auto& kw : keywords) {
         size_t pos = 0;
         while ((pos = chunk.find(kw, pos)) != std::string::npos) {
+            // Skip if keyword is part of a larger word
             if (pos > 0 &&
                 (std::isalnum(static_cast<unsigned char>(chunk[pos - 1])) ||
                  chunk[pos - 1] == '_')) {
@@ -245,6 +256,11 @@ std::vector<std::pair<std::string, std::string>> detect_password_matches(const s
                     }
                     ++value_end;
                 }
+
+                // Extract the exact secret value
+                std::string value = chunk.substr(value_start, value_end - value_start);
+
+                // Extract snippet (surrounding context)
                 size_t snippet_start = (pos > 20) ? pos - 20 : 0;
                 size_t snippet_len = std::min<size_t>(160, chunk.size() - snippet_start);
                 std::string snippet = chunk.substr(snippet_start, snippet_len);
@@ -252,7 +268,11 @@ std::vector<std::pair<std::string, std::string>> detect_password_matches(const s
                 for (char& c : snippet) {
                     if (c < 0x20 || c > 0x7E) c = '.';
                 }
-                results.emplace_back(kw, snippet);
+                // Only add if value is non-empty
+                if (!value.empty()) {
+                    results.emplace_back(PasswordMatch{kw, value, snippet});
+                }
+
                 pos = next;
             } else {
                 pos = next;
@@ -262,9 +282,15 @@ std::vector<std::pair<std::string, std::string>> detect_password_matches(const s
     return results;
 }
 
+struct PrivateKeyMatch {
+    std::string value;    // full PEM block
+    std::string snippet;  // same as value (or trimmed context)
+    std::string type;     // e.g., "RSA PRIVATE KEY"
+};
+
 // Private key detector logic (moved from old PrivateKeyDetector)
-std::vector<std::string> detect_private_key_matches(const std::string& chunk) {
-    std::vector<std::string> snippets;
+std::vector<PrivateKeyMatch> detect_private_key_matches(const std::string& chunk) {
+    std::vector<PrivateKeyMatch> matches;
     static const std::vector<std::string> begin_markers = {
         "-----BEGIN RSA PRIVATE KEY-----",
         "-----BEGIN OPENSSH PRIVATE KEY-----",
@@ -290,10 +316,14 @@ std::vector<std::string> detect_private_key_matches(const std::string& chunk) {
             for (char& c : snippet) {
                 if (c < 0x20 || c > 0x7E) c = '.';
             }
-            snippets.push_back(snippet);
+            // Extract type from begin marker (e.g., "RSA PRIVATE KEY")
+            std::string type = begin_markers[i];
+            type = type.substr(11); // after "-----BEGIN "
+            type = type.substr(0, type.size() - 5); // remove "-----"
+            matches.push_back({snippet, snippet, type});
         }
     }
-    return snippets;
+    return matches;
 }
 
 std::optional<FindingSeverity> get_sensitive_path_severity(const std::string& path) {
@@ -460,12 +490,25 @@ public:
         FindingList findings;
         if (auto* m = std::get_if<MemoryChunkEvidence>(&evidence)) {
             auto matches = detect_password_matches(m->chunk);
-            for (const auto& [keyword, snippet] : matches) {
+            for (const auto& match : matches) {
+                MemorySecretFindingDetails details;
+                details.raw_secret = match.value;
+                details.raw_snippet = match.snippet;
+                try {
+                    details.fingerprint = SecretFingerprinter::instance().fingerprint(match.value);
+                } catch (const std::exception& e) {
+                    Logger::log(LogLevel::Error, "Fingerprint computation failed: " + std::string(e.what()));
+                    continue; // skip this finding
+                }
+                details.secret_type = match.keyword;
+                details.secret_length = match.value.size();
+                details.location = m->location;
+                details.address = m->address;
                 findings.emplace_back(
                     FindingSeverity::High,
                     "Sensitive data found in memory",
-                    "Potential secret in memory: " + keyword,
-                    MemorySecretFindingDetails{snippet, keyword, m->location, m->address}
+                    "Potential secret in memory: " + match.keyword,
+                    details
                 );
             }
         }
@@ -482,13 +525,26 @@ public:
     FindingList analyze(const Evidence& evidence) const override {
         FindingList findings;
         if (auto* m = std::get_if<MemoryChunkEvidence>(&evidence)) {
-            auto snippets = detect_private_key_matches(m->chunk);
-            for (const auto& snippet : snippets) {
+            auto matches = detect_private_key_matches(m->chunk);
+            for (const auto& match : matches) {
+                MemorySecretFindingDetails details;
+                details.raw_secret = match.value;
+                details.raw_snippet = match.snippet;
+                try {
+                    details.fingerprint = SecretFingerprinter::instance().fingerprint(match.value);
+                } catch (const std::exception& e) {
+                    Logger::log(LogLevel::Error, "Fingerprint computation failed: " + std::string(e.what()));
+                    continue; // skip this finding
+                }
+                details.secret_type = "private_key"; // or match.type
+                details.secret_length = match.value.size();
+                details.location = m->location;
+                details.address = m->address;                
                 findings.emplace_back(
                     FindingSeverity::High,
                     "Sensitive data found in memory",
                     "Private key detected in process memory.",
-                    MemorySecretFindingDetails{snippet, "private_key", m->location, m->address}
+                    details
                 );
             }
         }

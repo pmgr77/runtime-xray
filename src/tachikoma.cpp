@@ -134,7 +134,7 @@ namespace runtimexray {
             // Generate a unique output file name based on child's PID
             child_output_path_ = "/tmp/runtimexray_child_" + std::to_string(getpid()) + ".log";
 
-            int fd = open(child_output_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            int fd = open(child_output_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
             if (fd >= 0) {
                 dup2(fd, STDOUT_FILENO);
                 dup2(fd, STDERR_FILENO);

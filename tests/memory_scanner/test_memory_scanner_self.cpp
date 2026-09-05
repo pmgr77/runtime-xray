@@ -54,17 +54,17 @@ int main(int argc, char* argv[]) {
             using T = std::decay_t<decltype(details)>;
             if constexpr (std::is_same_v<T, runtimexray::MemorySecretFindingDetails>) {
                 if (details.location == "memory" &&
-                    details.snippet.find(memory_secret) != std::string::npos) {
+                    details.raw_snippet.find(memory_secret) != std::string::npos) {
                     found_memory = true;
                 }
                 if (details.location == "environment" &&
                     !env_secret.empty() &&
-                    details.snippet.find(env_secret) != std::string::npos) {
+                    details.raw_snippet.find(env_secret) != std::string::npos) {
                     found_env = true;
                 }
                 if (details.location == "cmdline" &&
                     !cmdline_secret.empty() &&
-                    details.snippet.find(cmdline_secret) != std::string::npos) {
+                    details.raw_snippet.find(cmdline_secret) != std::string::npos) {
                     found_cmdline = true;
                 }
             }

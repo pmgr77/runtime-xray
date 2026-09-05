@@ -129,6 +129,8 @@ bool parse_global_options(const std::vector<std::string>& args,
                           << severity_str << "\n";
                 return false;
             }
+        } else if (arg == "--show-secrets") {
+            opts.show_secrets = true;
         } else {
             // Not a common option; pass it through to the command
             remaining.push_back(arg);

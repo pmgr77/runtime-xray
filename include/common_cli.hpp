@@ -40,6 +40,7 @@ struct CommonOptions {
     std::string log_level = "info";   // error, warn, info, debug, trace
     std::string log_file;             // log file (empty = stderr)
     FindingSeverity min_severity = FindingSeverity::Medium;
+    bool show_secrets = false;        // whether to show secrets in reports (default: false)
 };
 
 /**

@@ -46,6 +46,7 @@
 #include <algorithm>
 #include <chrono>
 #include <optional>
+#include <unistd.h>
 
 namespace {
     runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
@@ -74,6 +75,8 @@ namespace {
                 }
             }
         }
+        // Clean up the file
+        unlink(file_path.c_str());
         return results;
     }
 
@@ -277,12 +280,17 @@ namespace runtimexray {
 
                     // Log the syscall entry (if debug or interesting)
                     if (Logger::is_enabled(LogLevel::Debug) || runtimexray::is_interesting_syscall(num)) {
-                        std::string line = "syscall " + std::to_string(ev.syscall_number) + ": " +
-                                            syscall_name +
-                                            " entry (pid=" + std::to_string(ev.pid) + 
-                                            ", tid=" + std::to_string(ev.tid) + ") " +
-                                            extra_info;
-                        Logger::log(LogLevel::Debug, line);
+                        std::string safe_extra = extra_info;
+                        if (extra_info.find("data=\"") != std::string::npos) {
+                            safe_extra = extra_info.substr(0, extra_info.find("data=\"") + 6) + "<redacted>\"";
+                        }
+                        Logger::log_sensitive(
+                            LogLevel::Debug,
+                            "syscall " + std::to_string(ev.syscall_number) + ": " + syscall_name +
+                                " entry (pid=" + std::to_string(ev.pid) + ", tid=" + std::to_string(ev.tid) + ")" + safe_extra,
+                            "syscall " + std::to_string(ev.syscall_number) + ": " + syscall_name +
+                                " entry (pid=" + std::to_string(ev.pid) + ", tid=" + std::to_string(ev.tid) + ")" + extra_info
+                        );
                     }
                 } else {
                     // Syscall exit – only log if debug is enabled
@@ -334,7 +342,11 @@ namespace runtimexray {
         // After trace, produce the graph
         auto graph = lineage_analyzer.produce_graph();
 
-        return report_findings(common, std::move(ctx), std::move(findings), std::move(graph), extra.has_value() ? &*extra : nullptr) ? 0 : 1;
+        return report_findings(common, 
+            std::move(ctx),
+            std::move(findings), 
+            std::move(graph),
+            extra.has_value() ? &*extra : nullptr) ? 0 : 1;
     }
 
     void TraceCommand::print_help() const
@@ -349,6 +361,7 @@ namespace runtimexray {
         std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
         std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
         std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
+        std::cout << "  --show-secrets         Show raw secret values in reports (default: hidden)\n";
         std::cout << "  --timeout SECONDS     Stop tracing after SECONDS\n";
         std::cout << "  --follow-forks        Trace child processes (default)\n";
         std::cout << "  --no-follow-forks     Do not trace child processes\n";
