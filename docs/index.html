@@ -125,6 +125,7 @@
         <code>--log-level LEVEL</code> – <code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code><br>
         <code>--log-file FILE</code> – write logs to file (default: stderr)<br>
         <code>--min-severity LEVEL</code> – <code>Critical</code>, <code>High</code>, <code>Medium</code>, <code>Low</code>, <code>Info</code><br>
+        <code>--show-secrets</code> – explicitly disclose detected secret values (redacted by default)<br>
         <em>(Removed: <code>--verbose</code>, <code>--output-format</code>, <code>--quiet</code> — replaced by the above)</em><br><br>
 
         <strong>Dynamic tracing features</strong><br>
@@ -146,15 +147,15 @@
         • 47+ CTest tests, runs on x86_64 and ARM64 (GitHub Actions)<br><br>
 
         <strong>🧪 Experimental</strong><br>
-        • Runtime correlation of static and dynamic evidence<br>
+        • Experimental process/event lineage; higher-level evidence correlation is planned<br>
         • eBPF process‑attach (planned)<br><br>
 
         <strong>📋 Planned</strong><br>
-        • Data lineage (track sensitive data from source to sink)<br>
+        • Value-level data lineage (track sensitive data from source to sink)<br>
         • Network‑boundary detection<br>
         • AI explanations (evidence‑first)<br>
         • PE / Mach‑O support<br>
-        • Web service / interactive demo<br>
+        • Local and air-gapped packaging and CI workflows<br>
         • HTML reports<br>
         • Dynamic plugin loading (<code>.so</code>)
     </div>
