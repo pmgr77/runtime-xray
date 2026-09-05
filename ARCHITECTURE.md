@@ -15,6 +15,7 @@ RuntimeXRay is a modular tool that analyzes the security posture of compiled app
   - `--log-level LEVEL` – set log level (error, warn, info, debug, trace)
   - `--log-file FILE` – write logs to file (default: stderr)
   - `--min-severity LEVEL` – filter findings
+  - `--show-secrets` – explicitly disclose secret values; redacted by default
 
 
 - **Collectors** – gather raw evidence without performing analysis:
@@ -45,6 +46,10 @@ RuntimeXRay is a modular tool that analyzes the security posture of compiled app
 
 - **Findings** – structured results produced by analyzers (`FindingList`).
 
+  Memory-secret findings retain the exact value internally for analysis and
+  reporting. The analyzer computes a per-run HMAC fingerprint. Reporters redact
+  the value by default; disclosure is an explicit option for local debugging.
+
 - **Logger** – thread‑safe, level‑based runtime logging (timestamps, levels). Logs to stderr or file (`--log-file`). Used by all modules for diagnostics and syscall traces (when `--log-level debug`).
 
 - **Reporter** – abstract `FindingReporter` with `TextFindingReporter` and `JsonFindingReporter` implementations. Renders findings to stdout or files (`--report`, `--json`). The old static `Reporter` class is now a utility for formatting.
@@ -57,7 +62,8 @@ Binary / Process
 → Collectors (Static, Dynamic, Memory)  
 → Evidence  
 → Analyzer Registry  
-→ Analyzers (built‑in + custom)  
+→ Analyzers (built-in + custom)
+→ Experimental event lineage / future value-level correlation
 → Findings  
 → Optional AI explanation (planned)  
 → Reporter (Text or JSON) → stdout or file

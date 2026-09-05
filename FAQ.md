@@ -3,7 +3,7 @@
 ## What is RuntimeXRay?
 
 RuntimeXRay is a security posture analyzer for **compiled applications**.  
-It runs your binary in a controlled sandbox, collects both **static** (ELF structure, hardening flags) and **dynamic** (system call tracing, memory scanning) evidence, and produces a human-readable security report.  
+It observes an authorized binary in a controlled test environment, collecting **static** (ELF structure, hardening flags) and **dynamic** (system call tracing, memory scanning) evidence. It does not create a security sandbox; the target runs with the privileges you give it.
 AI‑generated explanations are optional and currently planned for future releases.
 
 Think of it as “`checksec` on steroids + runtime tracing + memory scanning + evidence‑backed findings”.
@@ -17,16 +17,14 @@ Think of it as “`checksec` on steroids + runtime tracing + memory scanning + e
 | Protects a running system from **external malware** | Helps **developers** find weaknesses in their **own software** |
 | Detects known malicious patterns   | Reveals **evidence** of insecure practices |
 | Verdict: `clean / infected`        | Report: `finding + evidence + severity + fix` |
-| Runs in background, system‑wide    | Launched on‑demand for a specific binary in a sandbox |
+| Runs in background, system‑wide    | Launched on‑demand for a specific authorized target |
 
 RuntimeXRay **does not** look for viruses. It looks for things like:
 
-- Hardcoded API keys and private keys
-- Secrets lingering in memory after use
-- Weak cryptographic algorithms (MD5, DES, …)
+- Password-like strings and private-key markers observed in process memory
+- Binary hardening weaknesses and selected imported APIs
 - Missing binary hardening (NX, PIE, RELRO, stack canary)
-- Sensitive data crossing the network boundary
-- Unexpected data flows that could leak credentials
+- Runtime file, network, and write observations that can later be correlated
 
 The result is a **security posture scorecard** for your compiled code, not a malware alarm.
 
@@ -45,16 +43,16 @@ also creates a serious trust gap:
   certificate validation) often survive code review and static analysis.
 
 RuntimeXRay acts as a **post‑build security verifier** specifically designed for this
-challenge. You compile the AI‑written code, run the binary in a sandbox, and get an
+challenge. You compile the AI‑written code, run the binary in a controlled test environment, and get an
 evidence‑based report that shows:
 
-- What secrets actually appear in memory and where they travel (data lineage is planned, not yet fully implemented).
+- Which secret-like values are observed in memory (redacted by default; value-level lineage is planned, not yet fully implemented).
 - Whether the binary respects modern hardening (NX, PIE, RELRO, stack canary).
-- If sensitive data reaches the network, a log file, or an unexpected process.
-- Which weak cryptographic primitives are in use, even if called indirectly.
+- Which files, endpoints, and write operations are observed during the run.
+- Which selected imported APIs are present; this does not prove indirect call behavior.
 
-This gives you **confidence that the compiled artifact does not hide dangerous
-behaviour** — regardless of how (or by whom) the source was written.
+This gives you evidence about observed behavior — not proof that the compiled
+artifact is free of dangerous behavior.
 
 ---
 
@@ -69,7 +67,7 @@ Many security problems are invisible in the source code alone:
 - **Binary‑only dependencies** – third‑party libraries without source code.
 
 RuntimeXRay **complements** source‑level AI by providing **evidence from real execution**:
-concrete memory contents, system call arguments, actual network destinations, and precise timings.
+redacted secret metadata, system call arguments, actual network destinations, and timings.
 
 > **AI on source code says:** “This code path *might* leak a key.”
 > **RuntimeXRay says:** “At timestamp 18:32:41.231 a 32‑byte AES key appeared at address 0x7f…, lived for 4.7 seconds, and was passed to `SSL_CTX_use_PrivateKey`. Here is the proof.”
@@ -131,8 +129,8 @@ Every security finding in the report follows a consistent, developer‑friendly 
    Actionable guidance grounded in security best practices. For instance:  
    *“Use OS‑protected key storage, minimise the plaintext key lifetime, or switch to hardware‑backed keys.”*
 
-6. **Confidence**  
-   How certain the engine is about the finding (e.g. **98%** for a hardcoded key, lower for inferred data flows).
+6. **Correlation status**
+   Whether the observation is standalone or part of a supported evidence correlation. Full value-level confidence scoring is planned.
 
 This way you don’t just get a list of problems — you get a **remediation roadmap** with all the supporting evidence.
 
@@ -149,9 +147,9 @@ If you *are* a reverse engineer, RuntimeXRay can be a quick first pass to highli
 
 ## Do I need an AI API key to use RuntimeXRay?
 
-No, the AI analyst is **optional**.  
+No. The AI analyst is **not currently integrated**.
 The core engine works entirely offline and produces structured results (text and JSON; HTML planned).  
-If you provide an API key (e.g., DeepSeek), RuntimeXRay can generate **human‑readable explanations** for each finding, but this is a bonus layer, not a requirement.
+Optional evidence-grounded explanations may be added later; the current core works offline and does not require an API key.
 
 ---
 
@@ -169,7 +167,7 @@ Examples:
 # Human‑readable findings + normal logs
 runtimexray trace /bin/ls
 
-# JSON report only (no stdout)
+# JSON report plus the default human-readable stdout report
 runtimexray trace --json report.json /bin/ls
 
 # Everything separated
@@ -182,7 +180,7 @@ runtimexray trace --json report.json --log-level debug --log-file debug.log /bin
 
 ## Can I run RuntimeXRay on production servers?
 
-The current MVP is designed for **controlled lab/sandbox environments**.  
+The current MVP is designed for **controlled lab environments**. RuntimeXRay does not provide isolation; run targets only with appropriate authorization.
 Production analysis is out of scope for now, because tracing and memory inspection can affect performance and stability.  
 An experimental eBPF backend (`--backend ebpf`) is now available for low‑overhead tracing, but production use is still limited. We plan to enhance it with process attach and function‑level tracing (uprobes) in the future.
 

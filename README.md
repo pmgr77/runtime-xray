@@ -102,6 +102,7 @@ All subcommands support common options:
 - `--log-level LEVEL` – set log level (error, warn, info, debug, trace)
 - `--log-file FILE` – write runtime logs to file (default: stderr)
 - `--min-severity LEVEL` – filter findings (Critical, High, Medium, Low, Info)
+- `--show-secrets` – explicitly include detected secret values in reports (redacted by default)
 
 **Removed:** `--verbose`, `--output-format`, `--quiet` (replaced by the above).
 
@@ -126,7 +127,7 @@ All subcommands support common options:
 - Syscall name mapping and filtering of interesting events
 - File path reading for `open` / `openat`
 - Network address parsing for `connect` / `sendto`
-- `write` buffer reading (first 4 KB)
+- `write` buffer inspection for writes up to 4 KB
 - Child stdout/stderr capture and scanning for sensitive keywords
 - Timeout support (`--timeout <seconds>`)
 - Fork/thread following (`--follow-forks` / `--no-follow-forks`)
@@ -163,21 +164,30 @@ All subcommands support common options:
 
 ### 🧪 Experimental
 
-- **Runtime correlation** – combining static and dynamic findings in a unified view is being designed.
+- **Event/process lineage** – experimental process and runtime-event relationships are available; higher-level correlation rules are still being designed.
 - **Memory scanning under load** – performance tuning and heuristic improvements.
 
 ### 📋 Planned
 
-- **Data lineage** – track sensitive data from source through transformations to sinks
+- **Value-level data lineage** – track sensitive data from source through transformations to sinks
 - **Network‑boundary detection** – identify unexpected outbound communication
 - **AI explanations** – optional LLM integration to explain findings, always evidence‑first
 - **Additional binary formats** – PE (Windows), Mach‑O (macOS)
 - **Public benchmark** – run against popular open‑source projects
-- **Web service** – upload a binary and receive a report
+- **Local/air-gapped workflows** – improve packaging and CI integration without requiring binary upload
 
 ---
 
 ## Quick Start
+
+RuntimeXRay currently targets Linux ELF binaries. Runtime analysis observes
+the program you launch; it is not a security sandbox. Run targets only in an
+authorized, controlled environment.
+
+Secret findings are redacted by default. HMAC fingerprints allow repeated
+observations to be compared within one execution without printing the secret.
+Use `--show-secrets` only for deliberate local debugging. Raw values in logs
+require both `--show-secrets` and debug/trace logging.
 
 ### Build
 

@@ -7,17 +7,17 @@ RuntimeXRay supports machine‑readable JSON output for easy integration into CI
 Use `--json FILE` (with any subcommand) to write the JSON report to a file. Human‑readable text still goes to stdout (unless you also use `--report`).
 
 ```bash
-# JSON report only (no text output)
+# JSON report plus the default text report on stdout
 runtimexray trace --json report.json /bin/ls
 
 # Text report + JSON report
 runtimexray trace --report report.txt --json report.json /bin/ls
 ```
 
-If you want JSON to be printed to stdout (e.g., for piping), use `--json /dev/stdout`. Note that stderr will still contain runtime logs, so capture stdout separately.
+If you want JSON to be printed to stdout, suppress the human-readable report explicitly. Runtime logs remain on stderr.
 
 ```bash
-runtimexray trace --json /dev/stdout /bin/ls > report.json 2> debug.log
+runtimexray trace --report /dev/null --json /dev/stdout /bin/ls > report.json 2> debug.log
 ```
 
 ## Python Parsing Example
@@ -28,12 +28,12 @@ import subprocess
 
 # Run trace with JSON output to stdout (stderr goes to debug.log)
 result = subprocess.run(
-    ["runtimexray", "trace", "--json", "/dev/stdout", "/bin/ls"],
+    ["runtimexray", "trace", "--report", "/dev/null", "--json", "/dev/stdout", "/bin/ls"],
     capture_output=True,  # captures both stdout and stderr
     text=True
 )
 
-# stdout contains only the JSON (if --json /dev/stdout is used)
+    # stdout contains only JSON because the text report is suppressed
 report = json.loads(result.stdout)
 
 for finding in report["findings"]:
@@ -77,4 +77,5 @@ You can extend RuntimeXRay with custom analyzers (see [Extending Analyzers](exte
 - JSON report: `--json FILE` (use `/dev/stdout` to print to stdout).
 - Runtime logs: `--log-file FILE` (default: stderr).
 - Verbose syscall traces: `--log-level debug`.
+- Secret values are redacted by default. Do not enable `--show-secrets` in normal CI; use it only for deliberate local debugging.
 - **Removed:** `--verbose`, `--output-format`, `--quiet` – their functionality is now covered by the above.

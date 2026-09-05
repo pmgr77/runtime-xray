@@ -16,6 +16,7 @@ It focuses on technical milestones and is subject to change.
   - `--log-level LEVEL` – set log level (error, warn, info, debug, trace)
   - `--log-file FILE` – write runtime logs to file (default: stderr)
   - `--min-severity <level>` – (Critical, High, Medium, Low, Info)
+  - `--show-secrets` – explicitly disclose detected secret values; reports are redacted by default
 
   *Removed:* `--verbose`, `--output-format`, `--quiet` (replaced by the above).
 
@@ -77,6 +78,7 @@ It focuses on technical milestones and is subject to change.
   - Metadata fields in JSON: `schema_version`, `tool`, `command`, `target`, `started_at`, `duration_ms`, plus extra fields for `trace` (backend, timeout_seconds, timed_out, child_output) and `mem` (pages_scanned, max_pages).
   - Summary section with counts by severity and type.
   - Integrated in all three subcommands.
+  - Per-run HMAC fingerprints for memory-secret findings; raw values are not shown by default.
 
 - **Centralized finding filtering** (`filter_findings`) respecting `min_severity`.
 
@@ -88,11 +90,17 @@ It focuses on technical milestones and is subject to change.
 
 - **Documentation**: `README.md`, `ARCHITECTURE.md`, `THREAT_MODEL.md`, `ROADMAP.md`, `docs/security_checks.md`, `docs/extending_detectors.md`, `docs/integration_examples.md`, `FAQ.md`, etc.
 
-## 🚀 Upcoming Features
+## 🚀 Near-term product milestones
+
+1. **Safe v0.1 release** – finish redaction hardening, installation guidance, versioning, reproducible CI, and a documented Linux/ELF scope.
+2. **Evidence-chain demonstration** – provide a small vulnerable sample and benchmark showing how independent observations can be correlated. Do not present full value-level lineage until implemented.
+3. **CI and release comparison** – add baseline, policy, and release-to-release behavioral comparison workflows.
+
+## 🔭 Later technical features
 
 - **Full dynamic analysis**:
-  - Complete process memory scanning / sensitive-data discovery (already partially implemented)
-  - Data lineage: track sensitive data from source through transformations to sinks
+  - Bounded process memory scanning and sensitive-data discovery improvements
+  - Value-level data lineage: track sensitive data from source through transformations to sinks
   - Network-boundary detection
   - Correlation of static and runtime evidence into a unified report
 
