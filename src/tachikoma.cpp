@@ -317,20 +317,47 @@ namespace runtimexray {
         pid_t child = static_cast<pid_t>(new_pid);
 
         if (follow_forks_) {
-            // The child is already attached; just set options to trace its own forks
-            // Trace the child: set options and continue with PTRACE_SYSCALL
-            if (ptrace(PTRACE_SETOPTIONS, child, nullptr,
-                   PTRACE_O_TRACEFORK |
-                   PTRACE_O_TRACEVFORK |
-                   PTRACE_O_TRACECLONE |
-                   PTRACE_O_TRACEEXIT) == -1) {
-                throw std::runtime_error(std::string("PTRACE_SETOPTIONS on child failed: pid=") + std::to_string(child) + " " + std::strerror(errno));
+            // Wait for the child to stop before attempting to set options.
+            // This ensures the child is still alive and in a suitable state.
+            int child_status;
+            pid_t wait_result = waitpid(child, &child_status, __WALL | WNOHANG);
+            if (wait_result == -1) {
+                // Child may have already exited – log and skip.
+                // Continue the parent without tracing this child.
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
+                    throw std::runtime_error(std::string("PTRACE_SYSCALL on parent failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
+                }
+                return true;
             }
-            traced_pids_.insert(child);
-            in_syscall_state_[child] = false;
-            // Continue the child
-            if (ptrace(PTRACE_SYSCALL, child, nullptr, nullptr) == -1) {
-                throw std::runtime_error(std::string("PTRACE_SYSCALL on child failed: pid=") + std::to_string(child) + " " + std::strerror(errno));
+            if (wait_result == child && WIFSTOPPED(child_status)) {
+                // Child is stopped – set options and add to traced set.
+                if (ptrace(PTRACE_SETOPTIONS, child, nullptr,
+                        PTRACE_O_TRACEFORK |
+                        PTRACE_O_TRACEVFORK |
+                        PTRACE_O_TRACECLONE |
+                        PTRACE_O_TRACEEXIT) == -1) {
+                    // If setting options fails (e.g., child died), just continue.
+                    // Log error but don't crash.
+                    // Continue the parent.
+                    if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
+                        throw std::runtime_error(std::string("PTRACE_SYSCALL on parent failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
+                    }
+                    return true;
+                }
+                traced_pids_.insert(child);
+                in_syscall_state_[child] = false;
+                // Continue the child
+                if (ptrace(PTRACE_SYSCALL, child, nullptr, nullptr) == -1) {
+                    throw std::runtime_error(std::string("PTRACE_SYSCALL on child failed: pid=") + std::to_string(child) + " " + std::strerror(errno));
+                }
+            } else {
+                // Child is not stopped (maybe exited) – do not trace it.
+                // Detach if necessary (but it might already be detached).
+                // Just continue the parent.
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
+                    throw std::runtime_error(std::string("PTRACE_SYSCALL on parent failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
+                }
+                return true;
             }
         } else {
             // Do NOT trace the child: continue it normally (untraced)
@@ -340,12 +367,12 @@ namespace runtimexray {
             // Do NOT add child to traced_pids_ – it will not be waited for
         }
 
-        // Continue the parent
+        // Continue the parent (only reached if we successfully handled the child)
         if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
             throw std::runtime_error(std::string("PTRACE_SYSCALL on parent failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
         }
         return true;
-    }
+    }    
 
     // Process a syscall stop for a specific PID
     void Tachikoma::handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall) {

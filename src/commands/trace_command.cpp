@@ -26,6 +26,7 @@
 #include "syscall_names.hpp"
 #include "itrace_backend.hpp" // declares create_ebpf_backend()
 #include "tachikoma.hpp"
+#include "memory_scanner.hpp"
 #include "finding.hpp"
 #include "analyzer_registry.hpp"
 #include "evidence.hpp"
@@ -34,6 +35,9 @@
 #include "finding_reporter.hpp"
 #include "dynamic_analysis.hpp"
 #include "lineage_analyzer.hpp"
+#include "risk_assessment_registry.hpp"
+#include "lineage.hpp"
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -47,38 +51,9 @@
 #include <chrono>
 #include <optional>
 #include <unistd.h>
+#include <cstddef>
 
 namespace {
-    runtimexray::FindingList scan_child_output_for_secrets(const std::string& file_path) {
-        runtimexray::FindingList results;
-        std::ifstream infile(file_path);
-        if (!infile) {
-            return results;
-        }
-
-        std::string line;
-        size_t found = 0;
-        const size_t max_findings = 5;
-
-        while (std::getline(infile, line) && found < max_findings) {
-            if (!line.empty()) {
-                // Create memory evidence from the output line.
-                runtimexray::MemoryChunkEvidence ev{line, "child_output", 0}; // pid unknown
-                auto findings = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ev);
-
-                for (const auto& f : findings) {
-                    if (found >= max_findings) {
-                        break;
-                    }
-                    results.push_back(f);
-                    ++found;
-                }
-            }
-        }
-        // Clean up the file
-        unlink(file_path.c_str());
-        return results;
-    }
 
     void handle_syscall_open(
         const char *syscall_name,
@@ -88,32 +63,38 @@ namespace {
         const runtimexray::SyscallEvent& ev)
     {
         uint64_t path_addr = (std::strcmp(syscall_name, "open") == 0) ? ev.arg0 : ev.arg1;
-        std::string path = backend->read_string(path_addr);
+        std::string path = backend->read_string(ev.pid, path_addr);
         if (!path.empty()) {
             extra_info = " path=\"" + path + "\"";
             runtimexray::FileAccessEvidence fe{path, 0, ev.pid};
             auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
-            findings.insert(findings.end(), res.begin(), res.end());
+            for (auto& f : res) {
+                f.pid = ev.pid;   // set PID
+                findings.push_back(f);
+            }
         }
     }
-    
+
     void handle_syscall_connect(
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
         std::string& extra_info,
         runtimexray::FindingList& findings,
-        const runtimexray::SyscallEvent& ev) 
+        const runtimexray::SyscallEvent& ev)
     {
         uint64_t sockaddr_ptr = ev.arg1;
         uint64_t addrlen = ev.arg2;
         if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
+            auto bytes = backend->read_memory(ev.pid, sockaddr_ptr, static_cast<size_t>(addrlen));
             auto parsed = runtimexray::parse_sockaddr(bytes);
             if (parsed.valid) {
                 extra_info = " addr=" + parsed.ip + ":" + std::to_string(parsed.port);
                 runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
                 auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
-                findings.insert(findings.end(), res.begin(), res.end());
-            }                            
+                for (auto& f : res) {
+                    f.pid = ev.pid;   // set PID
+                    findings.push_back(f);
+                }
+            }
         }
     }
 
@@ -123,18 +104,39 @@ namespace {
         runtimexray::FindingList& findings,
         const runtimexray::SyscallEvent& ev)
     {
-        // sendto: arg4 – dest_addr, arg5 – addrlen (x86_64: r8, r9)
-        uint64_t sockaddr_ptr = ev.arg4;
-        uint64_t addrlen = ev.arg5;
-        if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-            auto bytes = backend->read_memory(sockaddr_ptr, static_cast<size_t>(addrlen));
-            auto parsed = runtimexray::parse_sockaddr(bytes);
-            if (parsed.valid) {
-                extra_info = " dest addr=" + parsed.ip + ":" + std::to_string(parsed.port);
-                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
-                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
-                findings.insert(findings.end(), res.begin(), res.end());
-            }                            
+        uint64_t buf_ptr = ev.arg1;
+        uint64_t count   = ev.arg2;
+
+        // Debug: log pointer and length
+        runtimexray::Logger::log(runtimexray::LogLevel::Debug, "sendto: buf_ptr=0x" + std::to_string(buf_ptr) +
+                ", count=" + std::to_string(count));
+
+        if (buf_ptr > 0 && count > 0 && count <= 4096) {
+            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            if (!bytes.empty()) {
+                if (runtimexray::Logger::is_enabled(runtimexray::LogLevel::Debug)) {
+                    // Log raw hex for debugging
+                    std::string hex;
+                    for (size_t i = 0; i < std::min(bytes.size(), (size_t)32); ++i) {
+                        char buf[4];
+                        snprintf(buf, sizeof(buf), "%02x", static_cast<unsigned char>(bytes[i]));
+                        hex += buf;
+                        if (i % 16 == 15) hex += " ";
+                    }
+                    runtimexray::Logger::log(runtimexray::LogLevel::Debug, "sendto raw bytes (hex): " + hex);
+                }
+                std::string data_str = runtimexray::sanitize_data(bytes);
+                // Append data info to extra_info (redacted in safe log)
+                extra_info += " data=\"" + data_str + "\"";
+                runtimexray::MemoryChunkEvidence mce{data_str, "sendto_data", ev.pid};
+                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+                for (auto& f : res) {
+                    f.pid = ev.pid;
+                    findings.push_back(f);
+                }
+            } else {
+                runtimexray::Logger::log(runtimexray::LogLevel::Debug, "sendto: read_memory returned empty");
+            }
         }
     }
 
@@ -148,22 +150,169 @@ namespace {
         uint64_t buf_ptr = ev.arg1;
         uint64_t count = ev.arg2;
         if (buf_ptr > 0 && count > 0 && count <= 4096) {
-            auto bytes = backend->read_memory(buf_ptr, static_cast<size_t>(count));
+            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
             if (!bytes.empty()) {
                 std::string data_str = runtimexray::sanitize_data(bytes);
+                std::string location = (fd == 1) ? "stdout" : (fd == 2) ? "stderr" : "write_data";
                 extra_info = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
-                runtimexray::MemoryChunkEvidence mce{data_str, "write_data", ev.pid};
+                runtimexray::MemoryChunkEvidence mce{data_str, location, ev.pid};
                 auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-                findings.insert(findings.end(), res.begin(), res.end());                                
+                for (auto& f : res) {
+                    f.pid = ev.pid;   // set PID
+                    findings.push_back(f);
+                }
             }
         }
     }
-};
+
+    void handle_syscall_send(
+        std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        std::string& extra_info,
+        runtimexray::FindingList& findings,
+        const runtimexray::SyscallEvent& ev)
+    {
+        // send(int sockfd, const void *buf, size_t len, int flags)
+        // Linux x86_64: rdi=sockfd, rsi=buf, rdx=len, r10=flags
+        uint64_t buf_ptr = ev.arg1;
+        uint64_t count = ev.arg2;
+        if (buf_ptr > 0 && count > 0 && count <= 4096) {
+            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            if (!bytes.empty()) {
+                std::string data_str = runtimexray::sanitize_data(bytes);
+                // Optional: include sockfd in extra_info
+                extra_info = " sockfd=" + std::to_string(ev.arg0) + " data=\"" + data_str + "\"";
+                runtimexray::MemoryChunkEvidence mce{data_str, "send_data", ev.pid};
+                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+                for (auto& f : res) {
+                    f.pid = ev.pid;   // set PID
+                    findings.push_back(f);
+                }
+            }
+        }
+    }
+
+
+    void handle_syscall_writev(
+        std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        std::string& extra_info,
+        runtimexray::FindingList& findings,
+        const runtimexray::SyscallEvent& ev)
+    {
+        // writev(int fd, const struct iovec *iov, int iovcnt)
+        uint64_t fd = ev.arg0;
+        uint64_t iov_ptr = ev.arg1;
+        uint64_t iovcnt = ev.arg2;
+
+        if (iov_ptr == 0 || iovcnt == 0 || iovcnt > 1024) {
+            return; // sane limit
+        }
+
+        // Read the iovec array from the target process
+        size_t iov_size = iovcnt * sizeof(struct iovec);
+        auto iov_bytes = backend->read_memory(ev.pid, iov_ptr, iov_size);
+        if (iov_bytes.empty()) {
+            return;
+        }
+
+        const struct iovec* iov = reinterpret_cast<const struct iovec*>(iov_bytes.data());
+
+        // For each iovec, read the buffer and scan for secrets
+        for (uint64_t i = 0; i < iovcnt; ++i) {
+            uint64_t buf_ptr = reinterpret_cast<uint64_t>(iov[i].iov_base);
+            uint64_t count = static_cast<uint64_t>(iov[i].iov_len);
+            if (buf_ptr == 0 || count == 0 || count > 4096) {
+                continue;
+            }
+
+            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            if (bytes.empty()) {
+                continue;
+            }
+
+            std::string data_str = runtimexray::sanitize_data(bytes);
+            // Differentiate stdout/stderr
+            std::string location = (fd == 1) ? "stdout" : (fd == 2) ? "stderr" : "writev_data";
+            runtimexray::MemoryChunkEvidence mce{data_str, location, ev.pid};
+            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+            for (auto& f : res) {
+                f.pid = ev.pid;
+                findings.push_back(f);
+            }
+            // Append data to extra_info (optional)
+            if (!extra_info.empty()) extra_info += " ";
+            extra_info += "iov[" + std::to_string(i) + "]=" + data_str;
+        }
+    }
+} // anonymous namespace
 
 namespace runtimexray {
 
+    // Helper to add data nodes from memory scan to lineage graph
+    void add_data_nodes_to_graph(
+        LineageGraph& graph,
+        const FindingList& mem_findings,
+        pid_t pid)
+    {
+        Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: PID=" + std::to_string(pid));
+        // Find the process node for this PID
+        size_t proc_idx = SIZE_MAX;
+        for (size_t i = 0; i < graph.observations.size(); ++i) {
+            const auto& obs = graph.observations[i];
+            if (obs.type == ObservationType::Event &&
+                obs.syscall_name == "process" &&
+                obs.pid == pid)
+            {
+                proc_idx = i;
+                break;
+            }
+        }
 
-    
+        Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: proc_idx=" + std::to_string(proc_idx));
+
+        // If no process node exists, create one
+        if (proc_idx == SIZE_MAX) {
+            Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: Creating new process node for PID " + std::to_string(pid));
+            Observation proc_obs;
+            proc_obs.type = ObservationType::Event;
+            proc_obs.syscall_name = "process";
+            proc_obs.pid = pid;
+            proc_obs.tid = pid;
+            proc_obs.start_time = std::chrono::steady_clock::now();
+            proc_obs.program_name = runtimexray::get_process_name(pid);
+            proc_idx = graph.observations.size();
+            graph.observations.push_back(proc_obs);
+        }
+
+        for (const auto& f : mem_findings) {
+            if (auto* details = std::get_if<MemorySecretFindingDetails>(&f.details)) {
+                Observation data_obs;
+                data_obs.type = ObservationType::Data;
+                data_obs.data_type = details->location.empty() ? details->secret_type : details->location;
+                data_obs.fingerprint = details->fingerprint;
+                // For graph, we can redact snippet or keep raw (reporter will handle)
+                data_obs.data_snippet = details->raw_snippet;
+                data_obs.address = details->address;
+                data_obs.size = details->raw_secret.size();
+                data_obs.pid = pid;
+                data_obs.tid = pid;
+                data_obs.start_time = std::chrono::steady_clock::now();
+                size_t data_idx = graph.observations.size();
+                Logger::log(LogLevel::Debug,
+                    "add_data_nodes_to_graph: Adding data node with fingerprint " +
+                    details->fingerprint +
+                    " for PID " + std::to_string(pid) + " at index " + std::to_string(data_idx));
+                graph.observations.push_back(data_obs);
+
+                LineageEdge edge;
+                edge.from_index = proc_idx;
+                edge.to_index = data_idx;
+                edge.relation = RelationType::StaticAssociated;
+                edge.details = "Memory secret found";
+                graph.edges.push_back(edge);
+            }
+        }
+    }
+
     bool TraceCommand::parse_specific_args(const std::vector<std::string> &args) {
         program_.clear();
         program_args_.clear();
@@ -200,6 +349,8 @@ namespace runtimexray {
                follow_forks_ = true;
             } else if (arg == "--no-follow-forks") {
                 follow_forks_ = false;
+            } else if (arg == "--scan-memory") {
+               scan_memory_ = true;
             } else if (program_.empty()) {
                 program_ = arg;
             } else {
@@ -219,8 +370,10 @@ namespace runtimexray {
         auto start_time = std::chrono::steady_clock::now();
 
         runtimexray::FindingList findings;
+
         std::optional<nlohmann::json> extra;
         std::string child_output;
+        std::vector<pid_t> child_pids;
 
         runtimexray::LineageAnalyzer lineage_analyzer;
 
@@ -259,7 +412,7 @@ namespace runtimexray {
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
 
-                if (!Logger::is_enabled(LogLevel::Debug) && 
+                if (!Logger::is_enabled(LogLevel::Debug) &&
                     !runtimexray::is_interesting_syscall(num)) {
                     return; // skip non-interesting syscalls
                 }
@@ -276,6 +429,10 @@ namespace runtimexray {
                         handle_syscall_sendto(backend, extra_info, findings, ev);
                     }  else if (std::strcmp(syscall_name, "write") == 0) {
                         handle_syscall_write(backend, extra_info, findings, ev);
+                    } else if (std::strcmp(syscall_name, "send") == 0) {
+                        handle_syscall_send(backend, extra_info, findings, ev);
+                    } else if (std::strcmp(syscall_name, "writev") == 0) {
+                        handle_syscall_writev(backend, extra_info, findings, ev);
                     }
 
                     // Log the syscall entry (if debug or interesting)
@@ -293,7 +450,14 @@ namespace runtimexray {
                         );
                     }
                 } else {
-                    // Syscall exit – only log if debug is enabled
+                    // Syscall exit
+                    const char* name = runtimexray::syscall_name(static_cast<long>(ev.syscall_number));
+                    if ((strcmp(name, "fork") == 0 || strcmp(name, "vfork") == 0 ||
+                        strcmp(name, "clone") == 0) && ev.return_value > 0) {
+                        pid_t child = static_cast<pid_t>(ev.return_value);
+                        child_pids.push_back(child);
+                        Logger::log(LogLevel::Debug, "Detected child PID " + std::to_string(child));
+                    }
                     if (Logger::is_enabled(LogLevel::Debug)) {
                         std::string line = "syscall " + std::to_string(ev.syscall_number) + ": " +
                                             syscall_name +
@@ -307,12 +471,36 @@ namespace runtimexray {
 
             backend->trace(config);
 
+            // ---- Produce lineage graph and scan memory for secrets ----
+            auto graph = lineage_analyzer.produce_graph();
+
+            if (scan_memory_) {
+                pid_t parent_pid = backend->get_pid();
+                if (parent_pid > 0) {
+                    FindingList parent_findings;
+                    size_t pages_scanned = 0;
+                    scan_process_for_secrets(parent_pid, parent_findings, 50, 1000, &pages_scanned);
+                    findings.insert(findings.end(), parent_findings.begin(), parent_findings.end());
+                }
+                for (pid_t child : child_pids) {
+                    FindingList child_findings;
+                    size_t pages_scanned = 0;
+                    scan_process_for_secrets(child, child_findings, 50, 1000, &pages_scanned);
+                    findings.insert(findings.end(), child_findings.begin(), child_findings.end());
+                }
+            }
+
             // ---- Child output handling (works for any backend that saves it) ----
             child_output = backend->child_output_path();
-
             if (!child_output.empty()) {
-                auto extra_findings = scan_child_output_for_secrets(child_output);
-                findings.insert(findings.end(), extra_findings.begin(), extra_findings.end());
+                Logger::log(LogLevel::Debug, "Child output saved to " + child_output + " (for debugging)");
+            }
+
+            // ---- Now add ALL findings as data nodes in the graph ----
+            for (const auto& f : findings) {
+                if (f.pid > 0) {
+                    add_data_nodes_to_graph(graph, {f}, f.pid);
+                }
             }
 
             // Build extra JSON metadata (for JSON reporter)
@@ -321,32 +509,34 @@ namespace runtimexray {
             (*extra)["timeout_seconds"] = static_cast<int>(timeout_.count());
             (*extra)["timed_out"] = backend->is_timed_out();
             (*extra)["child_output"] = "Child stdout/stderr saved to " + child_output;
+
+            runtimexray::filter_findings(findings, common.min_severity, false);
+
+            auto end_time = std::chrono::steady_clock::now();
+            int duration_ms = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
+            );
+
+            ReportContext ctx;
+            ctx.command = "trace";
+            ctx.target = program_;
+            ctx.started_at = runtimexray::current_iso8601_utc();
+            ctx.duration_ms = duration_ms;
+
+            // After filtering findings, but before reporting:
+            RiskAssessmentRegistry::instance().assess_findings(findings, ctx, &graph);
+
+            return report_findings(common,
+                std::move(ctx),
+                std::move(findings),
+                std::move(graph),
+                extra.has_value() ? &*extra : nullptr) ? 0 : 1;
+
         } catch (const std::exception& e) {
             Logger::log(LogLevel::Error, std::string("Trace failed: ") + e.what());
             return 1;
         }
-
-        runtimexray::filter_findings(findings, common.min_severity, false);
-
-        auto end_time = std::chrono::steady_clock::now();
-        int duration_ms = static_cast<int>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
-        );
-
-        ReportContext ctx;
-        ctx.command = "trace";
-        ctx.target = program_;
-        ctx.started_at = runtimexray::current_iso8601_utc();
-        ctx.duration_ms = duration_ms;
-
-        // After trace, produce the graph
-        auto graph = lineage_analyzer.produce_graph();
-
-        return report_findings(common, 
-            std::move(ctx),
-            std::move(findings), 
-            std::move(graph),
-            extra.has_value() ? &*extra : nullptr) ? 0 : 1;
+        // No code after catch – the function always returns from inside try or catch.
     }
 
     void TraceCommand::print_help() const

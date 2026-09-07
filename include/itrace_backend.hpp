@@ -67,6 +67,9 @@ public:
     /** @return Unique backend name, e.g., "ptrace", "ebpf". */
     virtual std::string name() const = 0;
     
+    /** @return PID of the traced process. */
+    virtual pid_t get_pid() const = 0;
+
     /** @return True if this backend can attach to an already-running process. */
     virtual bool supports_attach() const = 0;
 
@@ -83,7 +86,9 @@ public:
      * @param max_len Maximum number of bytes to read.
      * @return String contents (without the null terminator).
      */
-    virtual std::string read_string(uint64_t address, size_t max_len = 256) const = 0;
+    virtual std::string read_string(uint64_t address, size_t max_len = 256) const {
+        return read_string(get_pid(), address, max_len);
+    }
     
     /**
      * @brief Reads arbitrary bytes from the traced process memory.
@@ -91,8 +96,28 @@ public:
      * @param size Number of bytes to read.
      * @return Vector of bytes (empty on error).
      */
-    virtual std::vector<std::byte> read_memory(uint64_t address, size_t size) const = 0;
+    virtual std::vector<std::byte> read_memory(uint64_t address, size_t size) const {
+        return read_memory(get_pid(), address, size);
+    }
     
+    /**
+     * @brief Reads a null-terminated string from a specific process memory.
+     * @param pid Process ID to read from.
+     * @param address Virtual address of the string in that process.
+     * @param max_len Maximum number of bytes to read.
+     * @return String contents (without the null terminator).
+     */
+    virtual std::string read_string(pid_t pid, uint64_t address, size_t max_len = 256) const = 0;
+
+    /**
+     * @brief Reads arbitrary bytes from a specific process memory.
+     * @param pid Process ID to read from.
+     * @param address Virtual address in that process.
+     * @param size Number of bytes to read.
+     * @return Vector of bytes (empty on error).
+     */
+    virtual std::vector<std::byte> read_memory(pid_t pid, uint64_t address, size_t size) const = 0;
+
     /**
      * @brief Starts a tracing session.
      *

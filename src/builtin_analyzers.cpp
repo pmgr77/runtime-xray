@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
+#include <cstring>
 
 namespace runtimexray {
 
@@ -220,8 +221,29 @@ struct PasswordMatch {
     std::string snippet;   // surrounding context
 };
 
+// Helper: clean extracted secret by trimming whitespace and removing trailing punctuation
+static std::string clean_extracted_secret(const std::string& raw) {
+    // Trim leading/trailing whitespace
+    size_t start = raw.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) return "";
+    size_t end = raw.find_last_not_of(" \t\n\r");
+    std::string trimmed = raw.substr(start, end - start + 1);
+
+    // Remove trailing punctuation that is likely formatting (.,!?:;)
+    while (!trimmed.empty() && strchr(".,!?:;", trimmed.back()) != nullptr) {
+        trimmed.pop_back();
+    }
+    // Trim any whitespace that may appear after removing punctuation
+    end = trimmed.find_last_not_of(" \t\n\r");
+    if (end != std::string::npos) {
+        trimmed = trimmed.substr(0, end + 1);
+    }
+    return trimmed;
+}
+
 // Password detector logic (moved from old PasswordDetector)
 std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
+    //Logger::log(LogLevel::Debug, "detect_password_matches: starting scan of chunk of size " + std::to_string(chunk.size()));
     std::vector<PasswordMatch> results;
     static const std::vector<std::string> keywords = {
         "password", "passwd", "pwd", "pass", "pswd",
@@ -250,29 +272,27 @@ std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
                 const size_t max_val_len = 128;
                 while (value_end < chunk.size() && (value_end - value_start) < max_val_len) {
                     char c = chunk[value_end];
-                    if (c == '\0' || c == '\n' || c == '\r' || c == ',' || c == ';' ||
-                        c == ' ') {
+                    if (c == '\0' || c == '\n' || c == '\r' || c == ',' || c == ';' || c == ' ') {
                         break;
                     }
                     ++value_end;
                 }
 
-                // Extract the exact secret value
-                std::string value = chunk.substr(value_start, value_end - value_start);
+                std::string raw_value = chunk.substr(value_start, value_end - value_start);
+                std::string cleaned_value = clean_extracted_secret(raw_value);
+                if (!cleaned_value.empty()) {
+                    // Extract snippet (surrounding context) – keep original raw snippet for logging
+                    size_t snippet_start = (pos > 20) ? pos - 20 : 0;
+                    size_t snippet_len = std::min<size_t>(160, chunk.size() - snippet_start);
+                    std::string snippet = chunk.substr(snippet_start, snippet_len);
+                    for (char& c : snippet) {
+                        if (c < 0x20 || c > 0x7E) c = '.';
+                    }
 
-                // Extract snippet (surrounding context)
-                size_t snippet_start = (pos > 20) ? pos - 20 : 0;
-                size_t snippet_len = std::min<size_t>(160, chunk.size() - snippet_start);
-                std::string snippet = chunk.substr(snippet_start, snippet_len);
-                // Clean non-printable
-                for (char& c : snippet) {
-                    if (c < 0x20 || c > 0x7E) c = '.';
+                    Logger::log(LogLevel::Debug, "detect_password_matches: found match: keyword=" + kw +
+                                ", raw=" + raw_value + ", cleaned=" + cleaned_value);
+                    results.emplace_back(PasswordMatch{kw, cleaned_value, snippet});
                 }
-                // Only add if value is non-empty
-                if (!value.empty()) {
-                    results.emplace_back(PasswordMatch{kw, value, snippet});
-                }
-
                 pos = next;
             } else {
                 pos = next;
@@ -539,7 +559,7 @@ public:
                 details.secret_type = "private_key"; // or match.type
                 details.secret_length = match.value.size();
                 details.location = m->location;
-                details.address = m->address;                
+                details.address = m->address;
                 findings.emplace_back(
                     FindingSeverity::High,
                     "Sensitive data found in memory",

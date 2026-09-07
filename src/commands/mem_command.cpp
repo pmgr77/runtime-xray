@@ -138,6 +138,7 @@ namespace runtimexray
                 data_obs.type = ObservationType::Data;
                 data_obs.data_type = details->secret_type;
                 data_obs.data_snippet = snippet_for_graph;
+                data_obs.fingerprint = details->fingerprint;
                 data_obs.address = details->address;
                 data_obs.size = details->raw_secret.size();
                 data_obs.pid = pid_;

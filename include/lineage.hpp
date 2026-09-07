@@ -57,6 +57,7 @@ struct Observation {
     // Data-specific fields
     std::string data_type;              // "secret", "key", "file_content", "env_var"
     std::string data_snippet;           // first 64 bytes (or less)
+    std::string fingerprint;            // HMAC‑SHA256 of exact secret (for correlation)
     uintptr_t address;
     size_t size;
     std::string source;                 // e.g., "file:/etc/passwd", "env:API_KEY"

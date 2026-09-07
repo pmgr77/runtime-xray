@@ -85,6 +85,25 @@ struct MemorySecretFindingDetails {
     uintptr_t address = 0;          // memory address where the secret was found
 };
 
+/**
+ * @brief A single step in an event chain.
+ */
+struct EventLink {
+    std::string description; // e.g., "openat /lib/liblzma.so.5"
+    pid_t pid;
+    pid_t tid;
+    std::string syscall_name;
+    std::string details;    // optional extra info
+};
+
+/**
+ * @brief A composite finding that represents a chain of events.
+ */
+struct EventChainFindingDetails {
+    std::string chain_summary;  // e.g., "Library load → Network → Child process"
+    std::vector<EventLink> links;
+};
+
 // Variant type for all possible finding details
 using DetailsVariant = std::variant<
     HardeningFindingDetails,
@@ -92,7 +111,8 @@ using DetailsVariant = std::variant<
     SensitiveFileAccessDetails,
     NetworkConnectionDetails,
     SensitiveDataWriteDetails,
-    MemorySecretFindingDetails
+    MemorySecretFindingDetails,
+    EventChainFindingDetails
 >;
 
 /**
@@ -107,6 +127,7 @@ public:
     std::string description;
     std::string evidence;
     DetailsVariant details;
+    pid_t pid;   // process ID that owns this finding
 
     /**
      * @brief Constructs a Finding.
@@ -114,9 +135,10 @@ public:
      * @param desc Human-readable description of the finding.
      * @param ev Evidence supporting the finding.
      * @param det Specific details (variant).
+     * @param p Process ID that owns this finding.
      */
-    Finding(FindingSeverity sev, std::string desc, std::string ev, DetailsVariant det)
-    : severity(sev), description(std::move(desc)), evidence(std::move(ev)), details(std::move(det)) 
+    Finding(FindingSeverity sev, std::string desc, std::string ev, DetailsVariant det, pid_t p = -1)
+    : severity(sev), description(std::move(desc)), evidence(std::move(ev)), details(std::move(det)), pid(p)
     {}
 };
     

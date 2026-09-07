@@ -194,8 +194,10 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
             // Create evidence and send to registry
             MemoryChunkEvidence ev{chunk, "memory", pid, address};
             FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
-            for (const auto& f : results) {
-                if (found >= max_findings) break;
+            for (auto& f : results) {
+                f.pid = pid;            // set PID
+                if (found >= max_findings) 
+                    break;
                 findings.push_back(f);
                 ++found;
             }
@@ -230,7 +232,8 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
         // Create evidence from this argument string.
         MemoryChunkEvidence ev{arg, "cmdline", pid, 0};
         FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
-        for (const auto& f : results) {
+        for (auto& f : results) {
+            f.pid = pid;            // set PID
             if (found >= max_findings) {
                 return;
             }
@@ -242,7 +245,9 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
 
 void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findings) {
     std::string environ = read_proc_file(pid, "environ");
+    Logger::log(LogLevel::Debug, "scan_environ_for_secrets: environ length = " + std::to_string(environ.size()));
     if (environ.empty()) {
+        Logger::log(LogLevel::Debug, "scan_environ_for_secrets: empty or failed to read");
         return;
     }
 
@@ -251,8 +256,10 @@ void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     for (const auto& var : env_vars) {
         // Create evidence from this environment variable string.
         MemoryChunkEvidence ev{var, "environment", pid, 0};
+        Logger::log(LogLevel::Debug, "scan_environ_for_secrets: checking env var: " + var);
         FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
-        for (const auto& f : results) {
+        for (auto& f : results) {
+            f.pid = pid;            // set PID
             if (found >= max_findings) {
                 return;
             }

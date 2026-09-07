@@ -47,6 +47,9 @@ set(RUNTIMEXRAY_SOURCES
     src/logger.cpp
     src/lineage_analyzer.cpp
     src/secret_fingerprinter.cpp
+    src/risk_assessment_registry.cpp
+    src/register_builtin_risk_assessments.cpp
+    src/cross_boundary_risk_assessment.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -330,6 +333,10 @@ if(NOT SKIP_PTRACE_TESTS)
     add_test(NAME check_capture_program_name
          COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_program_name.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:exec_echo_test>)
     set_tests_properties(check_capture_program_name PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+    add_test(NAME check_cross_boundary_risk
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cross_boundary.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:cross_boundary_test>)
+    set_tests_properties(check_cross_boundary_risk PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
 endif()
 

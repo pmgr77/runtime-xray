@@ -669,6 +669,7 @@ bool is_interesting_syscall_x86_64(long num) {
         case 257: // openat
         case 0:   // read
         case 1:   // write
+        case 20:  // writev
         case 3:   // close
         case 82:  // rename
         case 83:  // mkdir
@@ -739,6 +740,7 @@ bool is_interesting_syscall_arm64(long num) {
         case 56:  // openat
         case 63:  // read
         case 64:  // write
+        case 66:  // writev
         case 57:  // close
         case 38:  // renameat
         case 34:  // mkdirat

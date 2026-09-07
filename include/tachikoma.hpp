@@ -83,6 +83,8 @@ public:
 
     const auto& timeout() const noexcept { return timeout_; }
 
+    pid_t get_pid() const noexcept { return child_pid_; }
+
     // Enable/disable following forks
     void set_follow_forks(bool follow);
 
@@ -136,7 +138,7 @@ private:
     // Helper to handle ptrace events (fork, clone, etc.)
     bool handle_ptrace_event(pid_t pid, int status, const SyscallCallback& cb);
     // Process a syscall stop for a specific PID
-    void handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall);    
+    void handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall);
 };
 
 } // namespace runtimexray

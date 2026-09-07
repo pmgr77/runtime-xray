@@ -59,20 +59,26 @@ public:
     std::string name() const override { return "ebpf"; }
     bool supports_attach() const override { return false; }
     bool supports_function_tracing() const override { return false; }
+    pid_t get_pid() const override { return child_pid_; }
 
     std::string read_string(uint64_t address, size_t max_len) const override {
-        if (child_pid_ <= 0) {
-            return "";
-        }
-        return read_process_memory_string(child_pid_, address, max_len);
+        return read_string(child_pid_, address, max_len);
     }
 
     std::vector<std::byte> read_memory(uint64_t address, size_t size) const override {
-        if (child_pid_ <= 0) {
-            return std::vector<std::byte>{};
-        }
-        return read_process_memory_bytes(child_pid_, address, size);
+        return read_memory(child_pid_, address, size);
     }
+
+    // New PID‑aware methods
+    std::string read_string(pid_t pid, uint64_t address, size_t max_len) const override {
+        if (pid <= 0) return "";
+        return read_process_memory_string(pid, address, max_len);
+    }
+
+    std::vector<std::byte> read_memory(pid_t pid, uint64_t address, size_t size) const override {
+        if (pid <= 0) return {};
+        return read_process_memory_bytes(pid, address, size);
+     }    
 
     bool is_timed_out() const override { return timed_out_; }
     std::string child_output_path() const override { return child_output_path_; }

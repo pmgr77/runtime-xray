@@ -27,6 +27,7 @@
 #include "commands/trace_command.hpp"
 #include "commands/mem_command.hpp"
 #include "logger.hpp"
+#include "register_builtin_risk_assessments.hpp"
 
 #include <iostream>
 #include <memory>
@@ -85,6 +86,8 @@ int main(int argc, char* argv[]) {
     if (!cmd.parse_specific_args(specific_args)) {
         return 1; // Error message already printed or help shown
     }
+
+    register_builtin_risk_assessments();
 
     // Execute the command
     return cmd.execute(common_opts);
