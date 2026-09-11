@@ -542,7 +542,7 @@ namespace runtimexray {
                     // ----- Inbound setup: capture resolved strings on entry -----
                     // The path pointer for openat and the sockaddr pointer for connect
                     // are only valid on entry. Stamp them onto the entry observation so
-                    // the fd resolver can read them back later.                    
+                    // the fd resolver can read them back later.
                     std::string resolved;
                     if (std::strcmp(syscall_name, "open") == 0 || std::strcmp(syscall_name,"openat") == 0) {
                         handle_syscall_open(syscall_name, backend, extra_info, findings, ev, resolved);
@@ -565,16 +565,16 @@ namespace runtimexray {
                         Logger::log_sensitive(
                             LogLevel::Debug,
                             "syscall " + std::to_string(ev.syscall_number) + ": " + syscall_name +
-                                " entry (pid=" + std::to_string(ev.pid) + 
+                                " entry (pid=" + std::to_string(ev.pid) +
                                 ", tid=" + std::to_string(ev.tid) + ")" + safe_extra,
                             "syscall " + std::to_string(ev.syscall_number) + ": " + syscall_name +
-                                " entry (pid=" + std::to_string(ev.pid) + 
+                                " entry (pid=" + std::to_string(ev.pid) +
                                 ", tid=" + std::to_string(ev.tid) + ")" + extra_info
                         );
                     }
                     return;
                 }
-                
+
                 // =======================================================================
                 // Syscall exit
                 // =======================================================================
@@ -657,7 +657,7 @@ namespace runtimexray {
                                 "During-trace memory scan for PID " + std::to_string(ev.pid) +
                                 ": " + std::to_string(mem_findings.size()) + " findings, " +
                                 std::to_string(pages_scanned) + " pages");
-                        }                        
+                        }
 
                         Logger::log_sensitive(
                             LogLevel::Debug,
@@ -758,8 +758,6 @@ namespace runtimexray {
                         } else if (obs.type == ObservationType::Data) {
                             if (obs.data_type == "memory") {
                                 mem_idx = idx;
-                            } else if (mem_idx == SIZE_MAX) {
-                                mem_idx = idx;            // fallback if no scanner node
                             }
                             if (!obs.secret_type.empty())
                                 secret_type = obs.secret_type;
@@ -804,7 +802,10 @@ namespace runtimexray {
                             << (send_res.endpoint.empty() ? "<unresolved>" : send_res.endpoint)
                         << "; confidence=exact-fingerprint-match"
                         << "; note=An attacker capable of reading process memory could "
-                        "recover the observed secret while it is resident.";
+                           "recover the observed secret while it is resident. "
+                           "Requires --scan-memory: without a scanner-derived memory "
+                           "observation the flow is not fully observed and no correlated "
+                           "finding is emitted.";
 
                     MemorySecretFindingDetails det;
                     det.fingerprint = fp;
@@ -868,13 +869,15 @@ namespace runtimexray {
         std::cout << "Options:\n";
         std::cout << "  --report FILE         Write human-readable report to FILE (default: stdout)\n";
         std::cout << "  --json FILE           Write JSON report to FILE\n";
-        std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
+        std::cout << "  --log-level LE`VEL     Set log level (error, warn, info, debug, trace)\n";
         std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
         std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
         std::cout << "  --show-secrets         Show raw secret values in reports (default: hidden)\n";
         std::cout << "  --timeout SECONDS     Stop tracing after SECONDS\n";
         std::cout << "  --follow-forks        Trace child processes (default)\n";
         std::cout << "  --no-follow-forks     Do not trace child processes\n";
+        std::cout << "  --scan-memory         Scan process memory for secrets; required for the\n";
+        std::cout << "                        file -> read -> memory -> send -> socket correlated finding\n";
         std::cout << "  --backend BACKEND     Select tracing backend (ptrace or ebpf, default: ptrace)\n";
         std::cout << "  --help                Show this help\n";
     }
