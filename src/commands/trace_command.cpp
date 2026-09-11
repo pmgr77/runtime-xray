@@ -52,6 +52,7 @@
 #include <optional>
 #include <unistd.h>
 #include <cstddef>
+#include <unordered_set>
 
 namespace {
 
@@ -488,10 +489,13 @@ namespace runtimexray {
             config.follow_forks = follow_forks_;
             config.debug = Logger::is_enabled(LogLevel::Debug);
 
-            // One-shot flag for the during-trace memory scan. The scanner must run while
-            // the traced process is still alive; after backend->trace() returns it is
-            // too late for a normally-exiting target.
-            bool memory_scanned = false;
+            // Per-process set of PIDs that have already had a during-trace memory
+            // scan. Scanning is triggered by the first read that yields a fingerprint
+            // in a given process; further reads in the same process skip the scan.
+            // Different processes (fork/clone children) are scanned independently,
+            // because a secret read by a child is resident in the child's memory, not
+            // the parent's.
+            std::unordered_set<pid_t> memory_scanned_pids;
 
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // Feed the analyzer first. It creates the entry observation and later
@@ -635,24 +639,25 @@ namespace runtimexray {
                             }
                         }
 
-                        // One-shot memory scan while the process is still alive.
-                        // Scanning after backend->trace() returns is too late: the
-                        // target has already exited.
-                        if (scan_memory_ && !memory_scanned && !res.empty()) {
-                            pid_t root = backend->get_pid();
-                            if (root > 0) {
-                                FindingList mem_findings;
-                                size_t pages_scanned = 0;
-                                scan_process_for_secrets(root, mem_findings, 50, 1000, &pages_scanned);
-                                findings.insert(findings.end(),
-                                                mem_findings.begin(), mem_findings.end());
-                                Logger::log(LogLevel::Debug,
-                                    "During-trace memory scan for PID " + std::to_string(root) +
-                                    ": " + std::to_string(mem_findings.size()) + " findings, " +
-                                    std::to_string(pages_scanned) + " pages");
-                                memory_scanned = true;
-                            }
-                        }
+                        // One-shot memory scan per process, while that process is still alive.
+                        // Scan the process where the read occurred (ev.pid), not the root
+                        // traced process: if the interesting read happened in a forked child,
+                        // the secret is resident in the child's memory, not the parent's.
+                        // `insert(...).second` is true only the first time we see this pid, so
+                        // the scan runs once per process.
+                        if (scan_memory_ && !res.empty() &&
+                            memory_scanned_pids.insert(ev.pid).second)
+                        {
+                            FindingList mem_findings;
+                            size_t pages_scanned = 0;
+                            scan_process_for_secrets(ev.pid, mem_findings, 50, 1000, &pages_scanned);
+                            findings.insert(findings.end(),
+                                            mem_findings.begin(), mem_findings.end());
+                            Logger::log(LogLevel::Debug,
+                                "During-trace memory scan for PID " + std::to_string(ev.pid) +
+                                ": " + std::to_string(mem_findings.size()) + " findings, " +
+                                std::to_string(pages_scanned) + " pages");
+                        }                        
 
                         Logger::log_sensitive(
                             LogLevel::Debug,
