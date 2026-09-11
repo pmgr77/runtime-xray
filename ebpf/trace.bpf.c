@@ -162,6 +162,47 @@ struct {
 } ringbuf_reserve_fail SEC(".maps");
 
 /* ------------------------------------------------------------------ */
+/* Syscall numbers                                                     */
+/* ------------------------------------------------------------------ */
+/*
+ * Only the numbers for the architecture this object is being compiled
+ * for. The build passes -D__TARGET_ARCH_x86 or -D__TARGET_ARCH_arm64,
+ * matching the convention libbpf uses for bpf_tracing.h.
+ */
+#if defined(__TARGET_ARCH_x86)
+
+#define NR_open       2
+#define NR_openat     257
+#define NR_execve     59
+#define NR_execveat   322
+#define NR_connect    42
+#define NR_write      1
+#define NR_writev     20
+#define NR_sendto     44
+#define NR_read       0
+#define NR_recvfrom   45
+#define NR_clone      56
+#define NR_clone3     435
+
+#elif defined(__TARGET_ARCH_arm64)
+
+#define NR_openat     56
+#define NR_execve     221
+#define NR_execveat   266
+#define NR_connect    203
+#define NR_write      64
+#define NR_writev     66
+#define NR_sendto     206
+#define NR_read       63
+#define NR_recvfrom   207
+#define NR_clone      220
+#define NR_clone3     435
+
+#else
+#error "Unsupported target architecture for RuntimeXRay eBPF program"
+#endif
+
+/* ------------------------------------------------------------------ */
 /* Syscall classification                                             */
 /* ------------------------------------------------------------------ */
 
@@ -171,52 +212,27 @@ struct {
  */
 
 static __always_inline int is_open_like(__u32 id) {
-    return id == 2     /* open       (x86_64) */
-        || id == 257   /* openat     (x86_64) */
-        || id == 56;   /* openat     (arm64)  */
+#if defined(__TARGET_ARCH_x86)
+    return id == NR_open || id == NR_openat;
+#else
+    return id == NR_openat;
+#endif
 }
 
 static __always_inline int is_exec_like(__u32 id) {
-    return id == 59    /* execve      (x86_64) */
-        || id == 322   /* execveat    (x86_64) */
-        || id == 221   /* execve      (arm64)  */
-        || id == 266;  /* execveat    (arm64)  */
+    return id == NR_execve || id == NR_execveat;
 }
 
 static __always_inline int is_connect(__u32 id) {
-    return id == 42    /* connect     (x86_64) */
-        || id == 203;  /* connect     (arm64)  */
+    return id == NR_connect;
 }
 
 static __always_inline int is_write_like(__u32 id) {
-    return id == 1     /* write       (x86_64) */
-        || id == 20    /* writev      (x86_64) */
-        || id == 44    /* sendto      (x86_64) */
-        || id == 64    /* write       (arm64)  */
-        || id == 66    /* writev      (arm64)  */
-        || id == 206;  /* sendto      (arm64)  */
+    return id == NR_write || id == NR_writev || id == NR_sendto;
 }
 
 static __always_inline int is_read_like(__u32 id) {
-    return id == 0     /* read        (x86_64) */
-        || id == 45    /* recvfrom    (x86_64) */
-        || id == 63    /* read        (arm64)  */
-        || id == 207;  /* recvfrom    (arm64)  */
-}
-
-/*
- * Return the argument slot that holds the path pointer for an
- * open/openat/execve/execveat call:
- *   open(path, flags, ...)              path is arg0
- *   openat(dirfd, path, flags, ...)     path is arg1
- *   execve(path, argv, envp)            path is arg0
- *   execveat(dirfd, path, argv, ...)    path is arg1
- */
-static __always_inline int path_arg_index(__u32 id) {
-    if (id == 2)  return 0;   /* open     (x86_64) */
-    if (id == 59) return 0;   /* execve   (x86_64) */
-    if (id == 221) return 0;  /* execve   (arm64)  */
-    return 1;                 /* openat / execveat */
+    return id == NR_read || id == NR_recvfrom;
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,10 +242,30 @@ static __always_inline int path_arg_index(__u32 id) {
 static __always_inline void fill_path(struct syscall_event *ev,
                                       struct sys_enter_ctx *ctx)
 {
-    int slot = path_arg_index((__u32)ctx->id);
-    const char *upath = (const char *)ctx->args[slot];
+    __u32 id = (__u32)ctx->id;
+    const char *upath = NULL;
+
+    /*
+     * The verifier requires all offsets into ctx to be compile-time
+     * constants, so each ctx->args[N] access below uses a literal index.
+     * Do not refactor this into a helper that takes the index as a
+     * parameter -- it will compile but fail to load.
+     */
+#if defined(__TARGET_ARCH_x86)
+    if (id == NR_open || id == NR_execve)
+        upath = (const char *)ctx->args[0];
+    else if (id == NR_openat || id == NR_execveat)
+        upath = (const char *)ctx->args[1];
+#else
+    if (id == NR_execve)
+        upath = (const char *)ctx->args[0];
+    else if (id == NR_openat || id == NR_execveat)
+        upath = (const char *)ctx->args[1];
+#endif
+
     if (!upath)
         return;
+
     long n = bpf_probe_read_user_str(ev->path, sizeof(ev->path), upath);
     if (n > 0)
         ev->has_path = 1;

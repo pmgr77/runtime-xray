@@ -84,9 +84,18 @@ if(BUILD_EBPF_BACKEND)
     set(EBPF_OBJECT ${CMAKE_BINARY_DIR}/trace.bpf.o)
     set(EBPF_HEADER ${CMAKE_BINARY_DIR}/trace_bpf_bytecode.h)
 
+    if(MACHINE_ARCH STREQUAL "x86_64")
+        set(EBPF_TARGET_ARCH_FLAG "-D__TARGET_ARCH_x86")
+    elseif(MACHINE_ARCH STREQUAL "aarch64")
+        set(EBPF_TARGET_ARCH_FLAG "-D__TARGET_ARCH_arm64")
+    else()
+        message(FATAL_ERROR "Unsupported eBPF target arch: ${MACHINE_ARCH}")
+    endif()
+
     add_custom_command(
         OUTPUT ${EBPF_OBJECT}
         COMMAND ${CLANG_EXECUTABLE} -g -O2 -target bpf
+                ${EBPF_TARGET_ARCH_FLAG}
                 -I/usr/include/bpf
                 -I${EBPF_ARCH_INCLUDE}
                 -c ${EBPF_SOURCE} -o ${EBPF_OBJECT}
@@ -237,7 +246,13 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
 
     add_test(NAME check_ebpf_threads
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
-    set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)    
+    set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
+
+    add_test(NAME check_ebpf_sensitive_object_flow
+     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_sensitive_object_flow.sh
+             $<TARGET_FILE:runtimexray>
+             $<TARGET_FILE:sensitive_object_flow>)
+    set_tests_properties(check_ebpf_sensitive_object_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)
@@ -315,6 +330,12 @@ if(NOT SKIP_PTRACE_TESTS)
     add_test(NAME check_trace_info_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Info $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_trace_info_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/hostname")
+
+    add_test(NAME check_ptrace_sensitive_object_flow
+     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ptrace_sensitive_object_flow.sh
+             $<TARGET_FILE:runtimexray>
+             $<TARGET_FILE:sensitive_object_flow>)
+    set_tests_properties(check_ptrace_sensitive_object_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
     # Fork/thread tracing tests (ptrace)
     add_test(NAME check_trace_follow_forks
