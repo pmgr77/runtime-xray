@@ -147,6 +147,10 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
             observations_[sys_idx].return_value = ev.return_value;
             observations_[sys_idx].is_entry = false;
 
+            // Remember the observation we just updated on exit, so a caller can
+            // stamp it with a fingerprint after on_syscall_event() returns.
+            last_exit_index_[pid][tid] = sys_idx;
+
             // Remove from pending
             pending_map.erase(it);
             if (pending_map.empty()) {
@@ -166,6 +170,45 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
                 handle_exit_group(ev);
             }
         }
+    }
+}
+
+void LineageAnalyzer::set_pending_event_source(pid_t pid, pid_t tid,
+                                               const std::string& source) {
+    auto pit = pending_entry_.find(pid);
+    if (pit == pending_entry_.end())
+        return;
+    auto tit = pit->second.find(tid);
+    if (tit == pit->second.end())
+        return;
+    if (tit->second < observations_.size()) {
+        observations_[tit->second].source = source;
+    }
+}
+
+void LineageAnalyzer::set_pending_event_fingerprint(pid_t pid, pid_t tid,
+                                                    const std::string& fingerprint) {
+    auto pit = pending_entry_.find(pid);
+    if (pit == pending_entry_.end())
+        return;
+    auto tit = pit->second.find(tid);
+    if (tit == pit->second.end())
+        return;
+    if (tit->second < observations_.size()) {
+        observations_[tit->second].fingerprint = fingerprint;
+    }
+}
+
+void LineageAnalyzer::set_last_exit_fingerprint(pid_t pid, pid_t tid,
+                                                const std::string& fingerprint) {
+    auto pit = last_exit_index_.find(pid);
+    if (pit == last_exit_index_.end())
+        return;
+    auto tit = pit->second.find(tid);
+    if (tit == pit->second.end())
+        return;
+    if (tit->second < observations_.size()) {
+        observations_[tit->second].fingerprint = fingerprint;
     }
 }
 

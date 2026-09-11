@@ -661,7 +661,7 @@ const char* syscall_name_arm64(long num) {
     }
 }
 
-// Возвращает true, если syscall интересен для анализа (файлы, сеть, процессы, память, привилегии)
+// Returns true, if syscall is interesting for analysis (files, networking, processes, memory, privileges)
 bool is_interesting_syscall_x86_64(long num) {
     switch (num) {
         // File operations

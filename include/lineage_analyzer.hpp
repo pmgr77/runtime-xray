@@ -45,6 +45,21 @@ public:
     /** After tracing, produce the lineage graph. */
     LineageGraph produce_graph() const;
 
+    // Attach a resolved string (path or "ip:port") to the in-flight syscall
+    // observation for (pid, tid). Called on syscall entry, after
+    // on_syscall_event() has created the entry observation.
+    void set_pending_event_source(pid_t pid, pid_t tid, const std::string& source);
+
+    // Attach a fingerprint to the in-flight syscall observation for (pid, tid).
+    // Called on syscall entry for send-family calls whose buffer contained a
+    // detected secret.
+    void set_pending_event_fingerprint(pid_t pid, pid_t tid, const std::string& fingerprint);
+
+    // Attach a fingerprint to the observation that was just updated by the
+    // most recent syscall exit for (pid, tid). Called on syscall exit for
+    // read-family calls whose userspace buffer contained a detected secret.
+    void set_last_exit_fingerprint(pid_t pid, pid_t tid, const std::string& fingerprint);
+
 private:
     const ITraceBackend* backend_ = nullptr;
 
@@ -60,6 +75,10 @@ private:
 
     // Pending syscall entry: (PID, TID) -> index of entry observation
     std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> pending_entry_;
+
+    // Index of the observation most recently updated by a syscall exit, keyed
+    // by (pid, tid). Used by set_last_exit_fingerprint().
+    std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> last_exit_index_;
 
     // Helper: get or create process node
     size_t ensure_process(pid_t pid, pid_t tid, const std::string& program = "");
