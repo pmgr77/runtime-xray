@@ -36,15 +36,45 @@
 namespace runtimexray {
 
 /**
- * @brief Represents a captured system call event.
+ * @brief A single syscall event observed by a tracing backend.
+ *
+ * Some backends (eBPF) can capture userspace bytes at tracepoint time — the
+ * only moment at which they are guaranteed still valid. Those backends
+ * populate the `captured_*` fields below with the raw bytes and leave the
+ * argN values as-is.
+ *
+ * Backends that stop the target (ptrace) cannot capture at tracepoint time
+ * in this way, so they leave the `captured_*` fields empty. Consumers must
+ * prefer the captured value when present and only fall back to
+ * ITraceBackend::read_string / read_memory when the captured field is empty.
  */
 struct SyscallEvent {
-    unsigned long long syscall_number;    ///< System call number (x86_64)
-    unsigned long long arg0, arg1, arg2, arg3, arg4, arg5; ///< Arguments (simplified)
-    long long return_value;      ///< Return value (valid on exit)
-    pid_t pid;              ///< Process ID
-    pid_t tid;              ///< Thread ID
-    bool is_entry;          ///< true = syscall entry, false = exit
+    unsigned long long syscall_number = 0;  ///< System call number (x86_64)
+    unsigned long long arg0 = 0, arg1 = 0, arg2 = 0, arg3 = 0, arg4 = 0, arg5 = 0; ///< Arguments (simplified)
+    long long return_value = 0;         ///< Return value (valid on exit)
+    pid_t pid = -1;                     ///< Process ID
+    pid_t tid = -1;                     ///< Thread ID
+    bool is_entry = true;               ///< true = syscall entry, false = exit
+
+    // ---- Bytes captured in-kernel, at tracepoint time --------------------
+    //
+    // If any of these are non-empty, the corresponding handler in
+    // trace_command.cpp must use them instead of reading target memory
+    // after the fact. That is what removes the asynchronous-read race.
+
+    // Resolved path for open/openat/execve/execveat.
+    std::string captured_path;
+
+    // Resolved "ip:port" endpoint for connect (filled by trace_command after parsing).
+    //std::string captured_endpoint;
+
+    // raw sockaddr bytes, connect only
+    std::vector<std::byte> captured_sockaddr;
+
+    // Raw userspace buffer content for read/recvfrom/write/writev/sendto.
+    // Already truncated by the backend to its capture limit; may be shorter
+    // than the syscall's count argument.
+    std::vector<std::byte> captured_payload;
 };
 
 using SyscallCallback = std::function<void(const SyscallEvent&)>;

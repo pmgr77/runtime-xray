@@ -44,6 +44,11 @@
 
 namespace runtimexray {
 
+// Must match the layout of `struct syscall_event` in ebpf/trace.bpf.c.
+#define RX_MAX_PATH     256
+#define RX_MAX_PAYLOAD  256
+#define RX_MAX_SOCKADDR 128
+
 // Must match the layout used in the eBPF program.
 struct syscall_event {
     __u32 pid;
@@ -52,6 +57,15 @@ struct syscall_event {
     __u64 args[6];
     __u64 ret;
     __u8 is_entry;
+
+    __u8  has_path;
+    __u8  has_sockaddr;
+    __u8  has_payload;
+    __u32 payload_len;
+
+    char  path[RX_MAX_PATH];
+    __u8  sockaddr[RX_MAX_SOCKADDR];
+    __u8  payload[RX_MAX_PAYLOAD];
 };
 
 class EbpfBackend : public ITraceBackend {
@@ -367,7 +381,8 @@ private:
                 fflush(log);
             }
         }
-        // --- end debug ---        
+        // --- end debug ---
+
         runtimexray::SyscallEvent event;
         event.pid = static_cast<pid_t>(ev->pid);
         event.tid = static_cast<pid_t>(ev->tid);
@@ -380,6 +395,35 @@ private:
         event.arg4 = ev->args[4];
         event.arg5 = ev->args[5];
         event.return_value = static_cast<long long>(ev->ret);
+
+        // ---- Captured bytes from the kernel side --------------------------
+        //
+        // These are already valid: the BPF program read them at tracepoint
+        // time, before the target could resume. Userspace consumers should
+        // prefer them over any post-hoc read of target memory.
+        if (ev->has_path) {
+            // bpf_probe_read_user_str guarantees NUL termination inside the
+            // buffer, so strnlen is safe.
+            size_t n = strnlen(ev->path, sizeof(ev->path));
+            event.captured_path.assign(ev->path, n);
+        }
+
+        if (ev->has_sockaddr) {
+            // Parsed into "ip:port" by the existing helper; the raw bytes
+            // are handed to parse_sockaddr which already understands them.
+            // We stash the raw bytes; trace_command's connect handler will
+            // parse and produce the endpoint string as before.
+            event.captured_sockaddr.assign(
+                reinterpret_cast<std::byte*>(ev->sockaddr),
+                reinterpret_cast<std::byte*>(ev->sockaddr) + sizeof(ev->sockaddr));
+        }
+
+        if (ev->has_payload && ev->payload_len > 0 && ev->payload_len <= RX_MAX_PAYLOAD) {
+            event.captured_payload.assign(
+                reinterpret_cast<std::byte*>(ev->payload),
+                reinterpret_cast<std::byte*>(ev->payload) + ev->payload_len);
+        }
+
         backend->handle_fork_event(ev);
 
         if (backend->callback_) {

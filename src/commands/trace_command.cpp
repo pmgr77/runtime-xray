@@ -112,6 +112,46 @@ namespace {
         return r;
     }
 
+    // Prefer bytes captured in-kernel by the backend. Fall back to reading
+    // target memory only when the backend did not capture (ptrace path).
+    std::string get_path_bytes(
+        const std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        const runtimexray::SyscallEvent& ev,
+        uint64_t addr)
+    {
+        if (!ev.captured_path.empty())
+            return ev.captured_path;
+        return backend->read_string(ev.pid, addr);
+    }
+
+    std::vector<std::byte> get_sockaddr_bytes(
+        const std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        const runtimexray::SyscallEvent& ev,
+        uint64_t addr, size_t len)
+    {
+        if (!ev.captured_sockaddr.empty()) {
+            // The kernel side already truncated to its capture limit. Trust
+            // that; a caller asking for `len` bytes still gets at most what
+            // was captured.
+            return ev.captured_sockaddr;
+        }
+        return backend->read_memory(ev.pid, addr, len);
+    }
+
+    std::vector<std::byte> get_buffer_bytes(
+        const std::unique_ptr<runtimexray::ITraceBackend>& backend,
+        const runtimexray::SyscallEvent& ev,
+        uint64_t addr, size_t len)
+    {
+        if (!ev.captured_payload.empty()) {
+            // The kernel side already truncated to its capture limit. Trust
+            // that; a caller asking for `len` bytes still gets at most what
+            // was captured.
+            return ev.captured_payload;
+        }
+        return backend->read_memory(ev.pid, addr, len);
+    }
+
     void handle_syscall_open(
         const char *syscall_name,
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
@@ -121,7 +161,8 @@ namespace {
         std::string& resolved_path)
     {
         uint64_t path_addr = (std::strcmp(syscall_name, "open") == 0) ? ev.arg0 : ev.arg1;
-        std::string path = backend->read_string(ev.pid, path_addr);
+        //std::string path = backend->read_string(ev.pid, path_addr);
+        std::string path = get_path_bytes(backend, ev, path_addr);
         if (!path.empty()) {
             resolved_path = path;
             extra_info = " path=\"" + path + "\"";
@@ -144,7 +185,8 @@ namespace {
         uint64_t sockaddr_ptr = ev.arg1;
         uint64_t addrlen = ev.arg2;
         if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-            auto bytes = backend->read_memory(ev.pid, sockaddr_ptr, static_cast<size_t>(addrlen));
+            //auto bytes = backend->read_memory(ev.pid, sockaddr_ptr, static_cast<size_t>(addrlen));
+            auto bytes = get_sockaddr_bytes(backend, ev, sockaddr_ptr, static_cast<size_t>(addrlen));
             auto parsed = runtimexray::parse_sockaddr(bytes);
             if (parsed.valid) {
                 resolved_endpoint = parsed.ip + ":" + std::to_string(parsed.port);
@@ -173,7 +215,8 @@ namespace {
                 ", count=" + std::to_string(count));
 
         if (buf_ptr > 0 && count > 0 && count <= 4096) {
-            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            //auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            auto bytes = get_buffer_bytes(backend, ev, buf_ptr, static_cast<size_t>(count));
             if (!bytes.empty()) {
                 if (runtimexray::Logger::is_enabled(runtimexray::LogLevel::Debug)) {
                     // Log raw hex for debugging
@@ -211,7 +254,8 @@ namespace {
         uint64_t buf_ptr = ev.arg1;
         uint64_t count = ev.arg2;
         if (buf_ptr > 0 && count > 0 && count <= 4096) {
-            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            //auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            auto bytes = get_buffer_bytes(backend, ev, buf_ptr, static_cast<size_t>(count));
             if (!bytes.empty()) {
                 std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
                 std::string data_str = runtimexray::sanitize_data(bytes);   // log-only
@@ -244,7 +288,8 @@ namespace {
 
         // Read the iovec array from the target process
         size_t iov_size = iovcnt * sizeof(struct iovec);
-        auto iov_bytes = backend->read_memory(ev.pid, iov_ptr, iov_size);
+        //auto iov_bytes = backend->read_memory(ev.pid, iov_ptr, iov_size);
+        auto iov_bytes = get_buffer_bytes(backend, ev, iov_ptr, static_cast<size_t>(iov_size));
         if (iov_bytes.empty()) {
             return;
         }
@@ -259,7 +304,8 @@ namespace {
                 continue;
             }
 
-            auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            //auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
+            auto bytes = get_buffer_bytes(backend, ev, buf_ptr, static_cast<size_t>(count));
             if (bytes.empty()) {
                 continue;
             }
@@ -552,62 +598,71 @@ namespace runtimexray {
                 if ((strcmp(name, "read") == 0 || strcmp(name, "recvfrom") == 0)
                     && ev.return_value > 0)
                 {
-                    uint64_t buf_ptr = ev.arg1;
-                    size_t   actual  = static_cast<size_t>(ev.return_value);
-                    if (buf_ptr != 0 && actual > 0 && actual <= 65536) {
-                        auto bytes = backend->read_memory(ev.pid, buf_ptr, actual);
-                        if (!bytes.empty()) {
-                            // Detection runs on raw bytes. sanitize_data is only for
-                            // logging.
-                            std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-                            std::string printable = runtimexray::sanitize_data(bytes);
-                            std::string location = (std::strcmp(name, "read") == 0) ? "read" : "recvfrom";
+                    std::vector<std::byte> bytes;
+                    size_t actual  = static_cast<size_t>(ev.return_value);
 
-                            runtimexray::MemoryChunkEvidence mce{raw, location, ev.pid, buf_ptr};
-                            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-                            for (auto& f : res) {
-                                f.pid = ev.pid;
-                                findings.push_back(f);
-                            }
-
-                            // Stamp the read-exit observation with the first fingerprint
-                            // so the correlated emit can find the read event by fp.
-                            for (const auto& f : res) {
-                                if (auto* d = std::get_if<runtimexray::MemorySecretFindingDetails>(&f.details)) {
-                                    lineage_analyzer.set_last_exit_fingerprint(ev.pid, ev.tid, d->fingerprint);
-                                    break;
-                                }
-                            }
-
-                            // One-shot memory scan while the process is still alive.
-                            // Scanning after backend->trace() returns is too late: the
-                            // target has already exited.
-                            if (scan_memory_ && !memory_scanned && !res.empty()) {
-                                pid_t root = backend->get_pid();
-                                if (root > 0) {
-                                    FindingList mem_findings;
-                                    size_t pages_scanned = 0;
-                                    scan_process_for_secrets(root, mem_findings, 50, 1000, &pages_scanned);
-                                    findings.insert(findings.end(),
-                                                    mem_findings.begin(), mem_findings.end());
-                                    Logger::log(LogLevel::Debug,
-                                        "During-trace memory scan for PID " + std::to_string(root) +
-                                        ": " + std::to_string(mem_findings.size()) + " findings, " +
-                                        std::to_string(pages_scanned) + " pages");
-                                    memory_scanned = true;
-                                }
-                            }
-
-                            Logger::log_sensitive(
-                                LogLevel::Debug,
-                                std::string("read exit pid=") + std::to_string(ev.pid) +
-                                    " fd=" + std::to_string(ev.arg0) +
-                                    " n="  + std::to_string(actual) + " <redacted>",
-                                std::string("read exit pid=") + std::to_string(ev.pid) +
-                                    " fd=" + std::to_string(ev.arg0) +
-                                    " n="  + std::to_string(actual) +
-                                    " data=\"" + printable + "\"");
+                    if (!ev.captured_payload.empty()) {
+                        // eBPF: bytes were captured in-kernel at syscall exit.
+                        bytes = ev.captured_payload;
+                    } else {
+                        // ptrace: read from target memory
+                        uint64_t buf_ptr = ev.arg1;
+                        if (buf_ptr != 0 && actual > 0 && actual <= 65536) {
+                            bytes = backend->read_memory(ev.pid, buf_ptr, actual);
                         }
+                    }
+
+                    if (!bytes.empty()) {
+                        // Detection runs on raw bytes, sanitize_data is only for logging.
+                        std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                        std::string printable = runtimexray::sanitize_data(bytes);
+                        std::string location = (std::strcmp(name, "read") == 0) ? "read" : "recvfrom";
+
+                        uintptr_t addr_hint = ev.arg1;   // 0 on eBPF; harmless
+                        runtimexray::MemoryChunkEvidence mce{raw, location, ev.pid, addr_hint};
+                        auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+                        for (auto& f : res) {
+                            f.pid = ev.pid;
+                            findings.push_back(f);
+                        }
+
+                        // Stamp the read-exit observation with the first fingerprint
+                        // so the correlated emit can find the read event by fp.
+                        for (const auto& f : res) {
+                            if (auto* d = std::get_if<runtimexray::MemorySecretFindingDetails>(&f.details)) {
+                                lineage_analyzer.set_last_exit_fingerprint(ev.pid, ev.tid, d->fingerprint);
+                                break;
+                            }
+                        }
+
+                        // One-shot memory scan while the process is still alive.
+                        // Scanning after backend->trace() returns is too late: the
+                        // target has already exited.
+                        if (scan_memory_ && !memory_scanned && !res.empty()) {
+                            pid_t root = backend->get_pid();
+                            if (root > 0) {
+                                FindingList mem_findings;
+                                size_t pages_scanned = 0;
+                                scan_process_for_secrets(root, mem_findings, 50, 1000, &pages_scanned);
+                                findings.insert(findings.end(),
+                                                mem_findings.begin(), mem_findings.end());
+                                Logger::log(LogLevel::Debug,
+                                    "During-trace memory scan for PID " + std::to_string(root) +
+                                    ": " + std::to_string(mem_findings.size()) + " findings, " +
+                                    std::to_string(pages_scanned) + " pages");
+                                memory_scanned = true;
+                            }
+                        }
+
+                        Logger::log_sensitive(
+                            LogLevel::Debug,
+                            std::string("read exit pid=") + std::to_string(ev.pid) +
+                                " fd=" + std::to_string(ev.arg0) +
+                                " n="  + std::to_string(actual) + " <redacted>",
+                            std::string("read exit pid=") + std::to_string(ev.pid) +
+                                " fd=" + std::to_string(ev.arg0) +
+                                " n="  + std::to_string(actual) +
+                                " data=\"" + printable + "\"");
                     }
                 }
 
