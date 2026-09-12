@@ -132,7 +132,15 @@
         • Fork/thread following (<code>--follow-forks</code> / <code>--no-follow-forks</code>)<br>
         • Timeout support (<code>--timeout &lt;sec&gt;</code>)<br>
         • eBPF backend (<code>--backend ebpf</code>) – low‑overhead, requires root<br>
-        • Sensitive file, network, and write detection<br><br>
+        • Sensitive file, network, and buffer detection<br>
+        • Live process-memory evidence with <code>--scan-memory</code><br>
+        • Exact sensitive-object correlation across read, independently scanned process memory, and send/socket observations<br><br>
+
+        <strong>Sensitive-object evidence chain</strong><br>
+        RuntimeXRay can currently prove this exact-fingerprint flow:<br>
+        <code>file → read → memory → send → socket</code><br>
+        The correlated finding includes the source file, read event, scanner-derived memory address, output event, socket destination, and <code>confidence=exact-fingerprint-match</code>.<br>
+        Secret values remain redacted by default. This reports observed behavior; it does not claim malicious intent or exfiltration.<br><br>
 
         <strong>Memory scanning</strong><br>
         • <code>/proc/&lt;pid&gt;/cmdline</code> and <code>/proc/&lt;pid&gt;/environ</code><br>
@@ -147,11 +155,11 @@
         • 47+ CTest tests, runs on x86_64 and ARM64 (GitHub Actions)<br><br>
 
         <strong>🧪 Experimental</strong><br>
-        • Experimental process/event lineage; higher-level evidence correlation is planned<br>
+        • Process/event lineage and the first exact sensitive-object correlation path are implemented; transformed values, lifetime tracking, and broader correlation remain experimental<br>
         • eBPF process‑attach (planned)<br><br>
 
         <strong>📋 Planned</strong><br>
-        • Value-level data lineage (track sensitive data from source to sink)<br>
+        • Broader value-level lineage across copies, transformations, lifetime, and additional sinks<br>
         • Network‑boundary detection<br>
         • AI explanations (evidence‑first)<br>
         • PE / Mach‑O support<br>

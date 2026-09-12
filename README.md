@@ -52,7 +52,7 @@ Dangerous API: strcpy
 PIE: disabled
 ```
 
-RuntimeXRay is designed to go further: connect security findings to **observable evidence** and, as runtime analysis evolves, show how potentially sensitive data and behavior move through the application.
+RuntimeXRay is designed to go further: connect security findings to **observable evidence** and show how the same sensitive object can be observed at multiple runtime boundaries.
 
 Instead of only saying:
 
@@ -76,7 +76,43 @@ Suppose a compiled application:
 
 RuntimeXRay is designed to turn these observations into concrete evidence that can be investigated and correlated with the security finding.
 
-> *A full demonstration is coming soon. We are currently preparing a sample application that will show how RuntimeXRay collects evidence and produces a finding.*
+One end-to-end sensitive-object flow is available today. With `trace --scan-memory`,
+RuntimeXRay can correlate the same detected secret across:
+
+```text
+source file
+    ↓
+read / recv
+    ↓
+sensitive-object fingerprint
+    ↓
+independent process-memory scan
+    ↓
+write / send
+    ↓
+socket destination
+```
+
+The correlation uses a per-run HMAC fingerprint of the exact detected secret.
+The secret value remains redacted by default.
+
+A correlated finding looks like this (shortened):
+
+```text
+Sensitive object observed from file to socket
+
+sensitive_object_type=password
+source_file=/tmp/.../cred.txt
+read_event{syscall=read ...}
+memory_observation{pid=... address=0xffff...}
+send_event{syscall=sendto ...}
+socket_destination=127.0.0.1:45903
+confidence=exact-fingerprint-match
+```
+
+This is an evidence statement, not an intent statement: RuntimeXRay shows what
+was observed. It does not label the destination malicious or claim
+exfiltration without additional evidence.
 
 ---
 
@@ -127,7 +163,10 @@ All subcommands support common options:
 - Syscall name mapping and filtering of interesting events
 - File path reading for `open` / `openat`
 - Network address parsing for `connect` / `sendto`
-- `write` buffer inspection for writes up to 4 KB
+- Sensitive-buffer inspection on relevant `read` / `recvfrom` and output syscalls
+- Per-run HMAC fingerprinting for exact sensitive-object correlation
+- Optional live process-memory scan during tracing with `--scan-memory`
+- Correlated file → read → memory → send/socket evidence finding when all required observations are present
 - Child stdout/stderr capture and scanning for sensitive keywords
 - Timeout support (`--timeout <seconds>`)
 - Fork/thread following (`--follow-forks` / `--no-follow-forks`)
@@ -164,12 +203,12 @@ All subcommands support common options:
 
 ### 🧪 Experimental
 
-- **Event/process lineage** – experimental process and runtime-event relationships are available; higher-level correlation rules are still being designed.
+- **Event/process lineage and sensitive-object correlation** – the first evidence chain is implemented for exact fingerprint matches across read/receive, scanner-derived process memory, and write/send observations. Broader transformations, lifetime tracking, and richer correlation rules remain experimental.
 - **Memory scanning under load** – performance tuning and heuristic improvements.
 
 ### 📋 Planned
 
-- **Value-level data lineage** – track sensitive data from source through transformations to sinks
+- **Broader value-level data lineage** – track sensitive data through copies, transformations, lifetime checkpoints, and additional sinks
 - **Network‑boundary detection** – identify unexpected outbound communication
 - **AI explanations** – optional LLM integration to explain findings, always evidence‑first
 - **Additional binary formats** – PE (Windows), Mach‑O (macOS)
@@ -241,9 +280,16 @@ To see all hardening details (including Info-level findings), use `--min-severit
 # JSON report
 ./runtimexray trace --json trace.json --timeout 5 /bin/cat /etc/passwd
 
+# Enable live memory evidence for sensitive-object correlation
+./runtimexray trace --scan-memory --json trace.json /path/to/application
+
 # Show all syscalls (via debug logs)
 ./runtimexray trace --log-level debug /bin/ls
 ```
+
+`--scan-memory` is required for the current file → read → memory → send/socket
+correlated finding. Without a scanner-derived memory observation, RuntimeXRay
+does not emit that correlation.
 
 ### Trace with eBPF (requires root)
 
@@ -361,7 +407,7 @@ The project is evolving from static binary inspection toward **evidence‑based 
 
 Planned areas include:
 
-* Data lineage
+* Broader sensitive-data lineage and lifetime analysis
 * Network‑boundary detection
 * Static/runtime evidence correlation
 * HTML reporting

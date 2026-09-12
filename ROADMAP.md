@@ -48,6 +48,9 @@ It focuses on technical milestones and is subject to change.
   - JSON report via `--json FILE`
   - Text report via `--report FILE`
   - Runtime logs via `--log-level` / `--log-file`
+  - live per-process memory scanning during tracing with `--scan-memory`
+  - exact sensitive-object HMAC correlation across read/receive, independently scanned process memory, and write/send observations
+  - correlated file → read → memory → send/socket finding with resolved source, destination, memory address, and exact-fingerprint confidence
 
 - **Memory scanning** (`runtimexray mem`):
   - parsing `/proc/<pid>/maps` for readable regions
@@ -93,14 +96,15 @@ It focuses on technical milestones and is subject to change.
 ## 🚀 Near-term product milestones
 
 1. **Safe v0.1 release** – finish redaction hardening, installation guidance, versioning, reproducible CI, and a documented Linux/ELF scope.
-2. **Evidence-chain demonstration** – provide a small vulnerable sample and benchmark showing how independent observations can be correlated. Do not present full value-level lineage until implemented.
-3. **CI and release comparison** – add baseline, policy, and release-to-release behavioral comparison workflows.
+2. **Expand the first evidence chain** – build on the implemented file → read → independently scanned memory → send/socket correlation with memory copies, mapping context, lifetime/checkpoint observations, and additional validated sinks. Do not present this as arbitrary transformed value tracking until implemented.
+3. **Evidence-chain demonstration and benchmark** – publish the existing sensitive-object sample as a reproducible product demonstration and add representative real-world validation cases.
+4. **CI and release comparison** – add baseline, policy, and release-to-release behavioral comparison workflows.
 
 ## 🔭 Later technical features
 
 - **Full dynamic analysis**:
   - Bounded process memory scanning and sensitive-data discovery improvements
-  - Value-level data lineage: track sensitive data from source through transformations to sinks
+  - Broader value-level data lineage: track sensitive data through copies, transformations, lifetime checkpoints, and additional sinks
   - Network-boundary detection
   - Correlation of static and runtime evidence into a unified report
 
@@ -121,7 +125,8 @@ It focuses on technical milestones and is subject to change.
 
 - **Memory scanning further improvements**:
   - Flag RWX anonymous memory
-  - Integrate with `trace` for runtime memory inspection (e.g., `--scan-memory`)
+  - Add targeted scan checkpoints around sensitive-object use
+  - Classify and correlate multiple copies of the same sensitive object
   - Track sensitive data lifetime in memory
   - Reduce false positives with advanced context analysis
 

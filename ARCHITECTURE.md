@@ -63,12 +63,59 @@ Binary / Process
 → Evidence  
 → Analyzer Registry  
 → Analyzers (built-in + custom)
-→ Experimental event lineage / future value-level correlation
+→ Event/process lineage
+→ Exact sensitive-object fingerprint correlation
 → Findings  
 → Optional AI explanation (planned)  
 → Reporter (Text or JSON) → stdout or file
 
 All subcommands use the same global options and central finding filtering, ensuring consistent behaviour across `runtimexray analyze`, `trace`, and `mem`.
+
+## Sensitive-object correlation
+
+The first end-to-end runtime correlation path is implemented in `trace`.
+
+For a fully observed object, RuntimeXRay can connect:
+
+```text
+file path
+   ↓
+read / recv event
+   ↓
+exact sensitive-object HMAC fingerprint
+   ↓
+independent scanner-derived process-memory observation
+   ↓
+write / send event carrying the same fingerprint
+   ↓
+resolved socket destination
+```
+
+The current correlation is intentionally strict. A correlated
+`file -> read -> memory -> send -> socket` finding is emitted only when the
+same fingerprint is present on:
+
+1. a successful read-family event,
+2. a `Data` observation produced by the independent memory scanner and tagged
+   `memory`, and
+3. a write/send-family event.
+
+The memory leg is not inferred from the syscall buffer. `--scan-memory` is
+therefore required for this correlation. If the memory scanner does not
+independently observe the sensitive object, the flow is considered incomplete
+and no correlated finding is emitted.
+
+The fingerprint is a per-run HMAC of the exact detected secret. This allows
+RuntimeXRay to connect observations without printing the secret. Reporters
+redact secret values by default; `--show-secrets` is an explicit local-debugging
+override.
+
+This mechanism proves an observed data path. It does not by itself prove
+malicious intent, exfiltration, or that a destination is unexpected.
+
+Broader lineage remains future work, including transformed values, lifetime
+tracking, additional checkpoints and sinks, and richer cross-process
+propagation.
 
 ## Output separation
 
@@ -84,7 +131,7 @@ This design ensures that JSON output remains valid and that logs can be captured
 
 - **ptrace** – classic tracing using `ptrace` syscall interception. Supports fork/thread following via `PTRACE_O_TRACEFORK`, `TRACEVFORK`, `TRACECLONE`. Works on x86_64 and ARM64.
 
-- **eBPF** – low‑overhead tracing using `raw_syscalls` tracepoints. Embeds a BPF program (compiled at build time) that filters events by PID and submits them via a ring buffer. Supports fork/thread following by dynamically updating the PID filter map. Requires root and kernel with eBPF support.
+- **eBPF** – low‑overhead tracing using `raw_syscalls` tracepoints. The BPF program captures relevant userspace bytes at tracepoint time and submits them through a ring buffer, avoiding a later userspace read race. It supports fork/thread following by dynamically updating the PID filter map. Requires root and kernel with eBPF support.
 
 Both backends implement the `ITraceBackend` interface and are selected via `--backend ptrace|ebpf`.
 
