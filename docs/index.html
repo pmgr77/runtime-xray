@@ -42,6 +42,19 @@
             margin-top: 0;
             color: #374151;
         }
+        .evidence-chain {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: #fff;
+            border-left: 4px solid #111827;
+            border-radius: 0.25rem;
+        }
+        .evidence-chain code {
+            background: #f3f4f6;
+            padding: 0.1rem 0.3rem;
+            border-radius: 0.2rem;
+            font-size: 0.9rem;
+        }
         .status {
             margin-top: 2rem;
             padding: 1rem;
@@ -111,6 +124,22 @@
         <p>Software changes faster than security teams can manually inspect every change. Runtime evidence shows what actually happened.</p>
     </div>
 
+    <div class="evidence-chain">
+        <strong>What RuntimeXRay can show today</strong><br><br>
+
+        RuntimeXRay can currently correlate this observed exact-fingerprint flow:<br><br>
+
+        <code>file → read → independently scanned memory → send → socket</code><br><br>
+
+        The correlated finding connects the source file, read event, scanner-derived
+        memory address, output event, and socket destination using the same
+        sensitive-object fingerprint.<br><br>
+
+        Secret values remain redacted by default. RuntimeXRay reports observed
+        evidence; it does not claim malicious intent, exfiltration, or that a
+        destination is unexpected without additional evidence.
+    </div>
+
     <div class="status">
         <strong>✅ Available today:</strong><br><br>
 
@@ -134,13 +163,7 @@
         • eBPF backend (<code>--backend ebpf</code>) – low‑overhead, requires root<br>
         • Sensitive file, network, and buffer detection<br>
         • Live process-memory evidence with <code>--scan-memory</code><br>
-        • Exact sensitive-object correlation across read, independently scanned process memory, and send/socket observations<br><br>
-
-        <strong>Sensitive-object evidence chain</strong><br>
-        RuntimeXRay can currently prove this exact-fingerprint flow:<br>
-        <code>file → read → memory → send → socket</code><br>
-        The correlated finding includes the source file, read event, scanner-derived memory address, output event, socket destination, and <code>confidence=exact-fingerprint-match</code>.<br>
-        Secret values remain redacted by default. This reports observed behavior; it does not claim malicious intent or exfiltration.<br><br>
+        • Exact-fingerprint correlation across read, independently scanned process memory, and send/socket observations<br><br>
 
         <strong>Memory scanning</strong><br>
         • <code>/proc/&lt;pid&gt;/cmdline</code> and <code>/proc/&lt;pid&gt;/environ</code><br>
