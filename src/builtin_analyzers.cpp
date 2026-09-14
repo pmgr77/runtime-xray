@@ -244,20 +244,34 @@ static std::string clean_extracted_secret(const std::string& raw) {
 // Password detector logic (moved from old PasswordDetector)
 std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
     //Logger::log(LogLevel::Debug, "detect_password_matches: starting scan of chunk of size " + std::to_string(chunk.size()));
+   
     std::vector<PasswordMatch> results;
     static const std::vector<std::string> keywords = {
         "password", "passwd", "pwd", "pass", "pswd",
         "password_hash", "password_salt", "password_encrypted",
-        "hashed_password", "api_key", "secret", "token", "credentials", "credential"
+        "hashed_password", "api_key", "secret", "token",
+        "credentials", "credential", "auth"
     };
+
+    // Lowercase the chunk exactly once. `lowered` is only used for
+    // keyword search; all extraction below still reads from `chunk`
+    // so the reported value keeps its original case.
+    std::string lowered;
+    lowered.reserve(chunk.size());
+    for (unsigned char c : chunk) {
+        lowered.push_back(static_cast<char>(std::tolower(c)));
+    }
+    
+    constexpr size_t kMinValueLen = 6;
 
     for (const auto& kw : keywords) {
         size_t pos = 0;
-        while ((pos = chunk.find(kw, pos)) != std::string::npos) {
+        while ((pos = lowered.find(kw, pos)) != std::string::npos) {
             // Skip if keyword is part of a larger word
+            // Boundary: reject alphanumeric prefix. `_` allowed
+            // (so REDIS_PASSWORD= matches).
             if (pos > 0 &&
-                (std::isalnum(static_cast<unsigned char>(chunk[pos - 1])) ||
-                 chunk[pos - 1] == '_')) {
+                (std::isalnum(static_cast<unsigned char>(chunk[pos - 1])))) {
                 pos += kw.size();
                 continue;
             }
@@ -280,7 +294,7 @@ std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
 
                 std::string raw_value = chunk.substr(value_start, value_end - value_start);
                 std::string cleaned_value = clean_extracted_secret(raw_value);
-                if (!cleaned_value.empty()) {
+                if (cleaned_value.size() >= kMinValueLen) {
                     // Extract snippet (surrounding context) – keep original raw snippet for logging
                     size_t snippet_start = (pos > 20) ? pos - 20 : 0;
                     size_t snippet_len = std::min<size_t>(160, chunk.size() - snippet_start);

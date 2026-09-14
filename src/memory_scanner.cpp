@@ -227,18 +227,45 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     }
 
     auto args = split_nul_strings(cmdline);
+
+    static const std::vector<std::pair<std::string, std::string>> credential_flags = {
+        {"-a",            "password"},
+        {"-p",            "password"},
+        {"--password",    "password"},
+        {"--passwd",      "password"},
+        {"--pass",        "password"},
+        {"--requirepass", "password"},
+        {"--api-key",     "api_key"},
+        {"--api_key",     "api_key"},
+        {"--token",       "token"},
+    };
+
     size_t found = 0;
-    for (const auto& arg : args) {
-        // Create evidence from this argument string.
-        MemoryChunkEvidence ev{arg, "cmdline", pid, 0};
+
+    auto emit = [&](const std::string& c) -> bool {
+        MemoryChunkEvidence ev{c, "cmdline", pid, 0};
         FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
         for (auto& f : results) {
-            f.pid = pid;            // set PID
-            if (found >= max_findings) {
-                return;
-            }
+            f.pid = pid;
+            if (found >= max_findings)
+                return false;
             findings.push_back(f);
             ++found;
+        }
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (!emit(args[i]))
+            return;
+
+        for (const auto& [flag, keyword] : credential_flags) {
+            if (args[i] == flag && i + 1 < args.size()) {
+                std::string synthesized = keyword + "=" + args[i + 1];
+                if (!emit(synthesized))
+                    return;
+                break;
+            }
         }
     }
 }

@@ -869,7 +869,7 @@ namespace runtimexray {
         std::cout << "Options:\n";
         std::cout << "  --report FILE         Write human-readable report to FILE (default: stdout)\n";
         std::cout << "  --json FILE           Write JSON report to FILE\n";
-        std::cout << "  --log-level LE`VEL     Set log level (error, warn, info, debug, trace)\n";
+        std::cout << "  --log-level LEVEL     Set log level (error, warn, info, debug, trace)\n";
         std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
         std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
         std::cout << "  --show-secrets         Show raw secret values in reports (default: hidden)\n";
