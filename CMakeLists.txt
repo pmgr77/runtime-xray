@@ -249,10 +249,17 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
     set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
 
     add_test(NAME check_ebpf_sensitive_object_flow
-     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_sensitive_object_flow.sh
+        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_sensitive_object_flow.sh
              $<TARGET_FILE:runtimexray>
              $<TARGET_FILE:sensitive_object_flow>)
     set_tests_properties(check_ebpf_sensitive_object_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
+    add_test(NAME check_trace_file_access_outcomes_ebpf
+        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_trace_file_access_outcomes.sh
+                $<TARGET_FILE:runtimexray>
+                $<TARGET_FILE:file_access_outcomes>
+                ebpf)
+    set_tests_properties(check_trace_file_access_outcomes_ebpf PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 125)
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)
@@ -350,6 +357,19 @@ if(NOT SKIP_PTRACE_TESTS)
     add_test(NAME check_trace_threads
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
     set_tests_properties(check_trace_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
+
+    add_test(
+        NAME check_trace_file_access_outcomes_ptrace
+        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_trace_file_access_outcomes.sh
+                $<TARGET_FILE:runtimexray>
+                $<TARGET_FILE:file_access_outcomes>
+                ptrace)
+
+    set_tests_properties(
+        check_trace_file_access_outcomes_ptrace
+        PROPERTIES
+            TIMEOUT 30
+            SKIP_RETURN_CODE 125)
 
     add_test(NAME check_capture_program_name
          COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_program_name.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:exec_echo_test>)

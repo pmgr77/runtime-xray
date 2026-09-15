@@ -26,6 +26,15 @@ target_compile_options(cross_boundary_test PRIVATE -O0)
 add_executable(sensitive_object_flow sensitive_object_flow.c)
 target_compile_options(sensitive_object_flow PRIVATE -O0)
 
+add_executable(file_access_outcomes file_access_outcomes.c)
+target_compile_options(file_access_outcomes PRIVATE -O0)
+
 # Optionally, set output directory
-set_target_properties(dynamic_target fork_test thread_test exec_echo_test secret_holder cross_boundary_test sensitive_object_flow PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_target_properties(dynamic_target 
+    fork_test thread_test
+    exec_echo_test
+    secret_holder
+    cross_boundary_test
+    sensitive_object_flow
+    file_access_outcomes
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
