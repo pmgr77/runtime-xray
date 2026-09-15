@@ -46,8 +46,9 @@ struct SymbolEvidence {
  */
 struct FileAccessEvidence {
     std::string path;
-    int flags = 0; // open() flags or -1 if not applicable
-    pid_t pid;
+    int flags = 0;      // open() flags or -1 if not applicable
+    pid_t pid = 0;
+    int err = 0;        // 0 = success; otherwise positive errno (EACCES, ENOENT, ...)
 };
 
 /**

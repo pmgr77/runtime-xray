@@ -37,6 +37,7 @@
 #include <iomanip>
 #include <sstream>
 #include <cstring>
+#include <cerrno>
 
 namespace runtimexray {
 
@@ -277,14 +278,16 @@ std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
             }
 
             size_t next = pos + kw.size();
-            if (next < chunk.size() && (chunk[next] == '=' || chunk[next] == ':')) {
+            if (next < chunk.size() &&
+                (chunk[next] == '=' || chunk[next] == ':')) {
                 size_t value_start = next + 1;
                 while (value_start < chunk.size() && chunk[value_start] == ' ') {
                     ++value_start;
                 }
                 size_t value_end = value_start;
                 const size_t max_val_len = 128;
-                while (value_end < chunk.size() && (value_end - value_start) < max_val_len) {
+                while (value_end < chunk.size() &&
+                    (value_end - value_start) < max_val_len) {
                     char c = chunk[value_end];
                     if (c == '\0' || c == '\n' || c == '\r' || c == ',' || c == ';' || c == ' ') {
                         break;
@@ -477,15 +480,43 @@ public:
     FindingList analyze(const Evidence& evidence) const override {
         FindingList findings;
         if (auto* f = std::get_if<FileAccessEvidence>(&evidence)) {
-            auto severity = get_sensitive_path_severity(f->path);
-            if (severity) {
-                findings.emplace_back(
-                    *severity,
-                    "Sensitive file access",
-                    "Process attempted to open: " + f->path,
-                    SensitiveFileAccessDetails{f->path, "Known sensitive path"}
-                );
+            auto base = get_sensitive_path_severity(f->path);
+            if (!base) {
+                return findings;
             }
+
+            FindingSeverity severity = *base;
+            std::string description;
+            std::string reason;
+            std::string outcome;
+
+            if (f->err == 0) {
+                outcome     = "opened";
+                description = "Sensitive file opened";
+                reason      = "Known sensitive path, access succeeded";
+            } else if (f->err == EACCES || f->err == EPERM) {
+                // Denied access stays at base severity: the process really
+                // tried, the file exists, and the kernel blocked it. This is
+                // at least as interesting as a successful read.
+                outcome     = "denied";
+                description = "Sensitive file access denied";
+                reason      = std::string("Known sensitive path, access denied: ") + std::strerror(f->err);
+            } else if (f->err == ENOENT) {
+                outcome     = "failed";
+                description = "Sensitive file access attempted (path does not exist)";
+                reason      = "Known sensitive path, attempted open but path is absent";
+            } else {
+                outcome     = "failed";
+                description = std::string("Sensitive file access failed: ") + std::strerror(f->err);
+                reason      = std::string("Known sensitive path, open failed: ") + std::strerror(f->err);
+            }
+
+            findings.emplace_back(
+                severity,
+                description,
+                "Process attempted to open: " + f->path,
+                SensitiveFileAccessDetails{f->path, reason, outcome, f->err}
+            );
         }
         return findings;
     }

@@ -153,26 +153,22 @@ namespace {
         return backend->read_memory(ev.pid, addr, len);
     }
 
-    void handle_syscall_open(
+    // Capture the path on syscall entry and expose it to the caller so the
+    // observation can be stamped for later fd -> path resolution. Findings
+    // are NOT emitted here: at entry the syscall has not returned, so we
+    // cannot yet distinguish a successful open from an ENOENT/EACCES probe.
+    void handle_syscall_open_entry(
         const char *syscall_name,
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
         std::string& extra_info,
-        runtimexray::FindingList& findings,
         const runtimexray::SyscallEvent& ev,
         std::string& resolved_path)
     {
         uint64_t path_addr = (std::strcmp(syscall_name, "open") == 0) ? ev.arg0 : ev.arg1;
-        //std::string path = backend->read_string(ev.pid, path_addr);
         std::string path = get_path_bytes(backend, ev, path_addr);
         if (!path.empty()) {
             resolved_path = path;
             extra_info = " path=\"" + path + "\"";
-            runtimexray::FileAccessEvidence fe{path, 0, ev.pid};
-            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
-            for (auto& f : res) {
-                f.pid = ev.pid;   // set PID
-                findings.push_back(f);
-            }
         }
     }
 
@@ -497,6 +493,13 @@ namespace runtimexray {
             // the parent's.
             std::unordered_set<pid_t> memory_scanned_pids;
 
+            // Entry-captured paths for open/openat, keyed by tid. The eBPF
+            // backend captures the path bytes in-kernel at sys_enter_openat;
+            // the exit event does not carry them, so we save the entry path
+            // here and reuse it on exit. ptrace keeps the buffer readable, so
+            // this map is simply preferred over re-reading.
+            std::unordered_map<pid_t, std::string> pending_open_paths;
+
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // Feed the analyzer first. It creates the entry observation and later
                 // updates the same observation on exit. All set_* calls below depend
@@ -545,9 +548,17 @@ namespace runtimexray {
                     // the fd resolver can read them back later.
                     std::string resolved;
                     if (std::strcmp(syscall_name, "open") == 0 || std::strcmp(syscall_name,"openat") == 0) {
-                        handle_syscall_open(syscall_name, backend, extra_info, findings, ev, resolved);
+                        handle_syscall_open_entry(syscall_name, backend, extra_info, ev, resolved);
                         if (!resolved.empty()) {
                             lineage_analyzer.set_pending_event_source(ev.pid, ev.tid, resolved);
+                            pending_open_paths[ev.tid] = resolved;
+                            // Bound the map: entries are only removed on exit, so a
+                            // thread that dies between entry and exit would leak one
+                            // entry forever. 4096 is far above any realistic
+                            // in-flight open/openat concurrency.
+                            if (pending_open_paths.size() > 4096) {
+                                pending_open_paths.clear();
+                            }                            
                         }
                     } else if (std::strcmp(syscall_name, "connect") == 0) {
                         handle_syscall_connect(backend, extra_info, findings, ev, resolved);
@@ -594,6 +605,50 @@ namespace runtimexray {
                                         ", tid=" + std::to_string(ev.tid) + ") " +
                                         std::to_string(ev.return_value);
                     Logger::log(LogLevel::Debug, line);
+                }
+
+                // ----- File access: report every attempt -----
+                // The kernel returns >= 0 on success and -errno on failure.
+                // Emitting on entry (the old behaviour) could not
+                // distinguish success from failure at all. Now every
+                // attempt is reported with the outcome carried in
+                // FileAccessEvidence::err. Severity is a function of the
+                // path only; the outcome differentiates the finding for
+                // consumers (opened / denied / failed).                
+                // Path retrieval priority:
+                //   1. ev.captured_path if the backend populated it on exit
+                //      (future eBPF backends may do this)
+                //   2. the entry-time path saved in pending_open_paths
+                //      (required for the current eBPF backend)
+                //   3. a fresh re-read via get_path_bytes (ptrace fallback;
+                //      safe because the thread is stopped at the exit trap)
+                if (strcmp(name, "open") == 0 || strcmp(name, "openat") == 0) {
+                    int err = 0;
+                    if (ev.return_value < 0) {
+                        err = static_cast<int>(-ev.return_value);
+                    }
+
+                    std::string path = ev.captured_path;
+                    if (path.empty()) {
+                        auto it = pending_open_paths.find(ev.tid);
+                        if (it != pending_open_paths.end()) {
+                            path = it->second;
+                            pending_open_paths.erase(it);
+                        }
+                    }
+                    if (path.empty()) {
+                        uint64_t path_addr = (strcmp(name, "open") == 0) ? ev.arg0 : ev.arg1;
+                        path = get_path_bytes(backend, ev, path_addr);
+                    }
+                    
+                    if (!path.empty()) {
+                        runtimexray::FileAccessEvidence fe{path, 0, ev.pid, err};
+                        auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
+                        for (auto& f : res) {
+                            f.pid = ev.pid;
+                            findings.push_back(f);
+                        }
+                    }
                 }
 
                 // ----- Inbound: userspace buffer is only valid on exit -----

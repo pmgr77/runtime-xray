@@ -61,7 +61,9 @@ struct DangerousApiFindingDetails {
 
 struct SensitiveFileAccessDetails {
     std::string path;
-    std::string reason;
+    std::string reason;     // human-readable; includes errno name
+    std::string outcome;    // "opened" | "denied" | "failed"
+    int         err = 0;     // 0 on success; errno otherwise
 };
 
 struct NetworkConnectionDetails {

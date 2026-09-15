@@ -27,6 +27,7 @@
 #endif
 
 #include "tachikoma.hpp"
+#include "logger.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -49,6 +50,48 @@
 #include <elf.h>          // for NT_PRSTATUS
 #include <asm/ptrace.h>   // for struct user_pt_regs
 #endif
+
+// PTRACE_GET_SYSCALL_INFO and struct ptrace_syscall_info come from
+// <linux/ptrace.h>. That header cannot be included alongside glibc's
+// <sys/ptrace.h>: it redefines every PTRACE_* constant as a plain integer
+// macro, which breaks implicit conversion to the __ptrace_request enum
+// used in the ptrace() prototype, and therefore every other ptrace() call
+// in this file.
+//
+// PTRACE_GET_SYSCALL_INFO itself is already declared in glibc's
+// <sys/ptrace.h> enum (glibc >= 2.28). We only need to supply the
+// PTRACE_SYSCALL_INFO_* operation codes and the struct that the kernel
+// fills in.
+
+#ifndef PTRACE_SYSCALL_INFO_NONE
+# define PTRACE_SYSCALL_INFO_NONE    0
+# define PTRACE_SYSCALL_INFO_ENTRY   1
+# define PTRACE_SYSCALL_INFO_EXIT    2
+# define PTRACE_SYSCALL_INFO_SECCOMP 3
+#endif
+
+struct ptrace_syscall_info {
+    unsigned char      op;
+    unsigned char      pad[3];
+    unsigned int       arch;
+    unsigned long long instruction_pointer;
+    unsigned long long stack_pointer;
+    union {
+        struct {
+            unsigned long long nr;
+            unsigned long long args[6];
+        } entry;
+        struct {
+            long long     rval;
+            unsigned char is_error;
+        } exit;
+        struct {
+            unsigned long long nr;
+            unsigned long long args[6];
+            unsigned int       ret_data;
+        } seccomp;
+    };
+};
 
 namespace runtimexray {
 
@@ -170,7 +213,8 @@ namespace runtimexray {
                         PTRACE_O_TRACEFORK |
                         PTRACE_O_TRACEVFORK |
                         PTRACE_O_TRACECLONE |
-                        PTRACE_O_TRACEEXIT) == -1) {
+                        PTRACE_O_TRACEEXIT |
+                        PTRACE_O_TRACESYSGOOD) == -1) {
                 throw std::runtime_error(std::string("PTRACE_SETOPTIONS failed: ") + std::strerror(errno));
             }
             
@@ -317,8 +361,12 @@ namespace runtimexray {
         pid_t child = static_cast<pid_t>(new_pid);
 
         if (follow_forks_) {
-            // Wait for the child to stop before attempting to set options.
-            // This ensures the child is still alive and in a suitable state.
+            // The child was created by PTRACE_O_TRACECLONE/FORK/VFORK. The
+            // kernel does not queue the child's initial SIGSTOP until the
+            // parent is resumed from its clone event, so a blocking waitpid
+            // here would deadlock. Use WNOHANG: if the stop has not arrived
+            // yet, we fall into the `else` branch, resume the parent, and
+            // let the main loop adopt the child when its SIGSTOP arrives.
             int child_status;
             pid_t wait_result = waitpid(child, &child_status, __WALL | WNOHANG);
             if (wait_result == -1) {
@@ -335,7 +383,8 @@ namespace runtimexray {
                         PTRACE_O_TRACEFORK |
                         PTRACE_O_TRACEVFORK |
                         PTRACE_O_TRACECLONE |
-                        PTRACE_O_TRACEEXIT) == -1) {
+                        PTRACE_O_TRACEEXIT |
+                        PTRACE_O_TRACESYSGOOD) == -1) {
                     // If setting options fails (e.g., child died), just continue.
                     // Log error but don't crash.
                     // Continue the parent.
@@ -390,8 +439,30 @@ namespace runtimexray {
         ev.arg4 = regs.args[4];
         ev.arg5 = regs.args[5];
 
-        if (!in_syscall) {
-            // Syscall entry
+        // Ask the kernel directly whether this stop is a syscall entry or exit.
+        // The state machine (`in_syscall`) is unreliable around clone/adopt and
+        // signal delivery; it has caused entry stops to be reported as exits,
+        // which produced `ret=-100` (= AT_FDCWD, the first argument to openat)
+        // in earlier runs. The kernel knows the answer, so we always ask it.
+        // The state machine is kept only as a fallback if the query fails.
+        //
+        // Note: PTRACE_GET_SYSCALL_INFO does NOT use an iovec. The `addr`
+        // argument is the size of the buffer, and `data` points directly to
+        // the struct ptrace_syscall_info that the kernel fills in.
+        bool entry_stop = !in_syscall;
+
+        struct ptrace_syscall_info info;
+        errno = 0;
+        long ptrace_ret = ptrace(PTRACE_GET_SYSCALL_INFO, pid,
+                             reinterpret_cast<void*>(sizeof(info)), &info);
+        if (ptrace_ret != -1) {
+            if (info.op == PTRACE_SYSCALL_INFO_ENTRY)
+                entry_stop = true;
+            else if (info.op == PTRACE_SYSCALL_INFO_EXIT)
+                entry_stop = false;
+        }
+
+        if (entry_stop) {
             ev.is_entry = true;
             ev.return_value = 0;
             cb(ev);
@@ -407,7 +478,8 @@ namespace runtimexray {
         // Continue
         if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
             running_ = false;
-            throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
+            throw std::runtime_error(std::string("ptrace(PTRACE_SYSCALL) failed: pid=") +
+                std::to_string(pid) + " " + std::strerror(errno));
         }
     }
 
@@ -424,9 +496,12 @@ namespace runtimexray {
         timed_out_ = false;
         auto start_time = std::chrono::steady_clock::now();
 
-        // Loop until all traced processes have exited
+        // Loop until every traced process has exited or the timeout fires.
         while (!traced_pids_.empty() && running_) {
-            // Check timeout (relative to the start of the whole trace)
+
+            // -------------------------------------------------------------------
+            // Timeout check (relative to the start of the whole trace)
+            // -------------------------------------------------------------------
             if (timeout_.count() > 0) {
                 auto now = std::chrono::steady_clock::now();
                 if ((now - start_time) >= timeout_) {
@@ -446,22 +521,28 @@ namespace runtimexray {
                 }
             }
 
-            // Wait for any traced process, non-blocking
+            // -------------------------------------------------------------------
+            // Wait for any traced process (including threads: __WALL)
+            // -------------------------------------------------------------------
             pid_t pid = waitpid(-1, &status, __WALL | WNOHANG);
             if (pid == -1) {
                 if (errno == EINTR) {
                     continue;
                 }
                 running_ = false;
-                throw std::runtime_error(std::string("waitpid failed: pid=") + std::to_string(pid) + " " + std::strerror(errno));
+                throw std::runtime_error(
+                    std::string("waitpid failed: pid=") + std::to_string(pid) +
+                    " " + std::strerror(errno));
             }
             if (pid == 0) {
-                // No event yet – sleep a bit to avoid busy-wait
+                // No event yet; sleep briefly to avoid busy-waiting.
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
-            // Process event for this pid
+            // -------------------------------------------------------------------
+            // Process termination
+            // -------------------------------------------------------------------
             if (WIFEXITED(status) || WIFSIGNALED(status)) {
                 // Process terminated
                 traced_pids_.erase(pid);
@@ -470,28 +551,97 @@ namespace runtimexray {
                     running_ = false;
                     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
                 }
-                continue;                
+                continue;
             }
 
-            if (WIFSTOPPED(status)) {
-                unsigned int event = static_cast<unsigned int>(status >> 16);
-                if (event == PTRACE_EVENT_FORK ||
-                    event == PTRACE_EVENT_VFORK ||
-                    event == PTRACE_EVENT_CLONE) {
-                    // New child created
-                    handle_ptrace_event(pid, status, cb);
+            if (!WIFSTOPPED(status)) {
+                continue; // not a stop we care about
+            }
+
+            // -------------------------------------------------------------------
+            // We have a stopped tracee. Classify the stop type.
+            // The branches below MUST stay in this order:
+            //   1. fork-family events
+            //   2. PTRACE_EVENT_EXIT
+            //   3. unknown pid (freshly-adopted child)
+            //   4. signal-delivery
+            //   5. real syscall stop
+            // -------------------------------------------------------------------
+            unsigned int event = static_cast<unsigned int>(status >> 16);
+            int sig = WSTOPSIG(status);
+
+            // (1) Fork-family events: the parent stopped because it just
+            //     created a child. handle_ptrace_event registers or defers
+            //     the child; do not touch syscall state for the parent here.
+            if (event == PTRACE_EVENT_FORK ||
+                event == PTRACE_EVENT_VFORK ||
+                event == PTRACE_EVENT_CLONE) {
+                handle_ptrace_event(pid, status, cb);
+                continue;
+            }
+
+            // (2) PTRACE_EVENT_EXIT: the tracee is about to die. This is
+            //     informational, not a syscall stop, so we must not toggle
+            //     in_syscall_state_. Just resume it and let the exit arrive
+            //     naturally via waitpid(WIFEXITED).
+            if (event == PTRACE_EVENT_EXIT) {
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
+                    traced_pids_.erase(pid);
+                    in_syscall_state_.erase(pid);
+                }
+                continue;
+            }
+
+            // (3) Unknown pid: this is the initial SIGSTOP of a child that
+            //     handle_ptrace_event could not wait for synchronously. That
+            //     stop only arrives after the parent was resumed from its
+            //     clone event, so it reaches us here instead of there.
+            //
+            //     This branch MUST come before the signal-delivery branch:
+            //     otherwise the SIGSTOP gets re-injected and the child stays
+            //     stopped forever. We resume with signal 0 to *suppress* the
+            //     synthetic SIGSTOP.
+            if (in_syscall_state_.find(pid) == in_syscall_state_.end()) {
+                if (ptrace(PTRACE_SETOPTIONS, pid, nullptr,
+                        PTRACE_O_TRACEFORK |
+                        PTRACE_O_TRACEVFORK |
+                        PTRACE_O_TRACECLONE |
+                        PTRACE_O_TRACEEXIT |
+                        PTRACE_O_TRACESYSGOOD) == -1) {
+                    // Child died before we could set options; nothing to do.
+                    if (ptrace(PTRACE_SYSCALL, pid, nullptr, 0) == -1) {
+                        // Already gone; nothing to clean up.
+                    }
                     continue;
                 }
-
-                // Otherwise it's a syscall entry/exit stop
-                auto it = in_syscall_state_.find(pid);
-                if (it == in_syscall_state_.end()) {
-                    // Should not happen – initialize
-                    in_syscall_state_[pid] = false;
-                    it = in_syscall_state_.find(pid);
+                traced_pids_.insert(pid);
+                // Initial value is a hint only; handle_syscall_stop now asks
+                // the kernel via PTRACE_GET_SYSCALL_INFO which stop this is.
+                in_syscall_state_[pid] = false;
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, 0) == -1) {
+                    traced_pids_.erase(pid);
+                    in_syscall_state_.erase(pid);
                 }
-                handle_syscall_stop(pid, cb, it->second);
+                continue;
             }
+
+            // (4) Syscall stops with TRACESYSGOOD enabled carry SIGTRAP|0x80.
+            //     Anything else — a real signal, a breakpoint, an event we do not
+            //     handle — is forwarded as-is and does not touch syscall state.
+            if (sig != (SIGTRAP | 0x80)) {
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, sig) == -1) {
+                    traced_pids_.erase(pid);
+                    in_syscall_state_.erase(pid);
+                }
+                continue;
+            }
+
+            // (5) Real syscall stop for a known pid. handle_syscall_stop is
+            //     where the kernel query (PTRACE_GET_SYSCALL_INFO) decides
+            //     definitively whether this is an entry or an exit — the
+            //     in_syscall_state_ flag is only a fallback.
+            auto it = in_syscall_state_.find(pid);
+            handle_syscall_stop(pid, cb, it->second);
         }
 
         return 0;

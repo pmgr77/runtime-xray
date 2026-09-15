@@ -202,7 +202,9 @@ namespace runtimexray {
                                 << ", Recommendation: " << details.recommendation << "\n";
                         } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
                             out << "      Path: " << details.path
-                                << ", Reason: " << details.reason << "\n";
+                                << ", Reason: " << details.reason
+                                << ", Outcome: " << details.outcome
+                                << ", Error: " << details.err << "\n";
                         } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
                             out << "      Remote: " << details.remote_addr << ":" << details.port
                                 << ", Reason: " << details.reason << "\n";
@@ -290,6 +292,8 @@ namespace runtimexray {
                     fj["type"] = "sensitive_file";
                     fj["details"]["path"] = details.path;
                     fj["details"]["reason"] = details.reason;
+                    fj["details"]["outcome"] = details.outcome;
+                    fj["details"]["err"] = details.err;
                 } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
                     fj["type"] = "network";
                     fj["details"]["remote_addr"] = details.remote_addr;
