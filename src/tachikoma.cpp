@@ -561,11 +561,12 @@ namespace runtimexray {
             // -------------------------------------------------------------------
             // We have a stopped tracee. Classify the stop type.
             // The branches below MUST stay in this order:
-            //   1. fork-family events
-            //   2. PTRACE_EVENT_EXIT
-            //   3. unknown pid (freshly-adopted child)
-            //   4. signal-delivery
-            //   5. real syscall stop
+            // 1. fork-family events       (PTRACE_EVENT_FORK | VFORK | CLONE)
+            // 2. PTRACE_EVENT_EXIT
+            // 3. unknown pid              (adopt block - freshly-adopted child)
+            // 4. plain SIGTRAP            (exec stop)
+            // 5. sig != SIGTRAP|0x80      (real signal delivery)
+            // 6. real syscall stop        (handle_syscall_stop)
             // -------------------------------------------------------------------
             unsigned int event = static_cast<unsigned int>(status >> 16);
             int sig = WSTOPSIG(status);
@@ -625,7 +626,25 @@ namespace runtimexray {
                 continue;
             }
 
-            // (4) Syscall stops with TRACESYSGOOD enabled carry SIGTRAP|0x80.
+            // (4) Post-exec SIGTRAP from execve(2): the kernel stops the tracee after
+            // a successful exec so the tracer can refresh its view of the process.
+            // Resume with signal 0 to suppress the trap. Forwarding SIGTRAP would
+            // terminate the tracee with the default disposition.
+            //
+            // Distinguishable from a syscall stop because TRACESYSGOOD is on:
+            // syscall stops carry SIGTRAP|0x80 (133), this one carries plain
+            // SIGTRAP (5).
+            if (sig == SIGTRAP) {
+                Logger::log(LogLevel::Debug,
+                    "ptrace: exec_sigtrap pid=" + std::to_string(pid));
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, 0) == -1) {
+                    traced_pids_.erase(pid);
+                    in_syscall_state_.erase(pid);
+                }
+                continue;
+            }
+
+            // (5) Syscall stops with TRACESYSGOOD enabled carry SIGTRAP|0x80.
             //     Anything else — a real signal, a breakpoint, an event we do not
             //     handle — is forwarded as-is and does not touch syscall state.
             if (sig != (SIGTRAP | 0x80)) {
@@ -636,7 +655,7 @@ namespace runtimexray {
                 continue;
             }
 
-            // (5) Real syscall stop for a known pid. handle_syscall_stop is
+            // (6) Real syscall stop for a known pid. handle_syscall_stop is
             //     where the kernel query (PTRACE_GET_SYSCALL_INFO) decides
             //     definitively whether this is an entry or an exit — the
             //     in_syscall_state_ flag is only a fallback.
