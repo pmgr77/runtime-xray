@@ -243,6 +243,11 @@ static std::string clean_extracted_secret(const std::string& raw) {
 }
 
 // Password detector logic (moved from old PasswordDetector)
+// Recognizes four shapes:
+//   password=value
+//   password: value
+//   "password":"value"     (JSON)
+//   'password':'value'     (single-quoted)
 std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
     //Logger::log(LogLevel::Debug, "detect_password_matches: starting scan of chunk of size " + std::to_string(chunk.size()));
    
@@ -278,10 +283,23 @@ std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
             }
 
             size_t next = pos + kw.size();
-            if (next < chunk.size() &&
-                (chunk[next] == '=' || chunk[next] == ':')) {
-                size_t value_start = next + 1;
+
+            // Skip an optional quote between the keyword and the separator, so that
+            // JSON-shaped credentials like "password":"..." are recognized.
+            size_t sep = next;
+            if (sep < chunk.size() && (chunk[sep] == '"' || chunk[sep] == '\'')) {
+                ++sep;
+            }
+
+            if (sep < chunk.size() &&
+                (chunk[sep] == '=' || chunk[sep] == ':')) {
+                size_t value_start = sep + 1;
                 while (value_start < chunk.size() && chunk[value_start] == ' ') {
+                    ++value_start;
+                }
+                // Skip a matching opening quote on the value side too.
+                if (value_start < chunk.size() &&
+                    (chunk[value_start] == '"' || chunk[value_start] == '\'')) {
                     ++value_start;
                 }
                 size_t value_end = value_start;
@@ -289,7 +307,8 @@ std::vector<PasswordMatch> detect_password_matches(const std::string& chunk) {
                 while (value_end < chunk.size() &&
                     (value_end - value_start) < max_val_len) {
                     char c = chunk[value_end];
-                    if (c == '\0' || c == '\n' || c == '\r' || c == ',' || c == ';' || c == ' ') {
+                    if (c == '\0' || c == '\n' || c == '\r' || c == ',' || c == ';' ||
+                        c == ' ' || c == '"' || c == '\'') {
                         break;
                     }
                     ++value_end;
