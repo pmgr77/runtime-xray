@@ -59,7 +59,7 @@ void LineageAnalyzer::add_edge(size_t from, size_t to,
     edges_.push_back(edge);
 }
 
-size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid,
+size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
                                               const std::string& program) {
     auto it = process_node_map_.find(pid);
     if (it != process_node_map_.end()) {
@@ -75,6 +75,7 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid,
     obs.type = ObservationType::Event;
     obs.pid = pid;
     obs.tid = tid;
+    obs.tgid = tgid;
     obs.program_name = program;
     obs.syscall_name = "process"; // marker
     obs.is_entry = true;
@@ -85,16 +86,20 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid,
 }
 
 void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
-    Logger::log(LogLevel::Debug, "on_syscall_event: pid=" + std::to_string(ev.pid) +
-                 " syscall=" + std::to_string(ev.syscall_number) +
-                 " entry=" + std::to_string(ev.is_entry));
+    Logger::log(LogLevel::Debug, 
+                "on_syscall_event: pid=" + std::to_string(ev.pid) +
+                " tid=" + std::to_string(ev.tid) +
+                " tgid=" + std::to_string(ev.tgid) +
+                " syscall=" + std::to_string(ev.syscall_number) +
+                " entry=" + std::to_string(ev.is_entry));
     
     pid_t pid = ev.pid;
     // We need to pass tid from SyscallEvent; we'll need to extend it
     pid_t tid = ev.tid;
+    pid_t tgid = ev.tgid;
 
     // Ensure process node exists
-    size_t proc_idx = ensure_process(pid, tid);
+    size_t proc_idx = ensure_process(pid, tid, tgid);
 
     if (ev.is_entry) {
         // Create syscall entry observation
@@ -102,6 +107,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         obs.type = ObservationType::Event;
         obs.pid = pid;
         obs.tid = tid;
+        obs.tgid = tgid;
         obs.start_time = std::chrono::steady_clock::now();
         obs.syscall_name = syscall_name(static_cast<long>(ev.syscall_number));
         obs.arg0 = ev.arg0;
@@ -218,7 +224,9 @@ void LineageAnalyzer::handle_fork_exit(const SyscallEvent& ev) {
 
     // Create child process node
     pid_t parent_pid = ev.pid;
-    size_t child_idx = ensure_process(child_pid, child_pid); // tid = pid for process
+    // Correct for fork/vfork and process-creating clone.
+    // CLONE_THREAD requires separate handling; fixed in the next identity phase.
+    size_t child_idx = ensure_process(child_pid, child_pid, child_pid); // tid = pid for process
 
     // Causality edge: parent process -> child process
     size_t parent_idx = process_node_map_[parent_pid];

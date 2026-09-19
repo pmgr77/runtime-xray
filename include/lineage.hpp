@@ -40,27 +40,33 @@ enum class ObservationType {
 };
 
 struct Observation {
-    ObservationType type;
+    ObservationType type = ObservationType::Event;
     std::chrono::steady_clock::time_point start_time;
     std::chrono::steady_clock::time_point end_time;
-    std::chrono::microseconds duration; // end_time - start_time (if applicable)
-    pid_t pid;
-    pid_t tid;
+    std::chrono::microseconds duration{0}; // end_time - start_time (if applicable)
+    // Linux execution identity.
+    //
+    // pid is retained for compatibility with the current graph model.
+    // tid identifies the task/thread that generated an event.
+    // tgid identifies the Linux thread group (process).
+    pid_t pid = -1;
+    pid_t tid = -1;
+    pid_t tgid = -1;
     std::string program_name;           // if known (from execve)
 
     // Event-specific fields
     std::string syscall_name;
-    uint64_t arg0, arg1, arg2, arg3, arg4, arg5;
-    long long return_value;
-    bool is_entry;
+    uint64_t arg0 = 0, arg1 = 0, arg2 = 0, arg3 = 0, arg4 = 0, arg5 = 0;
+    long long return_value = 0;
+    bool is_entry = false;
 
     // Data-specific fields
     std::string data_type;              // "secret", "key", "file_content", "env_var"
     std::string data_snippet;           // first 64 bytes (or less)
     std::string fingerprint;            // HMAC‑SHA256 of exact secret (for correlation)
     std::string secret_type;            // "password", "private_key", "api_key", ...
-    uintptr_t address;
-    size_t size;
+    uintptr_t address = 0;
+    size_t size = 0;
     std::string source;                 // e.g., "file:/etc/passwd", "env:API_KEY"
     
     // Static-specific fields

@@ -356,6 +356,7 @@ namespace runtimexray {
             proc_obs.syscall_name = "process";
             proc_obs.pid = pid;
             proc_obs.tid = pid;
+            proc_obs.tgid = pid;
             proc_obs.start_time = std::chrono::steady_clock::now();
             proc_obs.program_name = runtimexray::get_process_name(pid);
             proc_idx = graph.observations.size();
@@ -375,6 +376,7 @@ namespace runtimexray {
                 data_obs.size = details->raw_secret.size();
                 data_obs.pid = pid;
                 data_obs.tid = pid;
+                data_obs.tgid = pid;
                 data_obs.start_time = std::chrono::steady_clock::now();
                 size_t data_idx = graph.observations.size();
                 Logger::log(LogLevel::Debug,

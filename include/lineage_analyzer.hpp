@@ -81,7 +81,7 @@ private:
     std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> last_exit_index_;
 
     // Helper: get or create process node
-    size_t ensure_process(pid_t pid, pid_t tid, const std::string& program = "");
+    size_t ensure_process(pid_t pid, pid_t tid, pid_t tgid, const std::string& program = "");
 
     // Helper: add observation and return index
     size_t add_observation(const Observation &obs);
