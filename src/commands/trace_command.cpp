@@ -405,6 +405,14 @@ namespace runtimexray {
 
         const Observation& process_obs = graph.observations[proc_idx];
         const uint64_t process_instance_id = process_obs.process_instance_id;
+        uint64_t exec_generation = 0;
+        for (auto it = graph.observations.rbegin(); it != graph.observations.rend(); ++it) {
+            if (it->process_instance_id == process_instance_id &&
+                it->syscall_name != "process") {
+                exec_generation = it->exec_generation;
+                break;
+            }
+        }
         const pid_t process_tgid = (process_obs.tgid > 0) ? process_obs.tgid : process_obs.pid;
 
         for (const auto& f : mem_findings) {
@@ -431,6 +439,7 @@ namespace runtimexray {
                 data_obs.tid = pid;
                 data_obs.tgid = process_tgid;
                 data_obs.process_instance_id = process_instance_id;
+                data_obs.exec_generation = exec_generation;
                 data_obs.start_time = std::chrono::steady_clock::now();
                 size_t data_idx = append_observation(graph, std::move(data_obs));
                 Logger::log(
@@ -566,7 +575,13 @@ namespace runtimexray {
                 // updates the same observation on exit. All set_* calls below depend
                 // on this having already run for the current event.
                 lineage_analyzer.on_syscall_event(ev);
-
+                //
+                // Semantic trace events are consumed by the lineage analyzer.
+                // They must not fall through into syscall-specific processing.
+                //
+                if (ev.type != TraceEventType::Syscall) {
+                    return;
+                }
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
 

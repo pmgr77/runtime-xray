@@ -117,6 +117,7 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     obs.tid = tid;
     obs.tgid = process_id;
     obs.process_instance_id = instance_id;
+    obs.exec_generation = 0;
     obs.program_name = program;
     obs.syscall_name = "process"; // marker
     obs.is_entry = true;
@@ -126,6 +127,7 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     active_process_by_tgid_[process_id] = instance_id;
     process_node_by_instance_[instance_id] = idx;
     active_tids_by_instance_[instance_id].insert(tid);
+    exec_generation_by_instance_[instance_id] = 0;
 
     Logger::log(
         LogLevel::Debug,
@@ -137,7 +139,15 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     return idx;
 }
 
-void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
+void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
+{
+    // Handle TraceEventType::Exec
+    // This must happen before normal syscall handling.
+    if (ev.type == TraceEventType::Exec) {
+        handle_exec_success(ev);
+        return;
+    }
+
     Logger::log(LogLevel::Debug,
                 "on_syscall_event: pid=" + std::to_string(ev.pid) +
                 " tid=" + std::to_string(ev.tid) +
@@ -153,6 +163,12 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
     // Ensure process node exists
     size_t proc_idx = ensure_process(pid, tid, tgid);
     const uint64_t process_instance_id = observations_[proc_idx].process_instance_id;
+    // stamp every syscall with current generation
+    uint64_t exec_generation = 0;
+    auto generation_it = exec_generation_by_instance_.find(process_instance_id);
+    if (generation_it != exec_generation_by_instance_.end()) {
+        exec_generation = generation_it->second;
+    }
 
     if (ev.is_entry) {
         // Create syscall entry observation
@@ -162,6 +178,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         obs.tid = tid;
         obs.tgid = tgid;
         obs.process_instance_id = process_instance_id;
+        obs.exec_generation = exec_generation;
         obs.start_time = std::chrono::steady_clock::now();
         obs.syscall_name = syscall_name(static_cast<long>(ev.syscall_number));
         obs.arg0 = ev.arg0;
@@ -189,7 +206,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         pending_entry_[pid][tid] = sys_idx;
 
         // If this is an execve entry, capture the program name immediately.
-        if (obs.syscall_name == "execve") {
+        if (is_exec_syscall(static_cast<long>(ev.syscall_number))) {
             handle_execve_entry(ev);
         }
 
@@ -239,7 +256,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
                 const uint64_t clone_flags =
                     observations_[sys_idx].arg0;
                 handle_fork_exit(ev, fork_syscall, clone_flags);
-            } else if (strcmp(name, "execve") == 0) {
+            } else if (is_exec_syscall(static_cast<long>(ev.syscall_number))) {
                 handle_execve_exit(ev);
             }
         }
@@ -369,66 +386,141 @@ void LineageAnalyzer::handle_fork_exit(
 }
 
 void LineageAnalyzer::handle_execve_entry(const SyscallEvent& ev) {
-    if (!backend_) {
-        Logger::log(LogLevel::Debug, "No backend set for LineageAnalyzer; cannot read execve path.");
-        return;
-    }
-    uint64_t path_addr = ev.arg0;
-    std::string path = backend_->read_string(ev.tid, path_addr);
+    std::string path = ev.captured_path;
+    //
+    // ptrace does not have kernel-captured path bytes, so fall back
+    // to reading target memory while the process is stopped.
+    //
     if (path.empty()) {
-        Logger::log(LogLevel::Debug, "handle_execve_entry: read_string returned empty for address 0x" + std::to_string(path_addr));
+        if (!backend_) {
+            Logger::log(
+                LogLevel::Debug,
+                "No backend set for LineageAnalyzer; cannot read exec path.");
+            return;
+        }
+
+        const uint64_t path_addr = is_execveat_syscall(static_cast<long>(ev.syscall_number)) ? ev.arg1 : ev.arg0;
+
+        path = backend_->read_string(ev.tid, path_addr);
+    }
+
+    if (path.empty()) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: exec path is empty for tid=" +
+            std::to_string(ev.tid));
         return;
     }
-    Logger::log(LogLevel::Debug, "handle_execve_entry: path = " + path);
-    const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
-    auto process_idx = find_active_process_node(process_id);
-    if (process_idx.has_value()) {
-        observations_[*process_idx].program_name = path;
-        Logger::log(LogLevel::Debug,
-            "Updated process node with program name (from execve entry): " + path);
-    } else {
-        Logger::log(LogLevel::Debug,
-            "Active process node not found for TGID " +
-            std::to_string(process_id) +
-            " (tid=" + std::to_string(ev.tid) + ")");
+
+    pending_exec_path_by_tid_[ev.tid] = path;
+
+    //
+    // The exec syscall observation records the requested executable.
+    // The process node itself spans all exec generations and therefore
+    // must not be renamed on every exec.
+    //
+    auto pid_it = pending_entry_.find(ev.pid);
+    if (pid_it != pending_entry_.end()) {
+        auto tid_it = pid_it->second.find(ev.tid);
+        if (tid_it != pid_it->second.end() &&
+            tid_it->second < observations_.size()) {
+            observations_[tid_it->second].program_name = path;
+        }
     }
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: pending exec path tid=" +
+        std::to_string(ev.tid) +
+        " path=" +
+        path);
 }
 
 void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
-    // Execve succeeded if return_value == 0
-    if (ev.return_value != 0) {
-        Logger::log(LogLevel::Debug, "execve failed, return=" + std::to_string(ev.return_value));
-        return;
-    }
-    if (!backend_) {
-        Logger::log(LogLevel::Debug, "No backend set for LineageAnalyzer; cannot read execve path.");
+    //
+    // A failed exec returns normally to the old image.
+    // Therefore the pending target must be discarded and the current
+    // exec generation remains unchanged.
+    //
+    if (ev.return_value < 0) {
+        pending_exec_path_by_tid_.erase(ev.tid);
+
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: execve failed tid=" +
+            std::to_string(ev.tid) +
+            " return=" +
+            std::to_string(ev.return_value));
+
         return;
     }
 
-    // arg0 is the path pointer
-    uint64_t path_addr = ev.arg0;
-    std::string path = backend_->read_string(ev.tid, path_addr);
-    if (path.empty()) {
-        Logger::log(LogLevel::Debug,
-            "handle_execve_exit: read_string returned empty for address 0x" +
-            std::to_string(path_addr));
-    } else {
-        Logger::log(LogLevel::Debug,
-            "handle_execve_exit: path = " +
-            path);
-        // Update the process node's program name
-        const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
-        auto process_idx = find_active_process_node(process_id);
-        if (process_idx.has_value()) {
-            observations_[*process_idx].program_name = path;
-            Logger::log(LogLevel::Debug,
-                "Updated process node with program name (from execve exit): " + path);
-        } else {
-            Logger::log(LogLevel::Debug,
-                "Process node not found for TGID " + std::to_string(process_id) +
-                " (tid=" + std::to_string(ev.tid) + ")");
-        }
+    //
+    // Successful exec is handled by TraceEventType::Exec.
+    //
+    // Do not update program_name or exec_generation here.
+}
+
+void LineageAnalyzer::handle_exec_success(const SyscallEvent& ev)
+{
+    const pid_t tgid = (ev.tgid > 0) ? ev.tgid : ev.pid;
+
+    auto process_idx = find_active_process_node(tgid);
+    if (!process_idx.has_value()) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: exec success but no active process for tgid=" +
+            std::to_string(tgid));
+        return;
     }
+
+    Observation& process_obs = observations_[*process_idx];
+    const uint64_t instance_id = process_obs.process_instance_id;
+    uint64_t& generation = exec_generation_by_instance_[instance_id];
+    ++generation;
+
+    // Support an interesting case:
+    // worker TID 1002 calls exec
+    //    ↓
+    // Linux de-threads
+    //    ↓
+    // post-exec task becomes TID 1000
+    // The pending path is under 1002, but exec event arrives as 1000.
+    auto path_it = pending_exec_path_by_tid_.find(ev.tid);
+    if (path_it == pending_exec_path_by_tid_.end() && ev.former_tid > 0) {
+        path_it = pending_exec_path_by_tid_.find(ev.former_tid);
+    }
+
+    // erase path during successful exec
+    if (path_it != pending_exec_path_by_tid_.end()) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: erase pending path, exec generation=" +
+            std::to_string(generation) +
+            " program=" +
+            path_it->second);
+        pending_exec_path_by_tid_.erase(path_it);
+    }
+
+    //
+    // Successful exec destroys all other threads in the process.
+    //
+    // The exec'ing task is the only surviving thread in the new image.
+    //
+    auto& tids = active_tids_by_instance_[instance_id];
+    tids.clear();
+    tids.insert(ev.tid);
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: process_instance=" +
+        std::to_string(instance_id) +
+        " successful exec -> generation=" +
+        std::to_string(generation) +
+        " tgid=" +
+        std::to_string(tgid) +
+        " tid=" +
+        std::to_string(ev.tid));
 }
 
 void LineageAnalyzer::handle_thread_exit(const SyscallEvent& ev)

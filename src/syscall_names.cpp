@@ -642,7 +642,7 @@ const char* syscall_name_arm64(long num) {
         case 263: return "getrandom";
         case 264: return "memfd_create";
         case 265: return "bpf";
-        case 266: return "execveat";
+        case 281: return "execveat";
         case 267: return "userfaultfd";
         case 268: return "membarrier";
         case 269: return "mlock2";
@@ -757,7 +757,7 @@ bool is_interesting_syscall_arm64(long num) {
         case 48:  // faccessat
         // Processes
         case 221: // execve
-        case 266: // execveat
+        case 281: // execveat
         case 220: // clone
         case 93:  // exit
         case 94:  // exit_group

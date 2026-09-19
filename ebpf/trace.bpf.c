@@ -188,7 +188,7 @@ struct {
 
 #define NR_openat     56
 #define NR_execve     221
-#define NR_execveat   266
+#define NR_execveat   281
 #define NR_connect    203
 #define NR_write      64
 #define NR_writev     66

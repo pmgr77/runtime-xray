@@ -86,6 +86,12 @@ private:
     // RuntimeXRay process instance -> process observation index.
     std::unordered_map<uint64_t, size_t> process_node_by_instance_;
 
+    // RuntimeXRay process instance -> current executable-image generation.
+    //
+    // A process begins at generation 0.
+    // Every successful exec advances it by one.
+    std::unordered_map<uint64_t, uint64_t> exec_generation_by_instance_;
+
     // RuntimeXRay process instance -> currently observed live TIDs.
     //
     // This lets us distinguish:
@@ -93,6 +99,12 @@ private:
     // from:
     //   the last thread in a process calling exit().
     std::unordered_map<uint64_t, std::unordered_set<pid_t>> active_tids_by_instance_;
+
+    // Pending exec target path by TID.
+    //
+    // Captured at execve entry and committed only after a successful
+    // exec boundary.
+    std::unordered_map<pid_t, std::string> pending_exec_path_by_tid_;
 
     // For chronological edges: (PID, TID) -> index of last syscall observation
     std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> thread_last_syscall_;
@@ -121,6 +133,7 @@ private:
 
     void handle_execve_entry(const SyscallEvent& ev);
     void handle_execve_exit(const SyscallEvent& ev);
+    void handle_exec_success(const SyscallEvent& ev);
 
     void handle_thread_exit(const SyscallEvent& ev);
     void handle_exit_group(const SyscallEvent& ev);

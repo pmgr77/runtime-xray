@@ -26,10 +26,12 @@
 #include "trace_bpf_bytecode.h"
 #include "logger.hpp"
 #include "syscall_names.hpp"
+
 #include <bpf/libbpf.h>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <unordered_map>
 #include <stdexcept>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -98,6 +100,8 @@ public:
     std::string child_output_path() const override { return child_output_path_; }
 
     int trace(const TraceConfig& config) override {
+        suppress_initial_exec_ = true;
+        pending_exec_tid_by_tgid_.clear();
         // 1. Fork + exec the target program
         follow_forks_ = config.follow_forks;
         debug_enabled_ = config.debug;
@@ -430,10 +434,70 @@ private:
 
         backend->handle_fork_event(ev);
 
+        const bool is_exec = is_exec_syscall(static_cast<long>(ev->syscall_id));
+
+        //
+        // eBPF starts observing before RuntimeXRay's child execs the target.
+        //
+        // Suppress that launcher exec so the requested target begins at
+        // exec_generation 0, matching the ptrace backend.
+        //
+        if (is_exec &&
+            event.pid == backend->child_pid_ &&
+            backend->suppress_initial_exec_)
+        {
+            if (!event.is_entry) {
+                backend->suppress_initial_exec_ = false;
+            }
+
+            return 0;
+        }
+        if (is_exec && event.is_entry) {
+            backend->pending_exec_tid_by_tgid_[event.tgid] = event.tid;
+        }
+        const pid_t post_exec_tid = event.tid;
+        pid_t pre_exec_tid = event.tid;
+        if (is_exec && !event.is_entry) {
+            auto tid_it = backend->pending_exec_tid_by_tgid_.find(event.tgid);
+            if (tid_it != backend->pending_exec_tid_by_tgid_.end()) {
+                pre_exec_tid = tid_it->second;
+                //
+                // Pair this syscall exit with the original execve entry.
+                //
+                // LineageAnalyzer keyed the pending entry by the pre-exec TID.
+                //
+                event.tid = pre_exec_tid;
+            }
+        }
+
         if (backend->callback_) {
             backend->callback_(event);
         }
 
+        //
+        // A successful exec creates the executable-image boundary.
+        //
+        // Emit this only after the normal syscall-exit callback, so the execve
+        // observation itself stays attached to the old generation.
+        //
+        if (is_exec &&
+            !event.is_entry &&
+            event.return_value == 0 &&
+            backend->callback_)
+        {
+            SyscallEvent exec_event;
+            exec_event.type = TraceEventType::Exec;
+            exec_event.pid = event.pid;
+            exec_event.tgid = event.tgid;
+            exec_event.tid = post_exec_tid;
+            if (pre_exec_tid != post_exec_tid) {
+                exec_event.former_tid = pre_exec_tid;
+            }
+            backend->callback_(exec_event);
+        }
+        if (is_exec && !event.is_entry) {
+            backend->pending_exec_tid_by_tgid_.erase(event.tgid);
+        }
         return 0;
     }
 
@@ -444,6 +508,15 @@ private:
     TraceEventCallback callback_;
     bool follow_forks_ = true;
     bool debug_enabled_ = false;
+    // The first exec of child_pid_ is RuntimeXRay launching the requested
+    // target. It establishes generation 0 and is not a runtime exec transition.
+    bool suppress_initial_exec_ = true;
+
+    // TGID -> TID that entered execve/execveat.
+    //
+    // Needed because a non-leader thread that successfully execs may emerge
+    // from exec with a different TID after Linux de-threads the process.
+    std::unordered_map<pid_t, pid_t> pending_exec_tid_by_tgid_;    
 
     struct bpf_object* bpf_object_ = nullptr;
     struct bpf_program* bpf_program_enter_ = nullptr;

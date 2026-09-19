@@ -119,6 +119,7 @@ namespace runtimexray
         proc_obs.tid = pid_;
         proc_obs.tgid = pid_;
         proc_obs.process_instance_id = process_instance_id;
+        proc_obs.exec_generation = 0;
         proc_obs.start_time = start_time;
         proc_obs.end_time = end_time;
         proc_obs.program_name = runtimexray::get_process_name(pid_);
@@ -153,6 +154,7 @@ namespace runtimexray
                 data_obs.tid = pid_;
                 data_obs.tgid = pid_;
                 data_obs.process_instance_id = process_instance_id;
+                data_obs.exec_generation = 0;
                 data_obs.start_time = start_time;
                 data_obs.end_time = end_time;
                 size_t data_idx = append_observation(graph, std::move(data_obs));

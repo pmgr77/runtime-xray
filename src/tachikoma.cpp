@@ -214,6 +214,7 @@ namespace runtimexray {
                         PTRACE_O_TRACEFORK |
                         PTRACE_O_TRACEVFORK |
                         PTRACE_O_TRACECLONE |
+                        PTRACE_O_TRACEEXEC |
                         PTRACE_O_TRACEEXIT |
                         PTRACE_O_TRACESYSGOOD) == -1) {
                 throw std::runtime_error(std::string("PTRACE_SETOPTIONS failed: ") + std::strerror(errno));
@@ -252,12 +253,14 @@ namespace runtimexray {
           follow_forks_(other.follow_forks_),
           traced_pids_(std::move(other.traced_pids_)),
           in_syscall_state_(std::move(other.in_syscall_state_)),
+          pending_syscall_entry_(std::move(other.pending_syscall_entry_)),
           tgid_by_tid_(std::move(other.tgid_by_tid_)) {
         other.child_pid_ = -1;
         other.running_ = false;
         other.timed_out_ = false;
         other.traced_pids_.clear();
         other.in_syscall_state_.clear();
+        other.pending_syscall_entry_.clear();
         other.tgid_by_tid_.clear();
     }
 
@@ -279,6 +282,7 @@ namespace runtimexray {
             follow_forks_ = other.follow_forks_;
             traced_pids_ = std::move(other.traced_pids_);
             in_syscall_state_ = std::move(other.in_syscall_state_);
+            pending_syscall_entry_ = std::move(other.pending_syscall_entry_);
             tgid_by_tid_ = std::move(other.tgid_by_tid_);
 
             other.child_pid_ = -1;
@@ -286,6 +290,7 @@ namespace runtimexray {
             other.timed_out_ = false;
             other.traced_pids_.clear();
             other.in_syscall_state_.clear();
+            other.pending_syscall_entry_.clear();
             other.tgid_by_tid_.clear();
         }
         return *this;
@@ -388,6 +393,7 @@ namespace runtimexray {
                         PTRACE_O_TRACEFORK |
                         PTRACE_O_TRACEVFORK |
                         PTRACE_O_TRACECLONE |
+                        PTRACE_O_TRACEEXEC |
                         PTRACE_O_TRACEEXIT |
                         PTRACE_O_TRACESYSGOOD) == -1) {
                     // If setting options fails (e.g., child died), just continue.
@@ -519,13 +525,51 @@ namespace runtimexray {
         }
 
         if (entry_stop) {
+            ev.type = TraceEventType::Syscall;
             ev.is_entry = true;
+            ev.syscall_number = regs.syscall_number;
+            ev.arg0 = regs.args[0];
+            ev.arg1 = regs.args[1];
+            ev.arg2 = regs.args[2];
+            ev.arg3 = regs.args[3];
+            ev.arg4 = regs.args[4];
+            ev.arg5 = regs.args[5];
             ev.return_value = 0;
+            //
+            // Preserve the syscall identity for the corresponding exit.
+            //
+            pending_syscall_entry_[pid] = ev;
             cb(ev);
             in_syscall = true;
         } else {
-            // Syscall exit
+            //
+            // Start from the syscall entry snapshot.
+            //
+            auto pending_it = pending_syscall_entry_.find(pid);
+            if (pending_it != pending_syscall_entry_.end())
+            {
+                ev = pending_it->second;
+                pending_syscall_entry_.erase(pending_it);
+            } else {
+                //
+                // Defensive fallback. Normally every exit has a cached entry.
+                //
+                ev.type = TraceEventType::Syscall;
+                ev.pid = pid;
+                ev.tid = pid;
+                ev.tgid = resolve_tgid(pid);
+                ev.syscall_number = regs.syscall_number;
+                ev.arg0 = regs.args[0];
+                ev.arg1 = regs.args[1];
+                ev.arg2 = regs.args[2];
+                ev.arg3 = regs.args[3];
+                ev.arg4 = regs.args[4];
+                ev.arg5 = regs.args[5];
+            }
             ev.is_entry = false;
+            //
+            // Return value belongs to the exit stop and is therefore read now.
+            //
             ev.return_value = regs.return_value;
             cb(ev);
             in_syscall = false;
@@ -603,6 +647,7 @@ namespace runtimexray {
                 // Process terminated
                 traced_pids_.erase(pid);
                 in_syscall_state_.erase(pid);
+                pending_syscall_entry_.erase(pid);
                 // linux can eventually reuse a TID - so erase
                 tgid_by_tid_.erase(pid);
 
@@ -640,7 +685,42 @@ namespace runtimexray {
                 continue;
             }
 
-            // (2) PTRACE_EVENT_EXIT: the tracee is about to die. This is
+            // (2) PTRACE_EVENT_EXEC:
+            if (event == PTRACE_EVENT_EXEC) {
+                unsigned long former_tid_raw = 0;
+                if (ptrace( PTRACE_GETEVENTMSG, pid, nullptr, &former_tid_raw) == -1) {
+                    former_tid_raw = 0;
+                }
+                SyscallEvent ev;
+                ev.type = TraceEventType::Exec;
+                // `pid` is the post-exec task identity.
+                ev.pid = pid;
+                ev.tid = pid;
+                ev.tgid = resolve_tgid(pid);
+                if (former_tid_raw != 0 && static_cast<pid_t>(former_tid_raw) != pid) {
+                    ev.former_tid = static_cast<pid_t>(former_tid_raw);
+                }
+                Logger::log(
+                    LogLevel::Debug,
+                    "ptrace: PTRACE_EVENT_EXEC tid=" +
+                    std::to_string(ev.tid) +
+                    " tgid=" +
+                    std::to_string(ev.tgid) +
+                    " former_tid=" +
+                    std::to_string(ev.former_tid));
+                
+                cb(ev);
+
+                if (ptrace(PTRACE_SYSCALL, pid, nullptr, 0) == -1) {
+                    traced_pids_.erase(pid);
+                    in_syscall_state_.erase(pid);
+                    pending_syscall_entry_.erase(pid);
+                }
+
+                continue;
+            }
+
+            // (3) PTRACE_EVENT_EXIT: the tracee is about to die. This is
             //     informational, not a syscall stop, so we must not toggle
             //     in_syscall_state_. Just resume it and let the exit arrive
             //     naturally via waitpid(WIFEXITED).
@@ -648,11 +728,12 @@ namespace runtimexray {
                 if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
                     traced_pids_.erase(pid);
                     in_syscall_state_.erase(pid);
+                    pending_syscall_entry_.erase(pid);
                 }
                 continue;
             }
 
-            // (3) Unknown pid: this is the initial SIGSTOP of a child that
+            // (4) Unknown pid: this is the initial SIGSTOP of a child that
             //     handle_ptrace_event could not wait for synchronously. That
             //     stop only arrives after the parent was resumed from its
             //     clone event, so it reaches us here instead of there.
@@ -666,6 +747,7 @@ namespace runtimexray {
                         PTRACE_O_TRACEFORK |
                         PTRACE_O_TRACEVFORK |
                         PTRACE_O_TRACECLONE |
+                        PTRACE_O_TRACEEXEC |
                         PTRACE_O_TRACEEXIT |
                         PTRACE_O_TRACESYSGOOD) == -1) {
                     // Child died before we could set options; nothing to do.
@@ -681,40 +763,41 @@ namespace runtimexray {
                 if (ptrace(PTRACE_SYSCALL, pid, nullptr, 0) == -1) {
                     traced_pids_.erase(pid);
                     in_syscall_state_.erase(pid);
+                    pending_syscall_entry_.erase(pid);
                 }
                 continue;
             }
 
-            // (4) Post-exec SIGTRAP from execve(2): the kernel stops the tracee after
-            // a successful exec so the tracer can refresh its view of the process.
-            // Resume with signal 0 to suppress the trap. Forwarding SIGTRAP would
-            // terminate the tracee with the default disposition.
+            // (5) Plain SIGTRAP that was not classified as a ptrace event.
             //
-            // Distinguishable from a syscall stop because TRACESYSGOOD is on:
-            // syscall stops carry SIGTRAP|0x80 (133), this one carries plain
-            // SIGTRAP (5).
+            // Successful exec is handled explicitly above through
+            // PTRACE_EVENT_EXEC. Do not interpret a generic SIGTRAP as exec.
             if (sig == SIGTRAP) {
                 Logger::log(LogLevel::Debug,
-                    "ptrace: exec_sigtrap pid=" + std::to_string(pid));
+                    "ptrace: plain SIGTRAP pid=" +
+                    std::to_string(pid));
+
                 if (ptrace(PTRACE_SYSCALL, pid, nullptr, 0) == -1) {
                     traced_pids_.erase(pid);
                     in_syscall_state_.erase(pid);
+                    pending_syscall_entry_.erase(pid);
                 }
                 continue;
             }
 
-            // (5) Syscall stops with TRACESYSGOOD enabled carry SIGTRAP|0x80.
+            // (6) Syscall stops with TRACESYSGOOD enabled carry SIGTRAP|0x80.
             //     Anything else — a real signal, a breakpoint, an event we do not
             //     handle — is forwarded as-is and does not touch syscall state.
             if (sig != (SIGTRAP | 0x80)) {
                 if (ptrace(PTRACE_SYSCALL, pid, nullptr, sig) == -1) {
                     traced_pids_.erase(pid);
                     in_syscall_state_.erase(pid);
+                    pending_syscall_entry_.erase(pid);
                 }
                 continue;
             }
 
-            // (6) Real syscall stop for a known pid. handle_syscall_stop is
+            // (7) Real syscall stop for a known pid. handle_syscall_stop is
             //     where the kernel query (PTRACE_GET_SYSCALL_INFO) decides
             //     definitively whether this is an entry or an exit — the
             //     in_syscall_state_ flag is only a fallback.

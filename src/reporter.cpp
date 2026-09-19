@@ -253,6 +253,7 @@ namespace runtimexray {
                             << ", TID " << obs.tid 
                             << ", TGID " << obs.tgid
                             << ", instance " << obs.process_instance_id
+                            << ", exec " << obs.exec_generation
                             << ")";
                         // Also print program_name if present (e.g., after execve)
                         if (!obs.program_name.empty()) {

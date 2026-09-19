@@ -35,6 +35,11 @@
 
 namespace runtimexray {
 
+enum class TraceEventType {
+    Syscall,
+    Exec
+};
+
 /**
  * @brief A single syscall event observed by a tracing backend.
  *
@@ -49,12 +54,16 @@ namespace runtimexray {
  * ITraceBackend::read_string / read_memory when the captured field is empty.
  */
 struct SyscallEvent {
+    TraceEventType type = TraceEventType::Syscall;
     unsigned long long syscall_number = 0;  ///< System call number (x86_64)
     unsigned long long arg0 = 0, arg1 = 0, arg2 = 0, arg3 = 0, arg4 = 0, arg5 = 0; ///< Arguments (simplified)
     long long return_value = 0;         ///< Return value (valid on exit)
     pid_t pid = -1;                     ///< Current backend PID identity; legacy field
     pid_t tid = -1;                     ///< Linux task/thread ID
     pid_t tgid = -1;                    ///< Linux thread-group ID (process identity)
+    // For TraceEventType::Exec, the pre-exec TID when Linux changed
+    // thread identity during exec. -1 when not applicable/unknown.
+    pid_t former_tid = -1;
     bool is_entry = true;               ///< true = syscall entry, false = exit
 
     // ---- Bytes captured in-kernel, at tracepoint time --------------------
@@ -163,13 +172,19 @@ private:
     bool follow_forks_ = true;
     std::set<pid_t> traced_pids_;   // all processes currently traced
     std::map<pid_t, bool> in_syscall_state_;
+    // Syscall entry state by TID.
+    //
+    // At syscall exit, especially across exec(), register contents may no
+    // longer contain the original syscall number/arguments reliably.
+    // Preserve the entry event and complete it with the exit return value.
+    std::map<pid_t, SyscallEvent> pending_syscall_entry_;
     // Linux task ID -> thread-group ID.
     // Example:
     //   tid 1000 -> tgid 1000   main thread
     //   tid 1001 -> tgid 1000   worker thread
     //   tid 1002 -> tgid 1000   worker thread
     std::map<pid_t, pid_t> tgid_by_tid_;
-
+    
     pid_t resolve_tgid(pid_t tid);
 
     void handle_syscall_stop(const SyscallCallback& cb, bool& in_syscall);

@@ -59,6 +59,11 @@ struct Observation {
     // RuntimeXRay-local process lifetime identity.
     // 0 means "not assigned".
     uint64_t process_instance_id = 0;
+    // Executable-image generation inside one process instance.
+    //
+    // 0 = initial executable image observed by RuntimeXRay.
+    // Incremented after every successful exec.
+    uint64_t exec_generation = 0;
     std::string program_name;           // if known (from execve)
 
     // Event-specific fields

@@ -25,6 +25,8 @@
 #ifndef RUNTIMEXRAY_SYSCALL_NAMES_HPP
 #define RUNTIMEXRAY_SYSCALL_NAMES_HPP
 
+#include <sys/syscall.h>
+
 namespace runtimexray {
 
 // Return a human-readable name for a syscall number on x86_64.
@@ -44,6 +46,21 @@ inline const char* syscall_name(long num)
     (void)num;
     return "unknown";
 #endif    
+}
+
+inline constexpr bool is_execveat_syscall(long num) noexcept
+{
+#ifdef SYS_execveat
+    return num == SYS_execveat;
+#else
+    (void)num;
+    return false;
+#endif
+}
+
+inline constexpr bool is_exec_syscall(long num) noexcept
+{
+    return num == SYS_execve || is_execveat_syscall(num);
 }
 
 bool is_interesting_syscall(long num);
