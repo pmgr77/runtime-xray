@@ -359,8 +359,7 @@ namespace runtimexray {
             proc_obs.tgid = pid;
             proc_obs.start_time = std::chrono::steady_clock::now();
             proc_obs.program_name = runtimexray::get_process_name(pid);
-            proc_idx = graph.observations.size();
-            graph.observations.push_back(proc_obs);
+            proc_idx = append_observation(graph, std::move(proc_obs));
         }
 
         for (const auto& f : mem_findings) {
@@ -378,12 +377,13 @@ namespace runtimexray {
                 data_obs.tid = pid;
                 data_obs.tgid = pid;
                 data_obs.start_time = std::chrono::steady_clock::now();
-                size_t data_idx = graph.observations.size();
-                Logger::log(LogLevel::Debug,
+                size_t data_idx = append_observation(graph, std::move(data_obs));
+                Logger::log(
+                    LogLevel::Debug,
                     "add_data_nodes_to_graph: Adding data node with fingerprint " +
                     details->fingerprint +
-                    " for PID " + std::to_string(pid) + " at index " + std::to_string(data_idx));
-                graph.observations.push_back(data_obs);
+                    " for TGID " + std::to_string(pid) +
+                    " at index " + std::to_string(data_idx));
 
                 LineageEdge edge;
                 edge.from_index = proc_idx;

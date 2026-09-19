@@ -67,6 +67,10 @@ private:
     std::vector<Observation> observations_;
     std::vector<LineageEdge> edges_;
 
+    // Monotonic observation sequence.
+    // 0 is reserved for "unassigned".
+    uint64_t next_seq_ = 1;
+
     // Process node map: Linux TGID -> process observation index.
     // Threads in the same thread group share one process node.
     std::unordered_map<pid_t, size_t> process_node_map_;

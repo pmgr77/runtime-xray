@@ -114,8 +114,7 @@ namespace runtimexray
         proc_obs.start_time = start_time;
         proc_obs.end_time = end_time;
         proc_obs.program_name = runtimexray::get_process_name(pid_);
-        size_t proc_idx = graph.observations.size();
-        graph.observations.push_back(proc_obs);
+        size_t proc_idx = append_observation(graph, std::move(proc_obs));
         
         // Data nodes for memory secrets
         for (const auto& f: findings) {
@@ -147,8 +146,7 @@ namespace runtimexray
                 data_obs.tgid = pid_;
                 data_obs.start_time = start_time;
                 data_obs.end_time = end_time;
-                size_t data_idx = graph.observations.size();
-                graph.observations.push_back(data_obs);
+                size_t data_idx = append_observation(graph, std::move(data_obs));
 
                 // Edge: process -> data
                 LineageEdge edge;

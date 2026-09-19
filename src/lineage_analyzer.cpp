@@ -38,7 +38,9 @@ LineageAnalyzer::LineageAnalyzer() {
 }
 
 size_t LineageAnalyzer::add_observation(const Observation& obs) {
-    observations_.push_back(obs);
+    Observation stored = obs;
+    stored.seq = next_seq_++;
+    observations_.push_back(std::move(stored));
     return observations_.size() - 1;
 }
 
@@ -89,17 +91,17 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     // For process nodes, we'll use end_time when process exits
     size_t idx = add_observation(obs);
     process_node_map_[process_id] = idx;
-    return idx; 
+    return idx;
 }
 
 void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
-    Logger::log(LogLevel::Debug, 
+    Logger::log(LogLevel::Debug,
                 "on_syscall_event: pid=" + std::to_string(ev.pid) +
                 " tid=" + std::to_string(ev.tid) +
                 " tgid=" + std::to_string(ev.tgid) +
                 " syscall=" + std::to_string(ev.syscall_number) +
                 " entry=" + std::to_string(ev.is_entry));
-    
+
     pid_t pid = ev.pid;
     // We need to pass tid from SyscallEvent; we'll need to extend it
     pid_t tid = ev.tid;
@@ -145,7 +147,6 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         if (obs.syscall_name == "execve") {
             handle_execve_entry(ev);
         }
-        
     } else {
         // Syscall exit
         auto& pending_map = pending_entry_[pid];
@@ -287,14 +288,14 @@ void LineageAnalyzer::handle_fork_exit(
             std::to_string(child_tid) +
             " classification deferred to child TGID");
         return;
-    }    
+    }
 
     //
     // fork(), vfork(), or clone() without CLONE_THREAD:
     // the returned child TID is the leader of a new thread group.
     //
     const pid_t child_tgid = child_tid;
-    
+
     size_t child_idx = ensure_process(child_tgid, child_tid, child_tgid);
 
     // Causality edge: parent process -> child process
@@ -306,7 +307,7 @@ void LineageAnalyzer::handle_fork_exit(
             std::to_string(parent_tgid));
         return;
     }
-    
+
     add_edge(
         parent_it->second,
         child_idx,
@@ -371,7 +372,7 @@ void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
         }
     }
     // Note: Execve exit may not always be delivered; we rely on the entry handler for the program name.
-    // The exit handler is kept as a fallback for debugging.    
+    // The exit handler is kept as a fallback for debugging.
 }
 
 void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {

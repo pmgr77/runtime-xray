@@ -30,6 +30,7 @@
 #include <vector>
 #include <cstdint>
 #include <sys/types.h>
+#include <utility>
 
 namespace runtimexray {
 
@@ -41,6 +42,9 @@ enum class ObservationType {
 
 struct Observation {
     ObservationType type = ObservationType::Event;
+    // Stable ordering key within one RuntimeXRay analysis.
+    // 0 means "not assigned".
+    uint64_t seq = 0;
     std::chrono::steady_clock::time_point start_time;
     std::chrono::steady_clock::time_point end_time;
     std::chrono::microseconds duration{0}; // end_time - start_time (if applicable)
@@ -68,7 +72,7 @@ struct Observation {
     uintptr_t address = 0;
     size_t size = 0;
     std::string source;                 // e.g., "file:/etc/passwd", "env:API_KEY"
-    
+
     // Static-specific fields
     std::string static_field;
     std::string static_category;        // "hardening", "dangerous_api"
@@ -82,7 +86,7 @@ enum class RelationType {
     Causality,       // A caused B (fork → child process)
     DataFlow,        // A's data was used by B (read → buffer)
     Calls,           // Process A called syscall B
-    StaticAssociated // Static finding associated with a node    
+    StaticAssociated // Static finding associated with a node
 };
 
 struct LineageEdge {
@@ -98,6 +102,20 @@ struct LineageGraph {
     std::vector<Observation> observations;
     std::vector<LineageEdge> edges;
 };
+
+inline size_t append_observation(
+    LineageGraph& graph,
+    Observation obs)
+{
+    if (obs.seq == 0) {
+        obs.seq = graph.observations.empty()
+            ? 1
+            : graph.observations.back().seq + 1;
+    }
+
+    graph.observations.push_back(std::move(obs));
+    return graph.observations.size() - 1;
+}
 
 } // namespace runtimexray
 

@@ -237,7 +237,8 @@ namespace runtimexray {
             out << "  Observations (" << graph.observations.size() << "):\n";
             for (size_t i = 0; i < graph.observations.size(); ++i) {
                 const auto& obs = graph.observations[i];
-                out << "    [" << i << "] ";
+                out << "    [" << i << "] "
+                    << "seq=" << obs.seq << " ";
                 if (obs.type == ObservationType::Event) {
                     out << "Event: " << obs.syscall_name;
                     if (obs.syscall_name == "process") {
