@@ -52,8 +52,9 @@ struct SyscallEvent {
     unsigned long long syscall_number = 0;  ///< System call number (x86_64)
     unsigned long long arg0 = 0, arg1 = 0, arg2 = 0, arg3 = 0, arg4 = 0, arg5 = 0; ///< Arguments (simplified)
     long long return_value = 0;         ///< Return value (valid on exit)
-    pid_t pid = -1;                     ///< Process ID
-    pid_t tid = -1;                     ///< Thread ID
+    pid_t pid = -1;                     ///< Current backend PID identity; legacy field
+    pid_t tid = -1;                     ///< Linux task/thread ID
+    pid_t tgid = -1;                    ///< Linux thread-group ID (process identity)
     bool is_entry = true;               ///< true = syscall entry, false = exit
 
     // ---- Bytes captured in-kernel, at tracepoint time --------------------
@@ -162,11 +163,20 @@ private:
     bool follow_forks_ = true;
     std::set<pid_t> traced_pids_;   // all processes currently traced
     std::map<pid_t, bool> in_syscall_state_;
+    // Linux task ID -> thread-group ID.
+    // Example:
+    //   tid 1000 -> tgid 1000   main thread
+    //   tid 1001 -> tgid 1000   worker thread
+    //   tid 1002 -> tgid 1000   worker thread
+    std::map<pid_t, pid_t> tgid_by_tid_;
+
+    pid_t resolve_tgid(pid_t tid);
 
     void handle_syscall_stop(const SyscallCallback& cb, bool& in_syscall);
 
     // Helper to handle ptrace events (fork, clone, etc.)
     bool handle_ptrace_event(pid_t pid, int status, const SyscallCallback& cb);
+
     // Process a syscall stop for a specific PID
     void handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall);
 };

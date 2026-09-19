@@ -384,7 +384,11 @@ private:
         // --- end debug ---
 
         runtimexray::SyscallEvent event;
+        // The BPF program already defines:
+        //   pid = TGID
+        //   tid = Linux task/thread ID
         event.pid = static_cast<pid_t>(ev->pid);
+        event.tgid = static_cast<pid_t>(ev->pid);
         event.tid = static_cast<pid_t>(ev->tid);
         event.syscall_number = ev->syscall_id;
         event.is_entry = (ev->is_entry != 0);

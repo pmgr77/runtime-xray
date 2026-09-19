@@ -44,6 +44,7 @@
 #include <sys/uio.h>   // for process_vm_readv and struct iovec
 #include <set>
 #include <map>
+#include <fstream>
 
 #if defined(__aarch64__)
 #include <sys/uio.h>      // for struct iovec
@@ -250,12 +251,14 @@ namespace runtimexray {
           child_output_path_(std::move(other.child_output_path_)),
           follow_forks_(other.follow_forks_),
           traced_pids_(std::move(other.traced_pids_)),
-          in_syscall_state_(std::move(other.in_syscall_state_)) {
+          in_syscall_state_(std::move(other.in_syscall_state_)),
+          tgid_by_tid_(std::move(other.tgid_by_tid_)) {
         other.child_pid_ = -1;
         other.running_ = false;
         other.timed_out_ = false;
         other.traced_pids_.clear();
         other.in_syscall_state_.clear();
+        other.tgid_by_tid_.clear();
     }
 
     Tachikoma& Tachikoma::operator=(Tachikoma&& other) noexcept {
@@ -276,12 +279,14 @@ namespace runtimexray {
             follow_forks_ = other.follow_forks_;
             traced_pids_ = std::move(other.traced_pids_);
             in_syscall_state_ = std::move(other.in_syscall_state_);
+            tgid_by_tid_ = std::move(other.tgid_by_tid_);
 
             other.child_pid_ = -1;
             other.running_ = false;
             other.timed_out_ = false;
             other.traced_pids_.clear();
             other.in_syscall_state_.clear();
+            other.tgid_by_tid_.clear();
         }
         return *this;
     }
@@ -423,14 +428,65 @@ namespace runtimexray {
         return true;
     }    
 
+    pid_t Tachikoma::resolve_tgid(pid_t tid) {
+        // Avoid reading /proc on every syscall
+        auto cached = tgid_by_tid_.find(tid);
+        if (cached != tgid_by_tid_.end()) {
+            return cached->second;
+        }
+
+        const std::string status_path = 
+            "/proc/" + std::to_string(tid) + "/status";
+
+        std::ifstream status(status_path);
+        if (!status) {
+            // The task may have disappeared between waitpid() and this lookup.
+            // Do not cache the fallback: if we see the TID again, allow another
+            // attempt to resolve it correctly.
+            return tid;
+        }
+
+        std::string line;
+        while (std::getline(status, line)) {
+            if (line.rfind("Tgid:", 0) != 0) {
+                continue;
+            }
+
+            const auto first_digit =
+                line.find_first_of("0123456789");
+            if (first_digit == std::string::npos) {
+                break;
+            }
+
+            try {
+                const pid_t tgid =
+                    static_cast<pid_t>(std::stol(line.substr(first_digit)));
+                if (tgid > 0) {
+                    tgid_by_tid_[tid] = tgid;
+                    return tgid;
+                }
+            }
+            catch (...) {
+                // Fall through to the safe fallback below.
+            }
+            break;
+        }
+
+        return tid;
+    }
+
     // Process a syscall stop for a specific PID
     void Tachikoma::handle_syscall_stop(pid_t pid, const SyscallCallback& cb, bool& in_syscall) {
         // Read registers to get syscall number and ar
         Registers regs = read_registers(pid);
 
         SyscallEvent ev;
+        // waitpid()/ptrace identify a Linux task, i.e. a TID.
+        // Keep the existing pid semantics for now; the next phase will normalize
+        // consumers around pid/tid/tgid explicitly.
         ev.pid = pid;
         ev.tid = pid; // ptrace traces individual threads
+        ev.tgid = resolve_tgid(pid);
         ev.syscall_number = regs.syscall_number;
         ev.arg0 = regs.args[0];
         ev.arg1 = regs.args[1];
@@ -547,6 +603,9 @@ namespace runtimexray {
                 // Process terminated
                 traced_pids_.erase(pid);
                 in_syscall_state_.erase(pid);
+                // linux can eventually reuse a TID - so erase
+                tgid_by_tid_.erase(pid);
+
                 if (traced_pids_.empty()) {
                     running_ = false;
                     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
