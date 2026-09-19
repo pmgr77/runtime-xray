@@ -332,35 +332,80 @@ namespace runtimexray {
         const FindingList& mem_findings,
         pid_t pid)
     {
-        Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: PID=" + std::to_string(pid));
-        // Find the process node for this PID
         size_t proc_idx = SIZE_MAX;
-        for (size_t i = 0; i < graph.observations.size(); ++i) {
+
+        // Search newest -> oldest because Linux can reuse a PID/TGID.
+        // The latest matching process node represents the most recent
+        // RuntimeXRay process instance for this numeric Linux identity.
+        for (size_t i = graph.observations.size(); i-- > 0;)
+        {
             const auto& obs = graph.observations[i];
             if (obs.type == ObservationType::Event &&
                 obs.syscall_name == "process" &&
-                obs.pid == pid)
+                (obs.pid == pid || obs.tgid == pid))
             {
                 proc_idx = i;
                 break;
             }
         }
 
+        // Second: pid may actually be a worker TID.
+        // Resolve TID -> process_instance_id -> process node.
+        if (proc_idx == SIZE_MAX) {
+            uint64_t instance_id = 0;
+            for (auto it = graph.observations.rbegin(); it != graph.observations.rend(); ++it) {
+                if (it->tid == pid && it->process_instance_id != 0) {
+                    instance_id = it->process_instance_id;
+                    break;
+                }
+            }
+
+            // Resolve that process instance back to its process node.
+            if (instance_id != 0) {
+                for (size_t i = graph.observations.size(); i-- > 0;) {
+                    const auto& obs = graph.observations[i];
+                    if (obs.type == ObservationType::Event &&
+                        obs.syscall_name == "process" &&
+                        obs.process_instance_id == instance_id) {
+                        proc_idx = i;
+                        break;
+                    }
+                }
+            }
+        }
+
         Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: proc_idx=" + std::to_string(proc_idx));
 
-        // If no process node exists, create one
+        // Last resort: process wasn't known to the trace.
         if (proc_idx == SIZE_MAX) {
-            Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: Creating new process node for PID " + std::to_string(pid));
+            //
+            // This process was not present in the existing lineage graph.
+            // Allocate a new RuntimeXRay process instance after all instances
+            // already present in the graph.
+            //
+            uint64_t next_instance_id = 1;
+
+            for (const auto& obs : graph.observations) {
+                if (obs.process_instance_id >= next_instance_id) {
+                    next_instance_id = obs.process_instance_id + 1;
+                }
+            }
+
             Observation proc_obs;
             proc_obs.type = ObservationType::Event;
             proc_obs.syscall_name = "process";
             proc_obs.pid = pid;
             proc_obs.tid = pid;
             proc_obs.tgid = pid;
+            proc_obs.process_instance_id = next_instance_id;
             proc_obs.start_time = std::chrono::steady_clock::now();
             proc_obs.program_name = runtimexray::get_process_name(pid);
             proc_idx = append_observation(graph, std::move(proc_obs));
         }
+
+        const Observation& process_obs = graph.observations[proc_idx];
+        const uint64_t process_instance_id = process_obs.process_instance_id;
+        const pid_t process_tgid = (process_obs.tgid > 0) ? process_obs.tgid : process_obs.pid;
 
         for (const auto& f : mem_findings) {
             if (auto* details = std::get_if<MemorySecretFindingDetails>(&f.details)) {
@@ -373,17 +418,31 @@ namespace runtimexray {
                 data_obs.data_snippet = details->raw_snippet;
                 data_obs.address = details->address;
                 data_obs.size = details->raw_secret.size();
+                //
+                // Transitional identity:
+                //
+                // pid/tid are kept as before so we don't break current correlation
+                // code in this commit.
+                //
+                // TGID and process_instance_id now provide the correct process-level
+                // identity.
+                //
                 data_obs.pid = pid;
                 data_obs.tid = pid;
-                data_obs.tgid = pid;
+                data_obs.tgid = process_tgid;
+                data_obs.process_instance_id = process_instance_id;
                 data_obs.start_time = std::chrono::steady_clock::now();
                 size_t data_idx = append_observation(graph, std::move(data_obs));
                 Logger::log(
                     LogLevel::Debug,
                     "add_data_nodes_to_graph: Adding data node with fingerprint " +
                     details->fingerprint +
-                    " for TGID " + std::to_string(pid) +
-                    " at index " + std::to_string(data_idx));
+                    " for TGID " +
+                    std::to_string(process_tgid) +
+                    " process_instance=" +
+                    std::to_string(process_instance_id) +
+                    " at index " +
+                    std::to_string(data_idx));                
 
                 LineageEdge edge;
                 edge.from_index = proc_idx;

@@ -62,6 +62,21 @@ void LineageAnalyzer::add_edge(size_t from, size_t to,
     edges_.push_back(edge);
 }
 
+std::optional<size_t>
+LineageAnalyzer::find_active_process_node(pid_t tgid) const {
+    auto active_it = active_process_by_tgid_.find(tgid);
+    if (active_it == active_process_by_tgid_.end()) {
+        return std::nullopt;
+    }
+
+    auto node_it = process_node_by_instance_.find(active_it->second);
+    if (node_it == process_node_by_instance_.end()) {
+        return std::nullopt;
+    }
+
+    return node_it->second;
+}
+
 size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
                                               const std::string& program) {
 
@@ -70,14 +85,30 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     // the process whose address space/resources the thread belongs to.
     const pid_t process_id = (tgid > 0) ? tgid : pid;
 
-    auto it = process_node_map_.find(process_id);
-    if (it != process_node_map_.end()) {
-        // Optionally update program name if it was empty
-        if (!program.empty() && observations_[it->second].program_name.empty()) {
-            observations_[it->second].program_name = program;
+    //
+    // Is this TGID already an active RuntimeXRay process instance?
+    //
+    if (auto existing = find_active_process_node(process_id)) {
+        Observation& process_obs = observations_[*existing];
+
+        if (!program.empty() &&
+            process_obs.program_name.empty()) {
+            process_obs.program_name = program;
         }
-        return it->second;
+
+        // Every syscall tells us that this TID is currently part
+        // of this process instance.
+        active_tids_by_instance_[process_obs.process_instance_id].insert(tid);
+
+        return *existing;
     }
+
+    //
+    // New lifetime of this TGID.
+    //
+    // Linux may reuse TGIDs, but RuntimeXRay never reuses instance IDs.
+    //
+    const uint64_t instance_id = next_process_instance_id_++;
 
     Observation obs;
     // We'll use Event for process nodes too, but distinguish by syscall_name == "process"
@@ -85,12 +116,24 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     obs.pid = process_id;
     obs.tid = tid;
     obs.tgid = process_id;
+    obs.process_instance_id = instance_id;
     obs.program_name = program;
     obs.syscall_name = "process"; // marker
     obs.is_entry = true;
     // For process nodes, we'll use end_time when process exits
     size_t idx = add_observation(obs);
-    process_node_map_[process_id] = idx;
+
+    active_process_by_tgid_[process_id] = instance_id;
+    process_node_by_instance_[instance_id] = idx;
+    active_tids_by_instance_[instance_id].insert(tid);
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: created process instance=" +
+        std::to_string(instance_id) +
+        " tgid=" +
+        std::to_string(process_id));
+
     return idx;
 }
 
@@ -109,6 +152,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
 
     // Ensure process node exists
     size_t proc_idx = ensure_process(pid, tid, tgid);
+    const uint64_t process_instance_id = observations_[proc_idx].process_instance_id;
 
     if (ev.is_entry) {
         // Create syscall entry observation
@@ -117,6 +161,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         obs.pid = pid;
         obs.tid = tid;
         obs.tgid = tgid;
+        obs.process_instance_id = process_instance_id;
         obs.start_time = std::chrono::steady_clock::now();
         obs.syscall_name = syscall_name(static_cast<long>(ev.syscall_number));
         obs.arg0 = ev.arg0;
@@ -146,6 +191,14 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
         // If this is an execve entry, capture the program name immediately.
         if (obs.syscall_name == "execve") {
             handle_execve_entry(ev);
+        }
+
+        if (obs.syscall_name == "exit") {
+            handle_thread_exit(ev);
+        }
+
+        if (obs.syscall_name == "exit_group") {
+            handle_exit_group(ev);
         }
     } else {
         // Syscall exit
@@ -188,8 +241,6 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
                 handle_fork_exit(ev, fork_syscall, clone_flags);
             } else if (strcmp(name, "execve") == 0) {
                 handle_execve_exit(ev);
-            } else if (strcmp(name, "exit_group") == 0 || strcmp(name, "exit") == 0) {
-                handle_exit_group(ev);
             }
         }
     }
@@ -298,18 +349,20 @@ void LineageAnalyzer::handle_fork_exit(
 
     size_t child_idx = ensure_process(child_tgid, child_tid, child_tgid);
 
-    // Causality edge: parent process -> child process
-    auto parent_it = process_node_map_.find(parent_tgid);
-    if (parent_it == process_node_map_.end()) {
+    
+    auto parent_idx = find_active_process_node(parent_tgid);
+    if (!parent_idx.has_value()) {
         Logger::log(
             LogLevel::Debug,
-            "lineage: parent process node missing for tgid=" +
+            "lineage: active parent process node missing for tgid=" +
             std::to_string(parent_tgid));
+
         return;
     }
 
+    // Causality edge: parent process -> child process
     add_edge(
-        parent_it->second,
+        *parent_idx,
         child_idx,
         RelationType::Causality,
         syscall_name + " created child process");
@@ -328,14 +381,15 @@ void LineageAnalyzer::handle_execve_entry(const SyscallEvent& ev) {
     }
     Logger::log(LogLevel::Debug, "handle_execve_entry: path = " + path);
     const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
-    auto it = process_node_map_.find(process_id);
-    if (it != process_node_map_.end()) {
-        observations_[it->second].program_name = path;
+    auto process_idx = find_active_process_node(process_id);
+    if (process_idx.has_value()) {
+        observations_[*process_idx].program_name = path;
         Logger::log(LogLevel::Debug,
             "Updated process node with program name (from execve entry): " + path);
     } else {
         Logger::log(LogLevel::Debug,
-            "Process node not found for TGID " + std::to_string(process_id) +
+            "Active process node not found for TGID " +
+            std::to_string(process_id) +
             " (tid=" + std::to_string(ev.tid) + ")");
     }
 }
@@ -355,14 +409,18 @@ void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
     uint64_t path_addr = ev.arg0;
     std::string path = backend_->read_string(ev.tid, path_addr);
     if (path.empty()) {
-        Logger::log(LogLevel::Debug, "handle_execve_exit: read_string returned empty for address 0x" + std::to_string(path_addr));
+        Logger::log(LogLevel::Debug,
+            "handle_execve_exit: read_string returned empty for address 0x" +
+            std::to_string(path_addr));
     } else {
-        Logger::log(LogLevel::Debug, "handle_execve_exit: path = " + path);
+        Logger::log(LogLevel::Debug,
+            "handle_execve_exit: path = " +
+            path);
         // Update the process node's program name
         const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
-        auto it = process_node_map_.find(process_id);
-        if (it != process_node_map_.end()) {
-            observations_[it->second].program_name = path;
+        auto process_idx = find_active_process_node(process_id);
+        if (process_idx.has_value()) {
+            observations_[*process_idx].program_name = path;
             Logger::log(LogLevel::Debug,
                 "Updated process node with program name (from execve exit): " + path);
         } else {
@@ -371,17 +429,87 @@ void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
                 " (tid=" + std::to_string(ev.tid) + ")");
         }
     }
-    // Note: Execve exit may not always be delivered; we rely on the entry handler for the program name.
-    // The exit handler is kept as a fallback for debugging.
+}
+
+void LineageAnalyzer::handle_thread_exit(const SyscallEvent& ev)
+{
+    const pid_t tgid = (ev.tgid > 0) ? ev.tgid : ev.pid;
+
+    auto process_idx = find_active_process_node(tgid);
+    if (!process_idx.has_value()) {
+        return;
+    }
+
+    Observation& process_obs = observations_[*process_idx];
+    const uint64_t instance_id = process_obs.process_instance_id;
+
+    auto tids_it = active_tids_by_instance_.find(instance_id);
+    if (tids_it == active_tids_by_instance_.end()) {
+        return;
+    }
+
+    // exit() terminates only the calling thread.
+    tids_it->second.erase(ev.tid);
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: thread tid=" +
+        std::to_string(ev.tid) +
+        " exited process_instance=" +
+        std::to_string(instance_id) +
+        " remaining_threads=" +
+        std::to_string(tids_it->second.size()));
+
+    //
+    // Other threads still belong to this process.
+    //
+    if (!tids_it->second.empty()) {
+        return;
+    }
+
+    //
+    // This was the last observed thread.
+    //
+    process_obs.end_time = std::chrono::steady_clock::now();
+
+    active_process_by_tgid_.erase(tgid);
+    active_tids_by_instance_.erase(instance_id);
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: process instance=" +
+        std::to_string(instance_id) +
+        " tgid=" +
+        std::to_string(tgid) +
+        " ended after last thread exit");
 }
 
 void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {
-    const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
-    auto it = process_node_map_.find(process_id);
-    if (it != process_node_map_.end()) {
-        observations_[it->second].end_time = std::chrono::steady_clock::now();
-        // Duration is not set for process nodes; we could compute it if we had start.
+    const pid_t tgid = (ev.tgid > 0) ? ev.tgid : ev.pid;
+
+    auto process_idx = find_active_process_node(tgid);
+    if (!process_idx.has_value()) {
+        return;
     }
+
+    Observation& process_obs = observations_[*process_idx];
+    process_obs.end_time = std::chrono::steady_clock::now();
+
+    const uint64_t instance_id = process_obs.process_instance_id;
+
+    Logger::log(LogLevel::Debug,
+        "lineage: process instance=" +
+        std::to_string(instance_id) +
+        " tgid=" + std::to_string(tgid) + " ended via exit_group");
+
+    //
+    // This TGID is no longer active.
+    //
+    // If Linux later reuses the same TGID, ensure_process() will allocate
+    // a completely new RuntimeXRay process_instance_id.
+    //
+    active_process_by_tgid_.erase(tgid);
+    active_tids_by_instance_.erase(instance_id);
 }
 
 LineageGraph LineageAnalyzer::produce_graph() const {

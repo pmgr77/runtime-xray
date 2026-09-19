@@ -242,12 +242,18 @@ namespace runtimexray {
                 if (obs.type == ObservationType::Event) {
                     out << "Event: " << obs.syscall_name;
                     if (obs.syscall_name == "process") {
-                        out << " (PID " << obs.pid << ")";
+                        out << " (PID " << obs.pid
+                            << ", instance " << obs.process_instance_id
+                            << ")";
                         if (!obs.program_name.empty()) {
                             out << ", Program: " << obs.program_name;
                         }
                     } else {
-                        out << " (PID " << obs.pid << ", TID " << obs.tid << ")";
+                        out << " (PID " << obs.pid 
+                            << ", TID " << obs.tid 
+                            << ", TGID " << obs.tgid
+                            << ", instance " << obs.process_instance_id
+                            << ")";
                         // Also print program_name if present (e.g., after execve)
                         if (!obs.program_name.empty()) {
                             out << " program: " << obs.program_name;

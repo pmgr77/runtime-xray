@@ -21,7 +21,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
- 
+
 #ifndef LINEAGE_ANALYZER_HPP
 #define LINEAGE_ANALYZER_HPP
 
@@ -29,7 +29,9 @@
 #include "tachikoma.hpp"
 #include "itrace_backend.hpp"
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#include <optional>
 
 namespace runtimexray {
 
@@ -71,9 +73,26 @@ private:
     // 0 is reserved for "unassigned".
     uint64_t next_seq_ = 1;
 
-    // Process node map: Linux TGID -> process observation index.
-    // Threads in the same thread group share one process node.
-    std::unordered_map<pid_t, size_t> process_node_map_;
+    // RuntimeXRay process instance allocator.
+    // 0 is reserved for "unassigned".
+    uint64_t next_process_instance_id_ = 1;
+
+    // Active Linux TGID -> RuntimeXRay process instance.
+    //
+    // A TGID may be reused by Linux after a process exits, so TGID itself
+    // must not be the permanent identity of a process in the lineage graph.
+    std::unordered_map<pid_t, uint64_t> active_process_by_tgid_;
+
+    // RuntimeXRay process instance -> process observation index.
+    std::unordered_map<uint64_t, size_t> process_node_by_instance_;
+
+    // RuntimeXRay process instance -> currently observed live TIDs.
+    //
+    // This lets us distinguish:
+    //   one worker thread calling exit()
+    // from:
+    //   the last thread in a process calling exit().
+    std::unordered_map<uint64_t, std::unordered_set<pid_t>> active_tids_by_instance_;
 
     // For chronological edges: (PID, TID) -> index of last syscall observation
     std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> thread_last_syscall_;
@@ -84,6 +103,9 @@ private:
     // Index of the observation most recently updated by a syscall exit, keyed
     // by (pid, tid). Used by set_last_exit_fingerprint().
     std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> last_exit_index_;
+
+    // Helper:
+    std::optional<size_t> find_active_process_node(pid_t tgid) const;
 
     // Helper: get or create process node
     size_t ensure_process(pid_t pid, pid_t tid, pid_t tgid, const std::string& program = "");
@@ -96,9 +118,12 @@ private:
 
     // Specific handlers
     void handle_fork_exit(const SyscallEvent& ev, std::string syscall_name, uint64_t clone_flags);
+
     void handle_execve_entry(const SyscallEvent& ev);
     void handle_execve_exit(const SyscallEvent& ev);
-    void handle_exit_group(const SyscallEvent& ev);    
+
+    void handle_thread_exit(const SyscallEvent& ev);
+    void handle_exit_group(const SyscallEvent& ev);
 };
 
 } // namespace runtimexray

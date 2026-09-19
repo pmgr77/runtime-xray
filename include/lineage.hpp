@@ -56,6 +56,9 @@ struct Observation {
     pid_t pid = -1;
     pid_t tid = -1;
     pid_t tgid = -1;
+    // RuntimeXRay-local process lifetime identity.
+    // 0 means "not assigned".
+    uint64_t process_instance_id = 0;
     std::string program_name;           // if known (from execve)
 
     // Event-specific fields

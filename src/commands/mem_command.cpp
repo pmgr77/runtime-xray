@@ -104,6 +104,13 @@ namespace runtimexray
         LineageGraph graph;
         graph.summary = "Memory scan for PID " + std::to_string(pid_) + " completed";
 
+        // Standalone `mem` builds a fresh graph containing one target process,
+        // so process instance 1 is sufficient and unambiguous.
+        //
+        // RuntimeXRay process_instance_id is local to one analysis report;
+        // it is not a Linux PID and does not need to be globally unique.
+        const uint64_t process_instance_id = 1;
+
         // Process node
         Observation proc_obs;
         proc_obs.type = ObservationType::Event;
@@ -111,6 +118,7 @@ namespace runtimexray
         proc_obs.pid = pid_;
         proc_obs.tid = pid_;
         proc_obs.tgid = pid_;
+        proc_obs.process_instance_id = process_instance_id;
         proc_obs.start_time = start_time;
         proc_obs.end_time = end_time;
         proc_obs.program_name = runtimexray::get_process_name(pid_);
@@ -144,6 +152,7 @@ namespace runtimexray
                 data_obs.pid = pid_;
                 data_obs.tid = pid_;
                 data_obs.tgid = pid_;
+                data_obs.process_instance_id = process_instance_id;
                 data_obs.start_time = start_time;
                 data_obs.end_time = end_time;
                 size_t data_idx = append_observation(graph, std::move(data_obs));
