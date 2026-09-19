@@ -27,6 +27,7 @@
 #include "logger.hpp"
 #include <cstring>
 #include <chrono>
+#include <linux/sched.h>
 
 namespace runtimexray {
 
@@ -61,7 +62,13 @@ void LineageAnalyzer::add_edge(size_t from, size_t to,
 
 size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
                                               const std::string& program) {
-    auto it = process_node_map_.find(pid);
+
+    // Process nodes represent Linux thread groups, not individual tasks.
+    // ptrace's pid may actually be a worker TID, while tgid identifies
+    // the process whose address space/resources the thread belongs to.
+    const pid_t process_id = (tgid > 0) ? tgid : pid;
+
+    auto it = process_node_map_.find(process_id);
     if (it != process_node_map_.end()) {
         // Optionally update program name if it was empty
         if (!program.empty() && observations_[it->second].program_name.empty()) {
@@ -73,15 +80,15 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     Observation obs;
     // We'll use Event for process nodes too, but distinguish by syscall_name == "process"
     obs.type = ObservationType::Event;
-    obs.pid = pid;
+    obs.pid = process_id;
     obs.tid = tid;
-    obs.tgid = tgid;
+    obs.tgid = process_id;
     obs.program_name = program;
     obs.syscall_name = "process"; // marker
     obs.is_entry = true;
     // For process nodes, we'll use end_time when process exits
     size_t idx = add_observation(obs);
-    process_node_map_[pid] = idx;
+    process_node_map_[process_id] = idx;
     return idx; 
 }
 
@@ -167,9 +174,17 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev) {
             const char* name = syscall_name(static_cast<long>(ev.syscall_number));
             if (strcmp(name, "fork") == 0 ||
                 strcmp(name, "vfork") == 0 ||
-                strcmp(name, "clone") == 0) 
+                strcmp(name, "clone") == 0 ||
+                strcmp(name, "clone3") == 0)
             {
-                handle_fork_exit(ev);
+                // Copy the information we need before calling the handler.
+                // handle_fork_exit() may create a process node, which can grow
+                // observations_ and invalidate references into the vector.
+                const std::string fork_syscall =
+                    observations_[sys_idx].syscall_name;
+                const uint64_t clone_flags =
+                    observations_[sys_idx].arg0;
+                handle_fork_exit(ev, fork_syscall, clone_flags);
             } else if (strcmp(name, "execve") == 0) {
                 handle_execve_exit(ev);
             } else if (strcmp(name, "exit_group") == 0 || strcmp(name, "exit") == 0) {
@@ -218,19 +233,85 @@ void LineageAnalyzer::set_last_exit_fingerprint(pid_t pid, pid_t tid,
     }
 }
 
-void LineageAnalyzer::handle_fork_exit(const SyscallEvent& ev) {
-    pid_t child_pid = static_cast<pid_t>(ev.return_value);
-    if (child_pid <= 0) return; // fork failed
+void LineageAnalyzer::handle_fork_exit(
+    const SyscallEvent& ev,
+    std::string syscall_name,
+    uint64_t clone_flags) {
 
-    // Create child process node
-    pid_t parent_pid = ev.pid;
-    // Correct for fork/vfork and process-creating clone.
-    // CLONE_THREAD requires separate handling; fixed in the next identity phase.
-    size_t child_idx = ensure_process(child_pid, child_pid, child_pid); // tid = pid for process
+    const pid_t child_tid = static_cast<pid_t>(ev.return_value);
+    if (child_tid <= 0) {
+        return; // fork failed
+    }
+
+    const pid_t parent_tgid =
+        (ev.tgid > 0) ? ev.tgid : ev.pid;
+
+    //
+    // clone(flags, ...)
+    //
+    // Unlike clone3(), clone() passes the flags directly as arg0,
+    // so we can reliably identify CLONE_THREAD here.
+    //
+    if (syscall_name == "clone") {
+        if ((clone_flags & CLONE_THREAD) != 0) {
+            Logger::log(
+                LogLevel::Debug,
+                "lineage: clone created thread tid=" +
+                std::to_string(child_tid) +
+                " in tgid=" +
+                std::to_string(parent_tgid));
+            return;
+        }
+    }
+
+    //
+    // clone3(&clone_args, sizeof(clone_args))
+    //
+    // arg0 is a userspace pointer to struct clone_args, NOT the flags.
+    // We intentionally do not classify this child here yet.
+    //
+    // The child's own syscall events already carry its authoritative
+    // TGID, so ensure_process() will still group threads correctly:
+    //
+    //     child TGID == parent TGID  -> same process node
+    //     child TGID != parent TGID  -> separate process node
+    //
+    // What is temporarily missing is only the parent->child causality
+    // edge for process-creating clone3(). We will fix that when we add
+    // explicit process-instance/lifecycle tracking.
+    //
+    if (syscall_name == "clone3") {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: clone3 child tid=" +
+            std::to_string(child_tid) +
+            " classification deferred to child TGID");
+        return;
+    }    
+
+    //
+    // fork(), vfork(), or clone() without CLONE_THREAD:
+    // the returned child TID is the leader of a new thread group.
+    //
+    const pid_t child_tgid = child_tid;
+    
+    size_t child_idx = ensure_process(child_tgid, child_tid, child_tgid);
 
     // Causality edge: parent process -> child process
-    size_t parent_idx = process_node_map_[parent_pid];
-    add_edge(parent_idx, child_idx, RelationType::Causality, "fork created child");
+    auto parent_it = process_node_map_.find(parent_tgid);
+    if (parent_it == process_node_map_.end()) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: parent process node missing for tgid=" +
+            std::to_string(parent_tgid));
+        return;
+    }
+    
+    add_edge(
+        parent_it->second,
+        child_idx,
+        RelationType::Causality,
+        syscall_name + " created child process");
 }
 
 void LineageAnalyzer::handle_execve_entry(const SyscallEvent& ev) {
@@ -239,18 +320,22 @@ void LineageAnalyzer::handle_execve_entry(const SyscallEvent& ev) {
         return;
     }
     uint64_t path_addr = ev.arg0;
-    std::string path = backend_->read_string(path_addr);
+    std::string path = backend_->read_string(ev.tid, path_addr);
     if (path.empty()) {
         Logger::log(LogLevel::Debug, "handle_execve_entry: read_string returned empty for address 0x" + std::to_string(path_addr));
         return;
     }
     Logger::log(LogLevel::Debug, "handle_execve_entry: path = " + path);
-    auto it = process_node_map_.find(ev.pid);
+    const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
+    auto it = process_node_map_.find(process_id);
     if (it != process_node_map_.end()) {
         observations_[it->second].program_name = path;
-        Logger::log(LogLevel::Debug, "Updated process node with program name (from execve entry): " + path);
+        Logger::log(LogLevel::Debug,
+            "Updated process node with program name (from execve entry): " + path);
     } else {
-        Logger::log(LogLevel::Debug, "Process node not found for PID " + std::to_string(ev.pid));
+        Logger::log(LogLevel::Debug,
+            "Process node not found for TGID " + std::to_string(process_id) +
+            " (tid=" + std::to_string(ev.tid) + ")");
     }
 }
 
@@ -267,18 +352,22 @@ void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
 
     // arg0 is the path pointer
     uint64_t path_addr = ev.arg0;
-    std::string path = backend_->read_string(path_addr);
+    std::string path = backend_->read_string(ev.tid, path_addr);
     if (path.empty()) {
         Logger::log(LogLevel::Debug, "handle_execve_exit: read_string returned empty for address 0x" + std::to_string(path_addr));
     } else {
         Logger::log(LogLevel::Debug, "handle_execve_exit: path = " + path);
         // Update the process node's program name
-        auto it = process_node_map_.find(ev.pid);
+        const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
+        auto it = process_node_map_.find(process_id);
         if (it != process_node_map_.end()) {
             observations_[it->second].program_name = path;
-            Logger::log(LogLevel::Debug, "Updated process node with program name");
+            Logger::log(LogLevel::Debug,
+                "Updated process node with program name (from execve exit): " + path);
         } else {
-            Logger::log(LogLevel::Debug, "Process node not found for PID " + std::to_string(ev.pid));
+            Logger::log(LogLevel::Debug,
+                "Process node not found for TGID " + std::to_string(process_id) +
+                " (tid=" + std::to_string(ev.tid) + ")");
         }
     }
     // Note: Execve exit may not always be delivered; we rely on the entry handler for the program name.
@@ -286,8 +375,8 @@ void LineageAnalyzer::handle_execve_exit(const SyscallEvent& ev) {
 }
 
 void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {
-    pid_t pid = ev.pid;
-    auto it = process_node_map_.find(pid);
+    const pid_t process_id = (ev.tgid > 0) ? ev.tgid : ev.pid;
+    auto it = process_node_map_.find(process_id);
     if (it != process_node_map_.end()) {
         observations_[it->second].end_time = std::chrono::steady_clock::now();
         // Duration is not set for process nodes; we could compute it if we had start.

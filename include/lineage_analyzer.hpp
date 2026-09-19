@@ -67,9 +67,10 @@ private:
     std::vector<Observation> observations_;
     std::vector<LineageEdge> edges_;
 
-    // Process node map: PID -> index in observations_
+    // Process node map: Linux TGID -> process observation index.
+    // Threads in the same thread group share one process node.
     std::unordered_map<pid_t, size_t> process_node_map_;
-    
+
     // For chronological edges: (PID, TID) -> index of last syscall observation
     std::unordered_map<pid_t, std::unordered_map<pid_t, size_t>> thread_last_syscall_;
 
@@ -90,7 +91,7 @@ private:
     void add_edge(size_t from, size_t to, RelationType rel, const std::string& details = "");
 
     // Specific handlers
-    void handle_fork_exit(const SyscallEvent& ev);
+    void handle_fork_exit(const SyscallEvent& ev, std::string syscall_name, uint64_t clone_flags);
     void handle_execve_entry(const SyscallEvent& ev);
     void handle_execve_exit(const SyscallEvent& ev);
     void handle_exit_group(const SyscallEvent& ev);    
