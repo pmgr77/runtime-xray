@@ -327,11 +327,22 @@ namespace {
 namespace runtimexray {
 
     // Helper to add data nodes from memory scan to lineage graph
+    // Memory Finding
+    //  |
+    //  └── evidence_observation_seqs += Data Observation seq
+    //
     void add_data_nodes_to_graph(
         LineageGraph& graph,
-        const FindingList& mem_findings,
+        Finding& finding,
         pid_t pid)
     {
+        // Does this Finding type require a new Data observation?
+        auto* details = std::get_if<MemorySecretFindingDetails>(&finding.details);
+        if (!details) {
+            return;
+        }
+
+        // 1. Resolve process node.
         size_t proc_idx = SIZE_MAX;
 
         // Search newest -> oldest because Linux can reuse a PID/TGID.
@@ -403,6 +414,7 @@ namespace runtimexray {
             proc_idx = append_observation(graph, std::move(proc_obs));
         }
 
+        // 2. Resolve identity inherited by the new Data observation.
         const Observation& process_obs = graph.observations[proc_idx];
         const uint64_t process_instance_id = process_obs.process_instance_id;
         uint64_t exec_generation = 0;
@@ -415,52 +427,58 @@ namespace runtimexray {
         }
         const pid_t process_tgid = (process_obs.tgid > 0) ? process_obs.tgid : process_obs.pid;
 
-        for (const auto& f : mem_findings) {
-            if (auto* details = std::get_if<MemorySecretFindingDetails>(&f.details)) {
-                Observation data_obs;
-                data_obs.type = ObservationType::Data;
-                data_obs.data_type = details->location.empty() ? details->secret_type : details->location;
-                data_obs.secret_type = details->secret_type;
-                data_obs.fingerprint = details->fingerprint;
-                // For graph, we can redact snippet or keep raw (reporter will handle)
-                data_obs.data_snippet = details->raw_snippet;
-                data_obs.address = details->address;
-                data_obs.size = details->raw_secret.size();
-                //
-                // Transitional identity:
-                //
-                // pid/tid are kept as before so we don't break current correlation
-                // code in this commit.
-                //
-                // TGID and process_instance_id now provide the correct process-level
-                // identity.
-                //
-                data_obs.pid = pid;
-                data_obs.tid = pid;
-                data_obs.tgid = process_tgid;
-                data_obs.process_instance_id = process_instance_id;
-                data_obs.exec_generation = exec_generation;
-                data_obs.start_time = std::chrono::steady_clock::now();
-                size_t data_idx = append_observation(graph, std::move(data_obs));
-                Logger::log(
-                    LogLevel::Debug,
-                    "add_data_nodes_to_graph: Adding data node with fingerprint " +
-                    details->fingerprint +
-                    " for TGID " +
-                    std::to_string(process_tgid) +
-                    " process_instance=" +
-                    std::to_string(process_instance_id) +
-                    " at index " +
-                    std::to_string(data_idx));                
+        // 4. Materialize the memory finding as a Data observation.
+        Observation data_obs;
+        data_obs.type = ObservationType::Data;
+        data_obs.data_type = details->location.empty() ? details->secret_type : details->location;
+        data_obs.secret_type = details->secret_type;
+        data_obs.fingerprint = details->fingerprint;
+        data_obs.data_snippet = details->raw_snippet;
+        data_obs.address = details->address;
+        data_obs.size = details->raw_secret.size();
 
-                LineageEdge edge;
-                edge.from_index = proc_idx;
-                edge.to_index = data_idx;
-                edge.relation = RelationType::StaticAssociated;
-                edge.details = "Memory secret found";
-                graph.edges.push_back(edge);
-            }
+        //
+        // Transitional identity:
+        //
+        // pid/tid are kept as before so we don't break current
+        // correlation code.
+        //
+        // TGID and process_instance_id provide the process-level
+        // identity.
+        //
+        data_obs.pid = pid;
+        data_obs.tid = pid;
+        data_obs.tgid = process_tgid;
+
+        data_obs.process_instance_id = process_instance_id;
+        data_obs.exec_generation = exec_generation;
+        data_obs.start_time = std::chrono::steady_clock::now();
+        const size_t data_idx = append_observation(graph, std::move(data_obs));
+        Logger::log(
+            LogLevel::Debug,
+            "add_data_nodes_to_graph: Adding data node with fingerprint " +
+            details->fingerprint +
+            " for TGID " +
+            std::to_string(process_tgid) +
+            " process_instance=" +
+            std::to_string(process_instance_id) +
+            " at index " +
+            std::to_string(data_idx));
+
+        // 5. Connect Finding -> stable Observation seq.
+        const uint64_t data_seq = graph.observations[data_idx].seq;
+        if (data_seq != 0) {
+            finding.evidence_observation_seqs.push_back(data_seq);
         }
+
+        // 6. Connect process node -> Data observation.
+        LineageEdge edge;
+        edge.from_index = proc_idx;
+        edge.to_index = data_idx;
+        edge.relation = RelationType::StaticAssociated;
+        edge.details = "Memory secret found";
+
+        graph.edges.push_back(std::move(edge));
     }
 
     bool TraceCommand::parse_specific_args(const std::vector<std::string> &args) {
@@ -601,7 +619,7 @@ namespace runtimexray {
                     // After the handler runs, stamp the send observation with the first
                     // fingerprint it produced. This is what lets the correlated emit
                     // match the send event to a read event and a memory node.
-                    const size_t before = findings.size();
+                    const size_t findings_before = findings.size();
 
                     if (std::strcmp(syscall_name, "write") == 0) {
                         handle_syscall_write(backend, extra_info, findings, ev);
@@ -611,7 +629,7 @@ namespace runtimexray {
                         handle_syscall_sendto(backend, extra_info, findings, ev);
                     }
 
-                    for (size_t k = before; k < findings.size(); ++k) {
+                    for (size_t k = findings_before; k < findings.size(); ++k) {
                         if (auto* d = std::get_if<runtimexray::MemorySecretFindingDetails>(&findings[k].details)) {
                             lineage_analyzer.set_pending_event_fingerprint(ev.pid, ev.tid, d->fingerprint);
                             break;   // one fingerprint per syscall is enough for Phase 1
@@ -640,6 +658,21 @@ namespace runtimexray {
                         handle_syscall_connect(backend, extra_info, findings, ev, resolved);
                         if (!resolved.empty()) {
                             lineage_analyzer.set_pending_event_source(ev.pid, ev.tid, resolved);
+                        }
+                    }
+
+                    //
+                    // Findings created while processing a syscall entry are supported
+                    // by the syscall observation that is currently pending.
+                    //
+                    // This covers connect, write, writev and sendto.
+                    //
+                    if (findings.size() > findings_before) {
+                        const auto observation_seq = lineage_analyzer.pending_event_seq(ev.pid, ev.tid);
+                        if (observation_seq.has_value()) {
+                            for (size_t k = findings_before; k < findings.size(); ++k) {
+                                findings[k].evidence_observation_seqs.push_back(*observation_seq);
+                            }
                         }
                     }
 
@@ -760,9 +793,12 @@ namespace runtimexray {
                         uintptr_t addr_hint = ev.arg1;   // 0 on eBPF; harmless
                         runtimexray::MemoryChunkEvidence mce{raw, location, ev.pid, addr_hint};
                         auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
+                        const auto observation_seq = lineage_analyzer.last_exit_event_seq(ev.pid, ev.tid);
                         for (auto& f : res) {
                             f.pid = ev.pid;
-                            findings.push_back(f);
+                            if (observation_seq.has_value()) {
+                                f.evidence_observation_seqs.push_back(*observation_seq);
+                            }
                         }
 
                         // Stamp the read-exit observation with the first fingerprint
@@ -772,6 +808,11 @@ namespace runtimexray {
                                 lineage_analyzer.set_last_exit_fingerprint(ev.pid, ev.tid, d->fingerprint);
                                 break;
                             }
+                        }
+
+                        // Detection result is no longer needed locally.
+                        for (auto& f : res) {
+                            findings.push_back(std::move(f));
                         }
 
                         // One-shot memory scan per process, while that process is still alive.
@@ -845,9 +886,9 @@ namespace runtimexray {
             }
 
             // ---- Now add ALL findings as data nodes in the graph ----
-            for (const auto& f : findings) {
+            for (auto& f : findings) {
                 if (f.pid > 0) {
-                    add_data_nodes_to_graph(graph, {f}, f.pid);
+                    add_data_nodes_to_graph(graph, f, f.pid);
                 }
             }
 
@@ -956,6 +997,11 @@ namespace runtimexray {
                         oss.str(),
                         det,
                         read_obs.pid);
+
+                    auto& correlated_finding = findings.back();
+                    correlated_finding.evidence_observation_seqs.push_back(read_obs.seq);
+                    correlated_finding.evidence_observation_seqs.push_back(mem_obs.seq);
+                    correlated_finding.evidence_observation_seqs.push_back(send_obs.seq);
                 }
             }
 
