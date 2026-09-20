@@ -85,6 +85,41 @@ struct SessionId {
 };
 
 /**
+ * @brief One occurrence of a fingerprinted value in the lineage graph.
+ *
+ * The occurrence records where RuntimeXRay observed matching bytes.
+ * Matching fingerprints establish value identity within one analysis;
+ * they do not by themselves establish causal data flow.
+ */
+struct ValueOccurrence {
+    uint64_t observation_seq = 0;
+    uint64_t process_instance_id = 0;
+    uint64_t exec_generation = 0;
+    ObservationType observation_type = ObservationType::Event;
+    // Populated for Event observations.
+    std::string syscall_name;
+    // Populated for Data observations, e.g. "memory", "read",
+    // "sendto_data".
+    std::string data_type;
+};
+
+/**
+ * @brief All lineage observations carrying the same fingerprint.
+ *
+ * fingerprint is the identity key. secret_type is descriptive metadata
+ * copied from observations when available and is not part of identity.
+ */
+struct ValueHistory {
+    std::string fingerprint;
+    std::string secret_type;
+
+    uint64_t first_seq = 0;
+    uint64_t last_seq = 0;
+
+    std::vector<ValueOccurrence> occurrences;
+};
+
+/**
  * @brief Association between a Finding and the evidence belonging to one
  *        narrative session.
  *
@@ -153,6 +188,17 @@ std::vector<NarrativeSession> build_narrative_sessions(const LineageGraph& graph
  * no session identity is guessed.
  */
 void associate_findings_with_sessions(const FindingList& findings, std::vector<NarrativeSession>& sessions);
+
+/**
+ * @brief Group fingerprinted lineage observations into value histories.
+ *
+ * Every non-empty Observation::fingerprint becomes part of exactly one
+ * ValueHistory identified by that fingerprint.
+ *
+ * Histories describe repeated observation of the same value. They do not
+ * imply propagation, causality, or direction of flow.
+ */
+std::vector<ValueHistory> build_value_histories(const LineageGraph& graph);
 
 } // namespace runtimexray
 

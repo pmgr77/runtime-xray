@@ -31,6 +31,7 @@ int main()
     read.process_instance_id = 1;
     read.exec_generation = 0;
     read.syscall_name = "read";
+    read.fingerprint = "fp-password";
 
     graph.observations.push_back(read);
 
@@ -42,16 +43,29 @@ int main()
     exec.tgid = 100;
     exec.process_instance_id = 1;
     exec.exec_generation = 0;
-
     exec.syscall_name = "execve";
     exec.program_name = "/bin/echo";
     exec.return_value = 0;
 
     graph.observations.push_back(exec);
 
+    Observation memory;
+    memory.type = ObservationType::Data;
+    memory.seq = 4;
+    memory.pid = 100;
+    memory.tid = 100;
+    memory.tgid = 100;
+    memory.process_instance_id = 1;
+    memory.exec_generation = 1;
+    memory.data_type = "memory";
+    memory.secret_type = "password";
+    memory.fingerprint = "fp-password";
+
+    graph.observations.push_back(memory);
+
     Observation brk;
     brk.type = ObservationType::Event;
-    brk.seq = 4;
+    brk.seq = 5;
     brk.pid = 100;
     brk.tid = 100;
     brk.tgid = 100;
@@ -60,6 +74,20 @@ int main()
     brk.syscall_name = "brk";
 
     graph.observations.push_back(brk);
+
+    Observation token_memory;
+    token_memory.type = ObservationType::Data;
+    token_memory.seq = 6;
+    token_memory.pid = 100;
+    token_memory.tid = 100;
+    token_memory.tgid = 100;
+    token_memory.process_instance_id = 1;
+    token_memory.exec_generation = 1;
+    token_memory.data_type = "memory";
+    token_memory.secret_type = "token";
+    token_memory.fingerprint = "fp-token";
+
+    graph.observations.push_back(token_memory);
 
     auto sessions = build_narrative_sessions(graph);
     assert(sessions.size() == 2);
@@ -78,10 +106,12 @@ int main()
     assert(s1.id.process_instance_id == 1);
     assert(s1.id.exec_generation == 1);
     assert(s1.program_name == "/bin/echo");
-    assert(s1.observation_seqs.size() == 1);
+    assert(s1.observation_seqs.size() == 3);
     assert(s1.observation_seqs[0] == 4);
+    assert(s1.observation_seqs[1] == 5);
+    assert(s1.observation_seqs[2] == 6);
     assert(s1.first_seq == 4);
-    assert(s1.last_seq == 4);
+    assert(s1.last_seq == 6);
     assert(s1.tgid == 100);
 
     MemorySecretFindingDetails single_details;
@@ -130,7 +160,48 @@ int main()
     assert(session1.finding_refs[0].evidence_observation_seqs.size() == 1);
     assert(session1.finding_refs[0].evidence_observation_seqs[0] == 4);
 
-    std::cout << "Narrative session tests passed\n";
+    const auto histories = build_value_histories(graph);
+    assert(histories.size() == 2);
+    const auto& password_history = histories[0];
+    assert(password_history.fingerprint == "fp-password");
+    assert(password_history.secret_type == "password");
+    assert(password_history.first_seq == 2);
+    assert(password_history.last_seq == 4);
+    assert(password_history.occurrences.size() == 2);
+
+    const auto& password_read = password_history.occurrences[0];
+    assert(password_read.observation_seq == 2);
+    assert(password_read.process_instance_id == 1);
+    assert(password_read.exec_generation == 0);
+    assert(password_read.observation_type == ObservationType::Event);
+    assert(password_read.syscall_name == "read");
+
+    const auto& password_memory = password_history.occurrences[1];
+    assert(password_memory.observation_seq == 4);
+    assert(password_memory.process_instance_id == 1);
+    assert(password_memory.exec_generation == 1);
+    assert(password_memory.observation_type == ObservationType::Data);
+    assert(password_memory.data_type == "memory");
+
+    const auto& token_history = histories[1];
+    assert(token_history.fingerprint == "fp-token");
+    assert(token_history.secret_type == "token");
+    assert(token_history.first_seq == 6);
+    assert(token_history.last_seq == 6);
+    assert(token_history.occurrences.size() == 1);
+
+    const auto& token_occurrence = token_history.occurrences[0];
+    assert(token_occurrence.observation_seq == 6);
+    assert(token_occurrence.process_instance_id == 1);
+    assert(token_occurrence.exec_generation == 1);
+    assert(token_occurrence.observation_type == ObservationType::Data);
+    assert(token_occurrence.data_type == "memory");
+
+    associate_findings_with_sessions(findings, sessions);
+    assert(sessions[0].finding_refs.size() == 2);
+    assert(sessions[1].finding_refs.size() == 1);
+
+    std::cout << "Narrative model tests passed\n";
 
     return 0;
 }

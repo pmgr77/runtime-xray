@@ -267,4 +267,57 @@ void associate_findings_with_sessions(
     }
 }
 
+std::vector<ValueHistory> build_value_histories(const LineageGraph& graph) {
+    std::map<std::string, ValueHistory> histories;
+
+    for (const auto& obs : graph.observations) {
+        if (obs.fingerprint.empty() || obs.seq == 0) {
+            continue;
+        }
+
+        auto [it, inserted] = histories.try_emplace(obs.fingerprint);
+        auto& history = it->second;
+        if (inserted) {
+            history.fingerprint = obs.fingerprint;
+            history.first_seq = obs.seq;
+        }
+
+        //
+        // secret_type is metadata, not fingerprint identity.
+        // Keep the first non-empty value we can resolve.
+        //
+        if (history.secret_type.empty() && !obs.secret_type.empty()) {
+            history.secret_type = obs.secret_type;
+        }
+
+        ValueOccurrence occurrence;
+        occurrence.observation_seq = obs.seq;
+        occurrence.process_instance_id = obs.process_instance_id;
+        occurrence.exec_generation = obs.exec_generation;
+        occurrence.observation_type = obs.type;
+        occurrence.syscall_name = obs.syscall_name;
+        occurrence.data_type = obs.data_type;
+        history.occurrences.push_back(std::move(occurrence));
+        history.last_seq = obs.seq;
+    }
+
+    std::vector<ValueHistory> result;
+    result.reserve(histories.size());
+
+    for (auto& [fingerprint, history] : histories) {
+        (void)fingerprint;
+        result.push_back(std::move(history));
+    }
+
+    //
+    // std::map grouped by fingerprint text, but narrative order should
+    // follow when the value was first observed.
+    //
+    std::sort(result.begin(), result.end(), [](const ValueHistory& a, const ValueHistory&b) {
+        return a.first_seq < b.first_seq;
+    });
+    
+    return result;
+}
+
 } // namespace runtimexray
