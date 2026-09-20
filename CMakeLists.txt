@@ -50,6 +50,7 @@ set(RUNTIMEXRAY_SOURCES
     src/risk_assessment_registry.cpp
     src/register_builtin_risk_assessments.cpp
     src/cross_boundary_risk_assessment.cpp
+    src/narrative.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -167,6 +168,15 @@ add_executable(test_secret_fingerprinter
 target_link_libraries(test_secret_fingerprinter PRIVATE OpenSSL::Crypto)
 target_include_directories(test_secret_fingerprinter PRIVATE include)
 add_test(NAME check_secret_fingerprinter COMMAND $<TARGET_FILE:test_secret_fingerprinter>)
+
+add_executable(test_narrative_sessions
+    tests/unit/test_narrative_sessions.cpp
+    src/narrative.cpp
+)
+target_include_directories(test_narrative_sessions PRIVATE include)
+add_test(NAME check_narrative_sessions
+         COMMAND test_narrative_sessions
+)
 
 # CLI-level mem lineage test
 add_test(NAME check_mem_lineage
