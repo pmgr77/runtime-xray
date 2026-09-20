@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <map>
+#include <utility>
 
 namespace runtimexray {
 
@@ -191,6 +192,79 @@ std::vector<NarrativeSession> build_narrative_sessions(const LineageGraph& graph
         });
 
     return result;
+}
+
+void associate_findings_with_sessions(
+    const FindingList& findings,
+    std::vector<NarrativeSession>& sessions) {
+
+    //
+    // Make the operation repeatable. Calling this function twice should
+    // rebuild the associations rather than duplicate them.
+    //
+    for (auto& session : sessions) {
+        session.finding_refs.clear();
+    }
+
+    //
+    // Build the reverse lookup:
+    //
+    //     Observation::seq -> NarrativeSession index
+    //
+    // Observation sequence numbers are stable within one RuntimeXRay
+    // analysis, while vector positions in the lineage graph are not used
+    // as evidence identities.
+    //
+    std::map<uint64_t, size_t> seq_to_session;
+    for (size_t session_index = 0; session_index < sessions.size(); ++session_index) {
+        for (uint64_t seq : sessions[session_index].observation_seqs) {
+            if (seq != 0) {
+                seq_to_session.emplace(seq, session_index);
+            }
+        }
+    }
+
+    //
+    // A single finding may contain evidence from several sessions.
+    //
+    // Group that finding's evidence by destination session first so each
+    // session receives one NarrativeFindingRef for the finding.
+    //
+    for (size_t finding_index = 0; finding_index < findings.size(); ++finding_index) {
+        const Finding& finding = findings[finding_index];
+
+        std::map<size_t, std::vector<uint64_t>> evidence_by_session;
+
+        for (uint64_t seq : finding.evidence_observation_seqs) {
+            const auto session_it = seq_to_session.find(seq);
+            if (session_it == seq_to_session.end()) {
+                //
+                // The evidence may refer to an observation that is not part
+                // of an executable session (for example, a process-lifetime
+                // observation). Do not guess a session.
+                //
+                continue;
+            }
+
+            const size_t session_index = session_it->second;
+            auto& session_evidence = evidence_by_session[session_index];
+
+            //
+            // Findings should normally contain unique seq references, but
+            // keep this derived view robust against accidental duplicates.
+            //
+            if (std::find(session_evidence.begin(), session_evidence.end(), seq) == session_evidence.end()) {
+                session_evidence.push_back(seq);
+            }
+        }
+
+        for (auto& [session_index, evidence_seqs] : evidence_by_session) {
+            NarrativeFindingRef ref;
+            ref.finding_index = finding_index;
+            ref.evidence_observation_seqs = std::move(evidence_seqs);
+            sessions[session_index].finding_refs.push_back(std::move(ref));
+        }
+    }
 }
 
 } // namespace runtimexray

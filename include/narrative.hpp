@@ -35,12 +35,14 @@
 #define RUNTIMEXRAY_NARRATIVE_HPP
 
 #include "lineage.hpp"
+#include "finding.hpp"
 
 #include <cstdint>
 #include <string>
 #include <tuple>
 #include <vector>
 #include <sys/types.h>
+#include <cstddef>
 
 namespace runtimexray {
 
@@ -83,6 +85,23 @@ struct SessionId {
 };
 
 /**
+ * @brief Association between a Finding and the evidence belonging to one
+ *        narrative session.
+ *
+ * finding_index is local to the FindingList used to build the narrative
+ * model. It is not a persistent or externally visible finding identifier.
+ *
+ * Evidence remains identified by stable Observation::seq values.
+ */
+struct NarrativeFindingRef {
+    size_t finding_index = 0;
+
+    // Only the evidence observations from this finding that belong to
+    // this particular session.
+    std::vector<uint64_t> evidence_observation_seqs;
+};
+
+/**
  * @brief Derived view of all observations belonging to one executable image.
  *
  * Observation sequence numbers are stored instead of vector indices so the
@@ -102,6 +121,9 @@ struct NarrativeSession {
     uint64_t last_seq = 0;
     // Stable Observation::seq values belonging to this executable generation.
     std::vector<uint64_t> observation_seqs;
+    // Findings supported by observations in this executable session.
+    // A composite finding may appear in more than one session.
+    std::vector<NarrativeFindingRef> finding_refs;
 };
 
 /**
@@ -119,6 +141,18 @@ struct NarrativeSession {
  * @return Sessions ordered by the first observation seen in each session.
  */
 std::vector<NarrativeSession> build_narrative_sessions(const LineageGraph& graph);
+
+/**
+ * @brief Associate findings with their supporting narrative sessions.
+ *
+ * Finding evidence is resolved through stable Observation::seq values.
+ * A finding may be associated with multiple sessions when its supporting
+ * observations cross process or exec-generation boundaries.
+ *
+ * Evidence references that do not belong to any known session are ignored;
+ * no session identity is guessed.
+ */
+void associate_findings_with_sessions(const FindingList& findings, std::vector<NarrativeSession>& sessions);
 
 } // namespace runtimexray
 

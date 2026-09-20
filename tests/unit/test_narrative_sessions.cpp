@@ -61,7 +61,7 @@ int main()
 
     graph.observations.push_back(brk);
 
-    const auto sessions = build_narrative_sessions(graph);
+    auto sessions = build_narrative_sessions(graph);
     assert(sessions.size() == 2);
     const auto& s0 = sessions[0];
     assert(s0.id.process_instance_id == 1);
@@ -83,6 +83,52 @@ int main()
     assert(s1.first_seq == 4);
     assert(s1.last_seq == 4);
     assert(s1.tgid == 100);
+
+    MemorySecretFindingDetails single_details;
+    single_details.secret_type = "password";
+    Finding single_session_finding(
+        FindingSeverity::High,
+        "Single-session finding",
+        "test",
+        single_details,
+        100);
+
+    single_session_finding.evidence_observation_seqs = {2};
+
+    MemorySecretFindingDetails cross_details;
+    cross_details.secret_type = "password";
+    Finding cross_session_finding(
+        FindingSeverity::High,
+        "Cross-session finding",
+        "test",
+        cross_details,
+        100);
+
+    cross_session_finding.evidence_observation_seqs = {2, 3, 4};
+
+    FindingList findings;
+    findings.push_back(std::move(single_session_finding));
+    findings.push_back(std::move(cross_session_finding));
+
+    associate_findings_with_sessions(findings, sessions);
+
+    const auto& session0 = sessions[0];
+    const auto& session1 = sessions[1];
+
+    assert(session0.finding_refs.size() == 2);
+    assert(session0.finding_refs[0].finding_index == 0);
+    assert(session0.finding_refs[0].evidence_observation_seqs.size() == 1);
+    assert(session0.finding_refs[0].evidence_observation_seqs[0] == 2);
+
+    assert(session0.finding_refs[1].finding_index == 1);
+    assert(session0.finding_refs[1].evidence_observation_seqs.size() == 2);
+    assert(session0.finding_refs[1].evidence_observation_seqs[0] == 2);
+    assert(session0.finding_refs[1].evidence_observation_seqs[1] == 3);
+
+    assert(session1.finding_refs.size() == 1);
+    assert(session1.finding_refs[0].finding_index == 1);
+    assert(session1.finding_refs[0].evidence_observation_seqs.size() == 1);
+    assert(session1.finding_refs[0].evidence_observation_seqs[0] == 4);
 
     std::cout << "Narrative session tests passed\n";
 
