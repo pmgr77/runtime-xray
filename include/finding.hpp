@@ -130,6 +130,11 @@ public:
     std::string evidence;
     DetailsVariant details;
     pid_t pid;   // process ID that owns this finding
+    // Stable lineage observations that support this finding.
+    //
+    // Values are Observation::seq, never vector indices.
+    // A finding may reference multiple observations.
+    std::vector<uint64_t> evidence_observation_seqs;
 
     /**
      * @brief Constructs a Finding.
@@ -143,7 +148,7 @@ public:
     : severity(sev), description(std::move(desc)), evidence(std::move(ev)), details(std::move(det)), pid(p)
     {}
 };
-    
+
     /** Container for all findings from a single analysis. */
     using FindingList = std::vector<Finding>;
 

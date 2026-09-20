@@ -720,9 +720,13 @@ namespace runtimexray {
                     if (!path.empty()) {
                         runtimexray::FileAccessEvidence fe{path, 0, ev.pid, err};
                         auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
+                        const auto observation_seq = lineage_analyzer.last_exit_event_seq(ev.pid, ev.tid);
                         for (auto& f : res) {
                             f.pid = ev.pid;
-                            findings.push_back(f);
+                            if (observation_seq.has_value()) {
+                                f.evidence_observation_seqs.push_back(*observation_seq);
+                            }
+                            findings.push_back(std::move(f));
                         }
                     }
                 }

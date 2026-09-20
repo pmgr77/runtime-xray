@@ -223,6 +223,13 @@ namespace runtimexray {
                             }
                         }
                     }, f.details);
+                    if (!f.evidence_observation_seqs.empty()) {
+                        out << "      Evidence observations:";
+                        for (uint64_t seq : f.evidence_observation_seqs) {
+                            out << " seq=" << seq;
+                        }
+                        out << "\n";
+                    }
                 }
             }
         } else {

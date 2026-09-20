@@ -302,6 +302,56 @@ void LineageAnalyzer::set_last_exit_fingerprint(pid_t pid, pid_t tid,
     }
 }
 
+std::optional<uint64_t> LineageAnalyzer::pending_event_seq(pid_t pid, pid_t tid) const
+{
+    auto pid_it = pending_entry_.find(pid);
+    if (pid_it == pending_entry_.end()) {
+        return std::nullopt;
+    }
+
+    auto tid_it = pid_it->second.find(tid);
+    if (tid_it == pid_it->second.end()) {
+        return std::nullopt;
+    }
+
+    const size_t index = tid_it->second;
+    if (index >= observations_.size()) {
+        return std::nullopt;
+    }
+
+    const uint64_t seq = observations_[index].seq;
+    if (seq == 0) {
+        return std::nullopt;
+    }
+
+    return seq;
+}
+
+std::optional<uint64_t> LineageAnalyzer::last_exit_event_seq(pid_t pid, pid_t tid) const
+{
+    auto pid_it = last_exit_index_.find(pid);
+    if (pid_it == last_exit_index_.end()) {
+        return std::nullopt;
+    }
+
+    auto tid_it = pid_it->second.find(tid);
+    if (tid_it == pid_it->second.end()) {
+        return std::nullopt;
+    }
+
+    const size_t index = tid_it->second;
+    if (index >= observations_.size()) {
+        return std::nullopt;
+    }
+
+    const uint64_t seq = observations_[index].seq;
+    if (seq == 0) {
+        return std::nullopt;
+    }
+
+    return seq;
+}
+
 void LineageAnalyzer::handle_fork_exit(
     const SyscallEvent& ev,
     std::string syscall_name,

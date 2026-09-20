@@ -62,6 +62,12 @@ public:
     // read-family calls whose userspace buffer contained a detected secret.
     void set_last_exit_fingerprint(pid_t pid, pid_t tid, const std::string& fingerprint);
 
+    // syscall currently at entry
+    std::optional<uint64_t> pending_event_seq(pid_t pid, pid_t tid) const;
+
+    // syscall just completed
+    std::optional<uint64_t> last_exit_event_seq(pid_t pid, pid_t tid) const;
+
 private:
     const ITraceBackend* backend_ = nullptr;
 
