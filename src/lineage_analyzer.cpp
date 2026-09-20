@@ -110,6 +110,14 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     //
     const uint64_t instance_id = next_process_instance_id_++;
 
+    std::string process_program = program;
+    if (!initial_program_assigned_) {
+        if (process_program.empty()) {
+            process_program = initial_program_;
+        }
+        initial_program_assigned_ = true;
+    }
+    
     Observation obs;
     // We'll use Event for process nodes too, but distinguish by syscall_name == "process"
     obs.type = ObservationType::Event;
@@ -118,9 +126,9 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     obs.tgid = process_id;
     obs.process_instance_id = instance_id;
     obs.exec_generation = 0;
-    obs.program_name = program;
+    obs.program_name = process_program;
     obs.syscall_name = "process"; // marker
-    obs.is_entry = true;
+    obs.is_entry = true;    
     // For process nodes, we'll use end_time when process exits
     size_t idx = add_observation(obs);
 

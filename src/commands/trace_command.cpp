@@ -37,6 +37,7 @@
 #include "lineage_analyzer.hpp"
 #include "risk_assessment_registry.hpp"
 #include "lineage.hpp"
+#include "narrative.hpp"
 
 #include <iostream>
 #include <string>
@@ -544,6 +545,7 @@ namespace runtimexray {
         std::vector<pid_t> child_pids;
 
         runtimexray::LineageAnalyzer lineage_analyzer;
+        lineage_analyzer.set_initial_program(program_);
 
         try {
             std::vector<std::string> full_args;
@@ -1027,6 +1029,46 @@ namespace runtimexray {
 
             // After filtering findings, but before reporting:
             RiskAssessmentRegistry::instance().assess_findings(findings, ctx, &graph);
+
+            auto narrative_sessions = build_narrative_sessions(graph);
+            associate_findings_with_sessions(findings, narrative_sessions);
+            for (const auto& session : narrative_sessions) {
+                Logger::log(
+                    LogLevel::Debug,
+                    "narrative: session process_instance=" +
+                    std::to_string(session.id.process_instance_id) +
+                    " exec_generation=" +
+                    std::to_string(session.id.exec_generation) +
+                    " program=\"" +
+                    session.program_name +
+                    "\" seq=" +
+                    std::to_string(session.first_seq) +
+                    ".." +
+                    std::to_string(session.last_seq) +
+                    " observations=" +
+                    std::to_string(session.observation_seqs.size()) +
+                    " findings=" +
+                    std::to_string(session.finding_refs.size()));
+
+                for (const auto& ref : session.finding_refs) {
+                    std::string evidence;
+
+                    for (uint64_t seq : ref.evidence_observation_seqs) {
+                        if (!evidence.empty()) {
+                            evidence += ",";
+                        }
+                        evidence += std::to_string(seq);
+                    }
+
+                    Logger::log(
+                        LogLevel::Debug,
+                        "narrative:   finding=" +
+                        std::to_string(ref.finding_index) +
+                        " evidence_seq=[" +
+                        evidence +
+                        "]");
+                }
+            }
 
             return report_findings(common,
                 std::move(ctx),

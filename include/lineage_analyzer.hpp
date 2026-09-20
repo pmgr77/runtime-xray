@@ -41,6 +41,8 @@ public:
 
     void set_backend(const ITraceBackend* backend) { backend_ = backend; }
 
+    void set_initial_program(const std::string& program) { initial_program_ = program; }
+
     /** Call for each syscall event (entry and exit). */
     void on_syscall_event(const SyscallEvent& ev);
 
@@ -71,6 +73,9 @@ public:
 private:
     const ITraceBackend* backend_ = nullptr;
 
+    std::string initial_program_;
+    bool initial_program_assigned_ = false;
+    
     // Graph storage
     std::vector<Observation> observations_;
     std::vector<LineageEdge> edges_;
