@@ -51,6 +51,11 @@ struct NarrativeStatement {
     std::vector<uint64_t> evidence_observation_seqs;
 };
 
+struct NarrativeSessionContext {
+    SessionId id;
+    std::string program_name;
+};
+
 /**
  * @brief Narrative explanation derived from one Finding.
  *
@@ -67,7 +72,8 @@ struct NarrativeStory {
     // Fingerprint of the value around which this story was correlated.
     std::string fingerprint;
 
-    std::vector<SessionId> session_ids;
+    // Executable-image lifetimes involved in this story.
+    std::vector<NarrativeSessionContext> sessions;
     std::vector<NarrativeStatement> statements;
 };
 

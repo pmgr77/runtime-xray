@@ -34,7 +34,72 @@
 #include "narrative_builder.hpp"
 
 #include <map>
+#include <sstream>
 
+namespace {
+
+struct ResolvedFdResource {
+    std::string path;
+    uint64_t path_observation_seq = 0;
+
+    std::string endpoint;
+    uint64_t endpoint_observation_seq = 0;
+};
+
+ResolvedFdResource resolve_fd_resource_at(
+    const runtimexray::LineageGraph& graph,
+    const runtimexray::Observation& target,
+    int fd)
+{
+    ResolvedFdResource resource;
+
+    for (const auto& obs : graph.observations) {
+        if (obs.seq == 0 || obs.seq >= target.seq) {
+            continue;
+        }
+        //
+        // Numeric Linux PIDs can be reused. Resolve FD history inside the
+        // RuntimeXRay process lifetime instead.
+        //
+        if (obs.process_instance_id != target.process_instance_id) {
+            continue;
+        }
+
+        if (obs.type != runtimexray::ObservationType::Event) {
+            continue;
+        }
+
+        if (obs.syscall_name == "open" || obs.syscall_name == "openat") {
+            if (obs.return_value == fd && !obs.source.empty()) {
+                resource.path = obs.source;
+                resource.path_observation_seq = obs.seq;
+            }
+        } else if (obs.syscall_name == "connect") {
+            if (obs.return_value == 0 && 
+                static_cast<int>(obs.arg0) == fd &&
+                !obs.source.empty()) {
+                resource.endpoint = obs.source;
+                resource.endpoint_observation_seq = obs.seq;
+            }
+        } else if (obs.syscall_name == "close") {
+            if (obs.return_value == 0 && 
+                static_cast<int>(obs.arg0) == fd) {
+                //
+                // The numeric FD may later be reused for a completely
+                // different resource.
+                //
+                resource.path.clear();
+                resource.path_observation_seq = 0;
+                resource.endpoint.clear();
+                resource.endpoint_observation_seq = 0;
+            }
+        }
+    }
+
+    return resource;
+}
+
+} // anonymous namespace
 namespace runtimexray {
 
 std::vector<NarrativeStory> NarrativeBuilder::build(
@@ -103,7 +168,10 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
                 if (ref.finding_index != finding_index) {
                     continue;
                 }
-                story.session_ids.push_back(session.id);
+                NarrativeSessionContext context;
+                context.id = session.id;
+                context.program_name = session.program_name;
+                story.sessions.push_back(std::move(context));
                 break;
             }
         }
@@ -148,12 +216,32 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
             if (obs.type == ObservationType::Event &&
                 (obs.syscall_name == "read" ||
                  obs.syscall_name == "recvfrom")) {
-                statement.text =
-                    "A " +
-                    details->secret_type +
-                    " value was observed in data returned by " +
-                    obs.syscall_name +
-                    "().";
+                std::ostringstream text;
+
+                text <<
+                    "A " <<
+                    details->secret_type <<
+                    " value was observed in data returned by " <<
+                    obs.syscall_name <<
+                    "()";
+                //
+                // read() arg0 is the source file descriptor.
+                //
+                if (obs.syscall_name == "read") {
+                    const int fd = static_cast<int>(obs.arg0);
+                    const auto resource = resolve_fd_resource_at(graph, obs, fd);
+                    if (!resource.path.empty()) {
+                        text <<
+                            " from file \"" <<
+                            resource.path <<
+                            "\"";
+                    }
+                    if (resource.path_observation_seq != 0) {
+                        statement.evidence_observation_seqs.push_back(resource.path_observation_seq);
+                    }
+                }
+                text << ".";
+                statement.text = text.str();
             }
 
             //
@@ -165,9 +253,18 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
             //
             else if (obs.type == ObservationType::Data &&
                 obs.data_type == "memory") {
-                statement.text =
-                    "The same fingerprinted value was also found "
-                    "in process memory.";
+                std::ostringstream text;
+
+                text << "The same fingerprinted value was also found "
+                        "in process memory";
+                if (obs.address != 0) {
+                    text << " at address 0x" <<
+                            std::hex <<
+                            obs.address <<
+                            std::dec;
+                }
+                text << ".";
+                statement.text = text.str();
             }
 
             //
@@ -181,11 +278,26 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
                 (obs.syscall_name == "sendto" ||
                  obs.syscall_name == "write" ||
                  obs.syscall_name == "writev")) {
-                statement.text =
+                std::ostringstream text;
+
+                text <<
                     "The same fingerprinted value was observed in "
-                    "data supplied to " +
-                    obs.syscall_name +
-                    "().";
+                    "data supplied to " <<
+                    obs.syscall_name <<
+                    "()";
+
+                const int fd = static_cast<int>(obs.arg0);
+                const auto resource = resolve_fd_resource_at(graph, obs, fd);
+                if (!resource.endpoint.empty()) {
+                    text <<
+                        " on a socket connected to " <<
+                        resource.endpoint;
+                    if (resource.endpoint_observation_seq != 0) {
+                        statement.evidence_observation_seqs.push_back(resource.endpoint_observation_seq);
+                    }
+                }
+                text << ".";
+                statement.text = text.str();                    
             }
 
             //
