@@ -664,8 +664,11 @@ void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {
 
 LineageGraph LineageAnalyzer::produce_graph() const {
     LineageGraph graph;
-    graph.summary = "Process lineage with " + std::to_string(observations_.size()) + " observations and " +
-                    std::to_string(edges_.size()) + " edges";
+    graph.summary = "Process lineage with " +
+                    std::to_string(observations_.size()) +
+                    " observations and " +
+                    std::to_string(edges_.size()) +
+                    " edges";
     graph.observations = observations_;
     graph.edges = edges_;
     return graph;

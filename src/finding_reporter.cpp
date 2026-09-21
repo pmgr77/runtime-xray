@@ -86,7 +86,30 @@ namespace runtimexray {
             }
         }
 
-        Report r{std::move(ctx), std::move(findings), std::move(lineage_graph), std::move(report_opts)};
+        if (ctx.command == "trace" && lineage_graph.has_value()) {
+            auto& graph = lineage_graph.value();
+            graph.summary =
+                "Process lineage with " +
+                std::to_string(graph.observations.size()) +
+                " observations and " +
+                std::to_string(graph.edges.size()) +
+                " edges";
+        }
+        
+        std::vector<NarrativeStory> narratives;
+        if (lineage_graph.has_value()) {
+            NarrativeBuilder builder;
+            narratives = builder.build(lineage_graph.value(), findings);
+        }
+
+        Report r{
+            std::move(ctx),
+            std::move(findings),
+            std::move(lineage_graph),
+            std::move(narratives),
+            std::move(report_opts)
+        };
+
         if (json_reporter) {
             json_reporter->report(r, extra);
         }

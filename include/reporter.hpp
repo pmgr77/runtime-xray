@@ -27,6 +27,7 @@
 
 #include "finding.hpp"
 #include "lineage.hpp"
+#include "narrative_builder.hpp"
 
 #include <nlohmann/json.hpp>
 #include <string>
@@ -52,6 +53,8 @@ struct Report {
     ReportContext context;
     FindingList findings;
     std::optional<LineageGraph> lineage_graph;
+    // Derived human-readable explanations backed by lineage observations.
+    std::vector<NarrativeStory> narratives;
     ReportingOptions report_opts;
 };
 

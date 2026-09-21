@@ -86,6 +86,64 @@ namespace runtimexray {
         return result;
     }
 
+    static void append_secret_fields(
+        std::ostream& out,
+        const MemorySecretFindingDetails& details,
+        const ReportingOptions& opts)
+    {
+        if (details.raw_secret.empty()) {
+            return;
+        }
+
+        out << " value: "
+            << (opts.show_secrets
+                    ? details.raw_secret
+                    : "<redacted>");
+
+        if (details.raw_snippet.empty()) {
+            return;
+        }
+
+        out << " context: "
+            << (opts.show_secrets
+                    ? details.raw_snippet
+                    : redact_secret(details.raw_snippet, details.raw_secret));
+    }
+
+    static nlohmann::json serialize_narratives(
+        const std::vector<NarrativeStory>& narratives)
+    {
+        nlohmann::json narratives_arr = nlohmann::json::array();
+
+        for (const auto& story : narratives) {
+            nlohmann::json story_json;
+            story_json["finding_index"] = story.finding_index;
+            story_json["title"] = story.title;
+            story_json["fingerprint"] = story.fingerprint;
+            story_json["sessions"] = nlohmann::json::array();
+
+            for (const auto& session : story.sessions) {
+                nlohmann::json session_json;
+                session_json["process_instance_id"] = session.id.process_instance_id;
+                session_json["exec_generation"] = session.id.exec_generation;
+                session_json["program"] = session.program_name;
+                story_json["sessions"].push_back(std::move(session_json));
+            }
+
+            story_json["statements"] = nlohmann::json::array();
+            for (const auto& statement : story.statements) {
+                nlohmann::json statement_json;
+                statement_json["text"] = statement.text;
+                statement_json["evidence_observation_seqs"] = statement.evidence_observation_seqs;
+                story_json["statements"].push_back(std::move(statement_json));
+            }
+
+            narratives_arr.push_back(std::move(story_json));
+        }
+
+        return narratives_arr;
+    }
+
     std::string Reporter::to_text(const Report& r, const nlohmann::json* extra) {
         std::ostringstream out;
 
@@ -174,14 +232,8 @@ namespace runtimexray {
                                 }
                                 out << " length: " << details.secret_length;
                                 out << " fingerprint: " << details.fingerprint;
-                                if (r.report_opts.show_secrets) {
-                                    out << " value: " << details.raw_secret;
-                                    out << " context: " << details.raw_snippet;
-                                } else {
-                                    out << " value: <redacted>";
-                                    std::string redacted_snippet = redact_secret(details.raw_snippet, details.raw_secret);
-                                    out << " context: " << redacted_snippet;
-                                } 
+
+                                append_secret_fields(out, details, r.report_opts);
                             } else {
                                 out << " - " << f.description << "\n";
                             }
@@ -215,12 +267,10 @@ namespace runtimexray {
                             out << "      Type: " << details.secret_type
                                 << ", Location: " << details.location
                                 << ", Length: " << details.secret_length
-                                << ", Fingerprint: " << details.fingerprint << "\n";
-                            if (r.report_opts.show_secrets) {
-                                out << "      Value: " << details.raw_secret << "\n";
-                            } else {
-                                out << "      Value: <redacted>\n";
-                            }
+                                << ", Fingerprint: " << details.fingerprint;
+
+                            append_secret_fields(out, details, r.report_opts);
+                            out << "\n";
                         }
                     }, f.details);
                     if (!f.evidence_observation_seqs.empty()) {
@@ -234,6 +284,53 @@ namespace runtimexray {
             }
         } else {
             out << "No findings.\n";
+        }
+
+        // ---- Evidence-backed narratives ----
+        if (!r.narratives.empty()) {
+            out << "\nNarratives:\n";
+            for (const auto& story : r.narratives) {
+                out << "  " << story.title << "\n";
+                //
+                // A narrative may span more than one executable image.
+                //
+                for (const auto& session : story.sessions) {
+                    out << "    Program: ";
+
+                    if (!session.program_name.empty()) {
+                        out << session.program_name;
+                    } else {
+                        out << "<unknown>";
+                    }
+
+                    out << " [instance="
+                        << session.id.process_instance_id
+                        << ", exec="
+                        << session.id.exec_generation
+                        << "]\n";
+                }
+            
+                for (const auto& statement : story.statements) {
+                    out << "    - "
+                        << statement.text
+                        << "\n";
+
+                    if (!statement.evidence_observation_seqs.empty()) {
+                        out << "      Evidence: ";
+
+                        for (size_t i = 0; i < statement.evidence_observation_seqs.size(); ++i) {
+                            if (i != 0) {
+                                out << ", ";
+                            }
+
+                            out << "seq="
+                                << statement.evidence_observation_seqs[i];
+                        }
+
+                        out << "\n";
+                    }
+                }
+            }
         }
 
         // ---- Lineage Graph ----
@@ -344,7 +441,7 @@ namespace runtimexray {
     std::string Reporter::to_json(const Report& r, const nlohmann::json* extra) {
         nlohmann::json j;
 
-        j["schema_version"] = "1.1";
+        j["schema_version"] = "1.2";
         j["tool"] = r.context.tool_name;
         j["tool_version"] = r.context.tool_version;
         j["command"] = r.context.command;
@@ -354,7 +451,8 @@ namespace runtimexray {
 
         nlohmann::json findings_arr = nlohmann::json::array();
         serialize_findings(r.findings, findings_arr, r.report_opts);
-        j["findings"] = findings_arr;
+        j["findings"] = std::move(findings_arr);
+        j["narratives"] = serialize_narratives(r.narratives);
 
         // Summary
         std::map<std::string, int> by_severity;

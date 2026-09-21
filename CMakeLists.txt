@@ -189,6 +189,16 @@ add_test(NAME check_narrative_builder
          COMMAND test_narrative_builder
 )
 
+add_executable(test_reporter_json
+    tests/unit/test_reporter_json.cpp
+    src/reporter.cpp
+)
+target_include_directories(test_reporter_json PRIVATE include)
+target_link_libraries(test_reporter_json PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME check_reporter_json
+         COMMAND test_reporter_json
+)
+
 # CLI-level mem lineage test
 add_test(NAME check_mem_lineage
          COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mem_lineage.sh $<TARGET_FILE:runtimexray>)

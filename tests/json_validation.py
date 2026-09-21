@@ -67,6 +67,10 @@ def main():
             print(f"Finding at index {idx} missing 'severity' or 'description'")
             sys.exit(1)
 
+    assert data["schema_version"] == "1.2"
+    assert "narratives" in data
+    assert isinstance(data["narratives"], list)
+
     print("JSON validation passed.")
     sys.exit(0)
 

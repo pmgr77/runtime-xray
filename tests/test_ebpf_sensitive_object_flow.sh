@@ -141,6 +141,7 @@ $RUN_PREFIX "$RUNTIMEXRAY_BIN" trace \
     --show-secrets \
     --scan-memory \
     --json "$TMP/out.json" \
+    --report "$TMP/out.txt" \
     "$APP" "$TMP/cred.txt" 127.0.0.1 "$PORT" </dev/null >/dev/null
 
 mark "tracer returned"
@@ -151,6 +152,11 @@ mark "tracer returned"
 if [ -n "$RUN_PREFIX" ] && [ -f "$TMP/out.json" ]; then
     $RUN_PREFIX chown "$(id -u):$(id -g)" "$TMP/out.json" 2>/dev/null || true
     mark "out.json chowned back to user"
+fi
+
+if [ -n "$RUN_PREFIX" ] && [ -f "$TMP/out.txt" ]; then
+    $RUN_PREFIX chown "$(id -u):$(id -g)" "$TMP/out.txt" 2>/dev/null || true
+    mark "out.txt chowned back to user"
 fi
 
 # ---------------------------------------------------------------------------
@@ -167,11 +173,17 @@ mark "listener exited"
 # Assertions
 # ---------------------------------------------------------------------------
 J="$TMP/out.json"
+T="$TMP/out.txt"
 [ -f "$J" ] || { echo "FAIL: no JSON report produced"; exit 1; }
+[ -f "$T" ] || { echo "FAIL: no TEXT report produced"; exit 1; }
 mark "json report present ($(wc -c < "$J") bytes)"
+mark "text report present ($(wc -c < "$T") bytes)"
 
-echo "--- correlated findings ---"
+echo "--- correlated json findings ---"
 grep -o '"location": *"correlated"' "$J" || echo "(none)"
+echo "--- correlated text findings ---"
+grep 'Location: correlated' "$T" || echo "(none)"
+
 
 echo "--- assertions ---"
 grep -q 'correlated'                  "$J" || { echo FAIL: no correlated finding;  exit 1; }
@@ -199,6 +211,107 @@ grep -q "127.0.0.1:$PORT"             "$J" || { echo FAIL: no socket_destination
 grep -q 'exact-fingerprint-match'     "$J" || { echo FAIL: no confidence tag;      exit 1; }
 ! grep -Eiq 'malware|exfiltration|backdoor|attack detected' "$J" \
     || { echo FAIL: forbidden claim; exit 1; }
+
+echo "--- narrative text assertions ---"
+
+grep -q '^Narratives:' "$T" \
+    || { echo FAIL: no narrative section in text report; exit 1; }
+
+grep -q 'Sensitive object observed from file to socket' "$T" \
+    || { echo FAIL: no correlated narrative title; exit 1; }
+
+grep -q 'read() from file' "$T" \
+    || { echo FAIL: narrative missing file-read statement; exit 1; }
+
+grep -q 'process memory at address 0x' "$T" \
+    || { echo FAIL: narrative missing memory statement; exit 1; }
+
+grep -q "socket connected to 127.0.0.1:$PORT" "$T" \
+    || { echo FAIL: narrative missing socket destination; exit 1; }
+
+grep -q 'Evidence: seq=' "$T" \
+    || { echo FAIL: narrative missing evidence references; exit 1; }
+
+
+echo "--- narrative JSON assertions ---"
+
+jq -e '.schema_version == "1.2"' "$J" >/dev/null \
+    || { echo FAIL: wrong JSON schema version; exit 1; }
+
+jq -e '.narratives | type == "array" and length > 0' "$J" >/dev/null \
+    || { echo FAIL: no JSON narratives; exit 1; }
+
+jq -e '
+    any(
+        .narratives[];
+        .title == "Sensitive object observed from file to socket"
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: correlated narrative missing from JSON; exit 1; }
+
+# validate the structure of that narrative:
+
+jq -e '
+    .narratives[]
+    | select(.title == "Sensitive object observed from file to socket")
+    | .sessions | length >= 1
+' "$J" >/dev/null \
+    || { echo FAIL: narrative has no session context; exit 1; }
+
+jq -e '
+    .narratives[]
+    | select(.title == "Sensitive object observed from file to socket")
+    | .statements | length == 3
+' "$J" >/dev/null \
+    || { echo FAIL: narrative does not contain three statements; exit 1; }
+
+# prove that statements have evidence:
+
+jq -e '
+    .narratives[]
+    | select(.title == "Sensitive object observed from file to socket")
+    | all(
+        .statements[];
+        (.evidence_observation_seqs | length) > 0
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: narrative statement missing observation evidence; exit 1; }
+
+# Validate the actual meaning too
+
+jq -e --arg endpoint "127.0.0.1:$PORT" '
+    .narratives[]
+    | select(.title == "Sensitive object observed from file to socket")
+    | any(
+        .statements[];
+        (.text | contains($endpoint))
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: JSON narrative missing socket endpoint; exit 1; }
+
+# temporary credential file:
+
+jq -e '
+    .narratives[]
+    | select(.title == "Sensitive object observed from file to socket")
+    | any(
+        .statements[];
+        (.text | contains("cred.txt"))
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: JSON narrative missing source file; exit 1; }
+
+# memory:
+jq -e '
+    .narratives[]
+    | select(.title == "Sensitive object observed from file to socket")
+    | any(
+        .statements[];
+        (.text | contains("process memory at address 0x"))
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: JSON narrative missing memory observation; exit 1; }
+
 
 mark "assertions passed"
 echo "SENSITIVE OBJECT FLOW OK (ebpf)"
