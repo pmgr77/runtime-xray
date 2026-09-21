@@ -144,6 +144,140 @@ namespace runtimexray {
         return narratives_arr;
     }
 
+    static const char* observation_type_to_string(ObservationType type) {
+        switch (type) {
+            case ObservationType::Event: return "event";
+            case ObservationType::Data: return "data";
+            case ObservationType::Static: return "static";
+            default: return "unknown";
+        }
+    }
+
+    static nlohmann::json serialize_observation(const Observation& obs, const ReportingOptions& opts) {
+        nlohmann::json j;
+
+        //
+        // Stable identity and process/executable context.
+        //
+        j["seq"] = obs.seq;
+        j["type"] = observation_type_to_string(obs.type);
+
+        j["pid"] = obs.pid;
+        j["tid"] = obs.tid;
+        j["tgid"] = obs.tgid;
+
+        j["process_instance_id"] = obs.process_instance_id;
+        j["exec_generation"] = obs.exec_generation;
+
+        if (!obs.program_name.empty()) { j["program"] = obs.program_name; }
+
+        if (obs.duration.count() != 0) { j["duration_us"] = obs.duration.count(); }
+
+        //
+        // Event observation.
+        //
+        if (obs.type == ObservationType::Event) {
+            j["syscall"] = obs.syscall_name;
+            j["return_value"] = obs.return_value;
+            j["is_entry"] = obs.is_entry;
+            j["args"] = { obs.arg0, obs.arg1, obs.arg2, obs.arg3, obs.arg4, obs.arg5 };
+
+            if (!obs.source.empty()) { j["source"] = obs.source; }
+
+            if (!obs.fingerprint.empty()) { j["fingerprint"] = obs.fingerprint; }
+
+            if (!obs.secret_type.empty()) { j["secret_type"] = obs.secret_type; }
+        }
+
+        //
+        // Data observation.
+        //
+        else if (obs.type == ObservationType::Data) {
+            j["data_type"] = obs.data_type;
+
+            if (!obs.fingerprint.empty()) { j["fingerprint"] = obs.fingerprint; }
+
+            if (!obs.secret_type.empty()) { j["secret_type"] = obs.secret_type; }
+
+            if (obs.address != 0) { j["address"] = obs.address; }
+
+            if (obs.size != 0) { j["size"] = obs.size; }
+
+            if (!obs.source.empty()) { j["source"] = obs.source; }
+
+            //
+            // Data snippets may contain the sensitive value itself.
+            // Never expose them unless --show-secrets is enabled.
+            //
+            if (!obs.data_snippet.empty()) {
+                if (opts.show_secrets) { j["data_snippet"] = obs.data_snippet; } 
+                else { j["data_snippet"] = nullptr; }
+            }
+        }
+
+        //
+        // Static-analysis observation.
+        //
+        else if (obs.type == ObservationType::Static) {
+            if (!obs.static_field.empty()) { j["field"] = obs.static_field; }
+
+            if (!obs.static_category.empty()) { j["category"] = obs.static_category; }
+
+            if (!obs.static_description.empty()) { j["description"] = obs.static_description; }
+
+            if (!obs.static_recommendation.empty()) { j["recommendation"] = obs.static_recommendation; }
+
+            if (!obs.cwe_id.empty()) { j["cwe"] = obs.cwe_id; }
+        }
+
+        return j;
+    }
+
+    static nlohmann::json serialize_lineage(const LineageGraph& graph, const ReportingOptions& opts) {
+        nlohmann::json lineage_json;
+
+        lineage_json["summary"] = graph.summary;
+
+        lineage_json["observations"] = nlohmann::json::array();
+
+        for (const auto& obs : graph.observations) {
+            lineage_json["observations"].push_back(serialize_observation(obs, opts));
+        }
+
+        lineage_json["edges"] = nlohmann::json::array();
+
+        for (const auto& edge : graph.edges)
+        {
+            nlohmann::json edge_json;
+
+            //
+            // External JSON references use stable Observation::seq,
+            // not internal vector positions.
+            //
+            if (edge.from_index < graph.observations.size()) {
+                edge_json["from_seq"] = graph.observations[edge.from_index].seq;
+            } else {
+                edge_json["from_seq"] = nullptr;
+            }
+
+            if (edge.to_index < graph.observations.size()) {
+                edge_json["to_seq"] = graph.observations[edge.to_index].seq;
+            } else {
+                edge_json["to_seq"] = nullptr;
+            }
+
+            edge_json["relation"] = relation_to_string(edge.relation);
+
+            edge_json["time_delta_us"] = edge.time_delta.count();
+
+            if (!edge.details.empty()) { edge_json["details"] = edge.details; }
+
+            lineage_json["edges"].push_back(std::move(edge_json));
+        }
+
+        return lineage_json;
+    }
+
     std::string Reporter::to_text(const Report& r, const nlohmann::json* extra) {
         std::ostringstream out;
 
@@ -387,6 +521,7 @@ namespace runtimexray {
             fj["severity"] = severity_to_string(f.severity);
             fj["description"] = f.description;
             fj["evidence"] = f.evidence;
+            fj["evidence_observation_seqs"] = f.evidence_observation_seqs;
 
             std::visit([&](const auto& details) {
                 using T = std::decay_t<decltype(details)>;
@@ -441,7 +576,7 @@ namespace runtimexray {
     std::string Reporter::to_json(const Report& r, const nlohmann::json* extra) {
         nlohmann::json j;
 
-        j["schema_version"] = "1.2";
+        j["schema_version"] = "1.3";
         j["tool"] = r.context.tool_name;
         j["tool_version"] = r.context.tool_version;
         j["command"] = r.context.command;
@@ -481,12 +616,7 @@ namespace runtimexray {
         }
 
         if (r.lineage_graph.has_value()) {
-            nlohmann::json lineage_json;
-            const auto& graph = r.lineage_graph.value();
-            lineage_json["summary"] = graph.summary;
-            // Serialize observations and edges (we'll need to convert to JSON)
-            // ...
-            j["lineage"] = lineage_json;
+            j["lineage"] = serialize_lineage(r.lineage_graph.value(), r.report_opts);
         }
 
         return j.dump(4);

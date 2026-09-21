@@ -67,9 +67,41 @@ def main():
             print(f"Finding at index {idx} missing 'severity' or 'description'")
             sys.exit(1)
 
-    assert data["schema_version"] == "1.2"
+    assert data["schema_version"] == "1.3"
     assert "narratives" in data
     assert isinstance(data["narratives"], list)
+
+    if "lineage" in data:
+        lineage = data["lineage"]
+
+        assert "summary" in lineage
+        assert "observations" in lineage
+        assert "edges" in lineage
+
+        assert isinstance(lineage["observations"], list)
+        assert isinstance(lineage["edges"], list)
+
+        observation_seqs = {
+            obs["seq"]
+            for obs in lineage["observations"]
+        }
+
+        assert 0 not in observation_seqs
+
+        for finding in data["findings"]:
+            for seq in finding.get(
+                "evidence_observation_seqs", []
+            ):
+                assert seq in observation_seqs
+
+        for narrative in data["narratives"]:
+            for statement in narrative.get(
+                "statements", []
+            ):
+                for seq in statement.get(
+                    "evidence_observation_seqs", []
+                ):
+                    assert seq in observation_seqs
 
     print("JSON validation passed.")
     sys.exit(0)

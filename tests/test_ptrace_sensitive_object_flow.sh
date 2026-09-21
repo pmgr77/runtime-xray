@@ -124,7 +124,7 @@ grep -q 'Evidence: seq=' "$T" \
 
 echo "--- narrative JSON assertions ---"
 
-jq -e '.schema_version == "1.2"' "$J" >/dev/null \
+jq -e '.schema_version == "1.3"' "$J" >/dev/null \
     || { echo FAIL: wrong JSON schema version; exit 1; }
 
 jq -e '.narratives | type == "array" and length > 0' "$J" >/dev/null \
@@ -200,5 +200,58 @@ jq -e '
     )
 ' "$J" >/dev/null \
     || { echo FAIL: JSON narrative missing memory observation; exit 1; }
+
+echo "--- lineage reference assertions ---"
+
+jq -e '
+    .lineage.observations
+    | type == "array" and length > 0
+' "$J" >/dev/null \
+    || { echo FAIL: lineage observations missing; exit 1; }
+
+jq -e '
+    .lineage.edges
+    | type == "array"
+' "$J" >/dev/null \
+    || { echo FAIL: lineage edges missing; exit 1; }
+
+jq -e '
+    (.lineage.observations | map(.seq)) as $seqs
+    |
+    all(
+        .findings[]
+        .evidence_observation_seqs[]?;
+        . as $seq
+        | ($seqs | index($seq)) != null
+    )
+' "$J" >/dev/null \
+    || {
+        echo FAIL: finding evidence reference missing from lineage;
+        exit 1;
+    }
+
+jq -e '
+    (.lineage.observations | map(.seq)) as $seqs
+    |
+    all(
+        .narratives[]
+        .statements[]
+        .evidence_observation_seqs[];
+        . as $seq
+        | ($seqs | index($seq)) != null
+    )
+' "$J" >/dev/null \
+    || {
+        echo FAIL: narrative evidence reference missing from lineage;
+        exit 1;
+    }
+
+jq -e '
+    all(
+        .lineage.observations[];
+        .seq > 0
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: zero lineage sequence; exit 1; }
 
 echo "SENSITIVE OBJECT FLOW OK (ptrace)"
