@@ -51,6 +51,7 @@ set(RUNTIMEXRAY_SOURCES
     src/register_builtin_risk_assessments.cpp
     src/cross_boundary_risk_assessment.cpp
     src/narrative.cpp
+    src/narrative_builder.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,16 @@ add_executable(test_narrative_sessions
 target_include_directories(test_narrative_sessions PRIVATE include)
 add_test(NAME check_narrative_sessions
          COMMAND test_narrative_sessions
+)
+
+add_executable(test_narrative_builder
+    tests/unit/test_narrative_builder.cpp
+    src/narrative.cpp
+    src/narrative_builder.cpp
+)
+target_include_directories(test_narrative_builder PRIVATE include)
+add_test(NAME check_narrative_builder
+         COMMAND test_narrative_builder
 )
 
 # CLI-level mem lineage test
