@@ -26,8 +26,14 @@ target_compile_options(cross_boundary_test PRIVATE -O0)
 add_executable(sensitive_object_flow sensitive_object_flow.c)
 target_compile_options(sensitive_object_flow PRIVATE -O0)
 
+add_executable(pipe_flow pipe_flow.c)
+target_compile_options(pipe_flow PRIVATE -O0)
+
 add_executable(file_access_outcomes file_access_outcomes.c)
 target_compile_options(file_access_outcomes PRIVATE -O0)
+
+add_executable(thread_lifecycle_test thread_lifecycle_test.c)
+target_compile_options(thread_lifecycle_test PRIVATE -O0)
 
 # Optionally, set output directory
 set_target_properties(dynamic_target 
@@ -36,5 +42,7 @@ set_target_properties(dynamic_target
     secret_holder
     cross_boundary_test
     sensitive_object_flow
+    pipe_flow
     file_access_outcomes
+    thread_lifecycle_test
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

@@ -895,17 +895,16 @@ namespace runtimexray {
             }
 
             // -----------------------------------------------------------------------
-            // Emit one correlated finding per fully-observed sensitive object.
+            // Emit the strong file -> memory -> socket correlation only when:
             //
-            // An object is "fully observed" when its fingerprint appears on all three
-            // of:
-            //   - a read-family Event (read / recvfrom)    -> the read event
-            //   - a Data node from the memory scan         -> the memory observation
-            //   - a write-family Event (write/writev/sendto) -> the send event
+            //   1. the same fingerprint appears in read, scanner memory, and output;
+            //   2. all three observations belong to the same process/exec session;
+            //   3. the input FD resolves to a file path;
+            //   4. the output FD resolves to a socket endpoint.
             //
-            // fd -> path and fd -> endpoint resolution is done by walking the graph
-            // backwards from the read and send events, so no runtime FD state is
-            // needed.
+            // Fingerprint equality establishes value identity, not causality.
+            // Cross-process flows require explicit resource lineage and are therefore
+            // intentionally excluded here.
             // -----------------------------------------------------------------------
             {
                 // fingerprint -> observation indices carrying it
@@ -957,6 +956,30 @@ namespace runtimexray {
 
                     const FdResource read_res = resolve_fd_at(graph, read_pid, read_fd, read_idx);
                     const FdResource send_res = resolve_fd_at(graph, send_pid, send_fd, send_idx);
+
+                    //
+                    // This finding makes a strong semantic claim:
+                    //
+                    //     file -> read -> memory -> send -> socket
+                    //
+                    // Fingerprint equality alone proves value identity, not causal flow.
+                    // Until RuntimeXRay has explicit cross-process resource lineage, require
+                    // the entire flow to stay inside one executable session and require both
+                    // endpoint resources to be resolved.
+                    //
+                    const bool same_session =
+                        read_obs.process_instance_id == mem_obs.process_instance_id &&
+                        read_obs.process_instance_id == send_obs.process_instance_id &&
+                        read_obs.exec_generation == mem_obs.exec_generation &&
+                        read_obs.exec_generation == send_obs.exec_generation;
+
+                    if (!same_session) {
+                        continue;
+                    }
+
+                    if (read_res.path.empty() || send_res.endpoint.empty()) {
+                        continue;
+                    }
 
                     std::ostringstream oss;
                     oss << "sensitive_object_type="

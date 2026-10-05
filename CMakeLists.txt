@@ -291,6 +291,13 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
                 $<TARGET_FILE:file_access_outcomes>
                 ebpf)
     set_tests_properties(check_trace_file_access_outcomes_ebpf PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 125)
+
+    add_test(NAME check_ebpf_pipe_flow
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_pipe_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:pipe_flow>)
+    set_tests_properties(check_ebpf_pipe_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
+
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)
@@ -370,10 +377,22 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_trace_info_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/hostname")
 
     add_test(NAME check_ptrace_sensitive_object_flow
-     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ptrace_sensitive_object_flow.sh
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ptrace_sensitive_object_flow.sh
              $<TARGET_FILE:runtimexray>
              $<TARGET_FILE:sensitive_object_flow>)
     set_tests_properties(check_ptrace_sensitive_object_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
+    add_test(NAME check_ptrace_pipe_flow
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ptrace_pipe_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:pipe_flow>)
+    set_tests_properties(check_ptrace_pipe_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
+
+    add_test(NAME check_process_instance_lifetime
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_process_instance_lifetime.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:thread_lifecycle_test>)
+    set_tests_properties(check_process_instance_lifetime PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
 
     # Fork/thread tracing tests (ptrace)
     add_test(NAME check_trace_follow_forks

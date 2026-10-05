@@ -75,6 +75,27 @@ private:
 
     std::string initial_program_;
     bool initial_program_assigned_ = false;
+
+    struct FdResourceBinding {
+        uint64_t resource_id = 0;
+        std::string type;
+        std::string role;
+    };
+
+    // RuntimeXRay-local resource allocator.
+    // 0 means "unassigned".
+    uint64_t next_resource_id_ = 1;
+
+    // process_instance_id -> fd -> resource
+    std::unordered_map<uint64_t, std::unordered_map<int, FdResourceBinding>> fd_bindings_by_instance_;
+
+    void stamp_fd_resource(Observation& obs) const;
+
+    void handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index);
+
+    void handle_close_exit(const SyscallEvent& ev, size_t syscall_index);
+
+    void link_pipe_dataflow(size_t read_index);
     
     // Graph storage
     std::vector<Observation> observations_;

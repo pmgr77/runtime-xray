@@ -81,6 +81,18 @@ struct Observation {
     size_t size = 0;
     std::string source;                 // e.g., "file:/etc/passwd", "env:API_KEY"
 
+    // Runtime resource identity.
+    //
+    // resource_id identifies one kernel/runtime resource within this
+    // RuntimeXRay analysis. 0 means "not assigned".
+    //
+    // Example:
+    //   pipe read fd 4  -> resource_id 7, type "pipe", role "read"
+    //   pipe write fd 5 -> resource_id 7, type "pipe", role "write"
+    uint64_t resource_id = 0;
+    std::string resource_type;
+    std::string resource_role;
+
     // Static-specific fields
     std::string static_field;
     std::string static_category;        // "hardening", "dangerous_api"

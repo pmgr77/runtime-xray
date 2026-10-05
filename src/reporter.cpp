@@ -187,6 +187,12 @@ namespace runtimexray {
             if (!obs.fingerprint.empty()) { j["fingerprint"] = obs.fingerprint; }
 
             if (!obs.secret_type.empty()) { j["secret_type"] = obs.secret_type; }
+
+            if (obs.resource_id != 0) { j["resource_id"] = obs.resource_id; }
+
+            if (!obs.resource_type.empty()) { j["resource_type"] = obs.resource_type; }
+
+            if (!obs.resource_role.empty()) { j["resource_role"] = obs.resource_role; }
         }
 
         //

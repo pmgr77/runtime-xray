@@ -196,6 +196,7 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
         obs.arg4 = ev.arg4;
         obs.arg5 = ev.arg5;
         obs.is_entry = true;
+        stamp_fd_resource(obs);
 
         size_t sys_idx = add_observation(obs);
 
@@ -251,6 +252,14 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
 
             // Special handling for fork/clone
             const char* name = syscall_name(static_cast<long>(ev.syscall_number));
+            if ((strcmp(name, "pipe") == 0 || strcmp(name, "pipe2") == 0) && ev.return_value == 0) {
+                handle_pipe_exit(ev, sys_idx);
+            }
+
+            if (std::strcmp(name, "close") == 0) {
+                handle_close_exit(ev, sys_idx);
+            }
+
             if (strcmp(name, "fork") == 0 ||
                 strcmp(name, "vfork") == 0 ||
                 strcmp(name, "clone") == 0 ||
@@ -307,6 +316,7 @@ void LineageAnalyzer::set_last_exit_fingerprint(pid_t pid, pid_t tid,
         return;
     if (tit->second < observations_.size()) {
         observations_[tit->second].fingerprint = fingerprint;
+        link_pipe_dataflow(tit->second);
     }
 }
 
@@ -381,12 +391,33 @@ void LineageAnalyzer::handle_fork_exit(
     //
     if (syscall_name == "clone") {
         if ((clone_flags & CLONE_THREAD) != 0) {
+            //
+            // The new task belongs to the parent's existing Linux thread group.
+            //
+            // Register it immediately rather than waiting for the child's first
+            // syscall. Otherwise the thread-group leader may exit first, causing
+            // handle_thread_exit() to incorrectly conclude that the whole process
+            // instance has ended.
+            //
+            auto parent_idx = find_active_process_node(parent_tgid);
+            if (!parent_idx.has_value()) {
+                Logger::log(
+                    LogLevel::Debug,
+                    "lineage: clone created thread but active parent process "
+                    "node is missing for tgid=" +
+                    std::to_string(parent_tgid));
+                return;
+            }
+            const uint64_t instance_id = observations_[*parent_idx].process_instance_id;
+            active_tids_by_instance_[instance_id].insert(child_tid);
             Logger::log(
                 LogLevel::Debug,
                 "lineage: clone created thread tid=" +
                 std::to_string(child_tid) +
                 " in tgid=" +
-                std::to_string(parent_tgid));
+                std::to_string(parent_tgid) +
+                " process_instance=" +
+                std::to_string(instance_id));
             return;
         }
     }
@@ -424,7 +455,6 @@ void LineageAnalyzer::handle_fork_exit(
 
     size_t child_idx = ensure_process(child_tgid, child_tid, child_tgid);
 
-    
     auto parent_idx = find_active_process_node(parent_tgid);
     if (!parent_idx.has_value()) {
         Logger::log(
@@ -433,6 +463,14 @@ void LineageAnalyzer::handle_fork_exit(
             std::to_string(parent_tgid));
 
         return;
+    }
+
+    const uint64_t parent_instance_id = observations_[*parent_idx].process_instance_id;
+    const uint64_t child_instance_id = observations_[child_idx].process_instance_id;
+
+    auto bindings_it = fd_bindings_by_instance_.find(parent_instance_id);
+    if (bindings_it != fd_bindings_by_instance_.end()) {
+        fd_bindings_by_instance_[child_instance_id] = bindings_it->second;
     }
 
     // Causality edge: parent process -> child process
@@ -624,6 +662,7 @@ void LineageAnalyzer::handle_thread_exit(const SyscallEvent& ev)
 
     active_process_by_tgid_.erase(tgid);
     active_tids_by_instance_.erase(instance_id);
+    fd_bindings_by_instance_.erase(instance_id);
 
     Logger::log(
         LogLevel::Debug,
@@ -660,6 +699,7 @@ void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {
     //
     active_process_by_tgid_.erase(tgid);
     active_tids_by_instance_.erase(instance_id);
+    fd_bindings_by_instance_.erase(instance_id);
 }
 
 LineageGraph LineageAnalyzer::produce_graph() const {
@@ -673,5 +713,189 @@ LineageGraph LineageAnalyzer::produce_graph() const {
     graph.edges = edges_;
     return graph;
 }
+
+void LineageAnalyzer::stamp_fd_resource(Observation& obs) const {
+    if (obs.process_instance_id == 0) {
+        return;
+    }
+
+    const bool has_fd_arg =
+        obs.syscall_name == "read" ||
+        obs.syscall_name == "write" ||
+        obs.syscall_name == "writev" ||
+        obs.syscall_name == "recvfrom" ||
+        obs.syscall_name == "sendto" ||
+        obs.syscall_name == "close";
+
+    if (!has_fd_arg) {
+        return;
+    }
+
+    const auto process_it = fd_bindings_by_instance_.find(obs.process_instance_id);
+    if (process_it == fd_bindings_by_instance_.end()) {
+        return;
+    }
+
+    const int fd = static_cast<int>(obs.arg0);
+    const auto fd_it = process_it->second.find(fd);
+    if (fd_it == process_it->second.end()) {
+        return;
+    }
+
+    obs.resource_id = fd_it->second.resource_id;
+    obs.resource_type = fd_it->second.type;
+    obs.resource_role = fd_it->second.role;
+}
+
+void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index) {
+    if (ev.return_value != 0 || !backend_) {
+        return;
+    }
+    if (syscall_index >= observations_.size()) {
+        return;
+    }
+    Observation& pipe_obs = observations_[syscall_index];
+    const uint64_t pipefd_addr = pipe_obs.arg0;
+    if (pipefd_addr == 0) {
+        return;
+    }
+
+    const auto bytes = backend_->read_memory(ev.pid, pipefd_addr, sizeof(int) * 2);
+    if (bytes.size() != sizeof(int) * 2) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: failed to read pipefd array from pid=" +
+            std::to_string(ev.pid) +
+            " addr=0x" + std::to_string(pipefd_addr));
+        return;
+    }
+
+    int fds[2] = {-1, -1};
+    std::memcpy(fds, bytes.data(), sizeof(fds));
+
+    if (fds[0] < 0 || fds[1] < 0) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: invalid pipefd values from pid=" +
+            std::to_string(ev.pid) +
+            " addr=0x" + std::to_string(pipefd_addr));
+        return;
+    }
+
+    const uint64_t resource_id = next_resource_id_++;
+
+    auto& fd_map = fd_bindings_by_instance_[pipe_obs.process_instance_id];
+    fd_map[fds[0]] = {resource_id, "pipe", "read"};
+    fd_map[fds[1]] = {resource_id, "pipe", "write"};
+    pipe_obs.resource_id = resource_id;
+    pipe_obs.resource_type = "pipe";
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: pipe resource=" +
+        std::to_string(resource_id) +
+        " read_fd=" +
+        std::to_string(fds[0]) +
+        " write_fd=" +
+        std::to_string(fds[1]) +
+        " process_instance=" +
+        std::to_string(pipe_obs.process_instance_id));
+}
+
+void LineageAnalyzer::handle_close_exit(const SyscallEvent& ev, size_t syscall_index) {
+
+    if (ev.return_value != 0 || !backend_ || syscall_index >= observations_.size()) {
+        return;
+    }
+
+    const Observation& close_obs = observations_[syscall_index];
+
+    auto process_it = fd_bindings_by_instance_.find(close_obs.process_instance_id);
+    if (process_it == fd_bindings_by_instance_.end()) {
+        return;
+    }
+
+    const int fd = static_cast<int>(close_obs.arg0);
+    process_it->second.erase(fd);
+}
+
+void LineageAnalyzer::link_pipe_dataflow(size_t read_index)
+{
+    if (read_index >= observations_.size()) {
+        return;
+    }
+
+    const Observation& read_obs = observations_[read_index];
+    if (read_obs.type != ObservationType::Event ||
+        read_obs.syscall_name != "read" ||
+        read_obs.return_value <= 0 ||
+        read_obs.resource_id == 0 ||
+        read_obs.resource_type != "pipe" ||
+        read_obs.resource_role != "read" ||
+        read_obs.fingerprint.empty()) {
+        return;
+    }
+
+    std::optional<size_t> best_write;
+    for (size_t i = 0; i < observations_.size(); ++i) {
+        if (i == read_index) {
+            continue;
+        }
+
+        const Observation& write_obs = observations_[i];
+        if (write_obs.type != ObservationType::Event) {
+            continue;
+        }
+
+        if (write_obs.syscall_name != "write" &&
+            write_obs.syscall_name != "writev") {
+            continue;
+        }
+
+        if (write_obs.return_value <= 0) {
+            continue;
+        }
+
+        if (write_obs.resource_id != read_obs.resource_id ||
+            write_obs.resource_type != "pipe" ||
+            write_obs.resource_role != "write") {
+            continue;
+        }
+
+        if (write_obs.fingerprint != read_obs.fingerprint) {
+            continue;
+        }
+
+        /*
+        * Observation order is not causal order.
+        *
+        * A blocking read may be observed before the write that satisfies it.
+        * The supplying write must, however, have completed no later than
+        * the read itself completed.
+        */
+        if (write_obs.end_time > read_obs.end_time) {
+            continue;
+        }
+
+        /*
+        * If multiple matching writes exist, choose the latest one that
+        * completed before this read completed.
+        */
+        if (!best_write.has_value() ||
+            observations_[*best_write].end_time < write_obs.end_time) {
+            best_write = i;
+        }
+    }
+
+    if (!best_write.has_value()) {
+        return;
+    }
+
+    add_edge(
+        *best_write,
+        read_index,
+        RelationType::DataFlow,
+        "exact fingerprint observed across pipe resource_id=" +
+            std::to_string(read_obs.resource_id));
+    }
 
 } // namespace runtimexray

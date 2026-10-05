@@ -149,6 +149,7 @@ public:
 
         bpf_program_enter_ = bpf_object__find_program_by_name(bpf_object_, "trace_sys_enter");
         bpf_program_exit_ = bpf_object__find_program_by_name(bpf_object_, "trace_sys_exit");
+        bpf_program_fork_ = bpf_object__find_program_by_name(bpf_object_, "trace_sched_process_fork");
         bpf_map_pid_filter_ = bpf_object__find_map_by_name(bpf_object_, "pid_filter");
         bpf_map_events_ = bpf_object__find_map_by_name(bpf_object_, "events");
         if (!bpf_program_enter_ || !bpf_program_exit_ || !bpf_map_pid_filter_ || !bpf_map_events_) {
@@ -156,6 +157,12 @@ public:
             kill(child_pid_, SIGKILL);
             waitpid(child_pid_, nullptr, 0);
             throw std::runtime_error("Required eBPF objects not found");
+        }
+        if (follow_forks_ && !bpf_program_fork_) {
+            bpf_object__close(bpf_object_);
+            kill(child_pid_, SIGKILL);
+            waitpid(child_pid_, nullptr, 0);
+            throw std::runtime_error("sched_process_fork eBPF program not found");
         }
         bpf_map_enter_counter_ = bpf_object__find_map_by_name(bpf_object_, "enter_counter");
         bpf_map_exit_counter_ = bpf_object__find_map_by_name(bpf_object_, "exit_counter");
@@ -189,6 +196,22 @@ public:
             kill(child_pid_, SIGKILL);
             waitpid(child_pid_, nullptr, 0);
             throw std::runtime_error("Failed to attach eBPF tracepoints");
+        }
+        if (follow_forks_) {
+            link_fork_ = bpf_program__attach_tracepoint(bpf_program_fork_, "sched", "sched_process_fork");
+            if (libbpf_get_error(link_fork_)) {
+                link_fork_ = nullptr;
+
+                bpf_link__destroy(link_enter_);
+                bpf_link__destroy(link_exit_);
+
+                bpf_object__close(bpf_object_);
+
+                kill(child_pid_, SIGKILL);
+                waitpid(child_pid_, nullptr, 0);
+
+                throw std::runtime_error("Failed to attach sched_process_fork tracepoint");
+            }
         }
 
         ring_buffer_ = ring_buffer__new(bpf_map__fd(bpf_map_events_), handle_event, this, nullptr);
@@ -255,6 +278,10 @@ public:
         ring_buffer__free(ring_buffer_);
         bpf_link__destroy(link_enter_);
         bpf_link__destroy(link_exit_);
+        if (link_fork_) {
+            bpf_link__destroy(link_fork_);
+            link_fork_ = nullptr;
+        }
         bpf_object__close(bpf_object_);
         ring_buffer_ = nullptr;
         bpf_object_ = nullptr;
@@ -530,6 +557,8 @@ private:
     struct bpf_link* link_enter_ = nullptr;
     struct bpf_link* link_exit_ = nullptr;
     struct ring_buffer* ring_buffer_ = nullptr;
+    struct bpf_program* bpf_program_fork_ = nullptr;
+    struct bpf_link* link_fork_ = nullptr;
 };
 
 std::unique_ptr<ITraceBackend> create_ebpf_backend() {

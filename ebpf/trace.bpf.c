@@ -107,6 +107,19 @@ struct sys_exit_ctx {
     long           ret;
 };
 
+struct sched_process_fork_ctx {
+    unsigned short common_type;
+    unsigned char common_flags;
+    unsigned char common_preempt_count;
+    int common_pid;
+
+    __u32 parent_comm;
+    int parent_pid;
+
+    __u32 child_comm;
+    int child_pid;
+};
+
 /* ------------------------------------------------------------------ */
 /* Maps                                                               */
 /* ------------------------------------------------------------------ */
@@ -466,6 +479,41 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
     }
 
     bpf_ringbuf_submit(ev, 0);
+    return 0;
+}
+
+SEC("tracepoint/sched/sched_process_fork")
+int trace_sched_process_fork(struct sched_process_fork_ctx *ctx)
+{
+    /*
+     * This tracepoint runs in the parent context while the child is
+     * being created.
+     *
+     * pid_filter is keyed by TGID, matching raw_syscalls filtering.
+     */
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 parent_tgid = (__u32)(pid_tgid >> 32);
+
+    __u32 *tracked = bpf_map_lookup_elem(&pid_filter, &parent_tgid);
+
+    if (!tracked) {
+        return 0;
+    }
+
+    __u32 child_pid = (__u32)ctx->child_pid;
+
+    if (child_pid == 0) {
+        return 0;
+    }
+
+    __u32 value = child_pid;
+
+    bpf_map_update_elem(
+        &pid_filter,
+        &child_pid,
+        &value,
+        BPF_ANY);
+
     return 0;
 }
 
