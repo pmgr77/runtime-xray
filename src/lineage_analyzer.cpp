@@ -422,6 +422,11 @@ void LineageAnalyzer::handle_task_create(const SyscallEvent& ev) {
 
     const uint64_t child_instance_id = observations_[child_idx].process_instance_id;
 
+    // Remember that this child process was already created through the early
+    // TaskCreate path. The corresponding parent fork/clone syscall may return
+    // much later (notably with CLONE_VFORK), after the child has already exited.
+    task_create_parent_instance_by_child_tid_[ev.child_tid] = parent_instance_id;
+
     //
     // This may also be encountered later through the fork/clone syscall
     // exit. Initialize exactly once so the late parent syscall exit cannot
@@ -510,6 +515,39 @@ void LineageAnalyzer::handle_fork_exit(
     }
 
     //
+    // TaskCreate may have already created and initialized this child.
+    //
+    // This is especially important for CLONE_VFORK: the child may exec or exit
+    // before the parent's clone syscall returns. In that case the child is no
+    // longer active here, but we must not create a second process instance.
+    //
+    auto parent_idx = find_active_process_node(parent_tgid);
+    if (!parent_idx.has_value()) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: active parent process node missing for tgid=" +
+            std::to_string(parent_tgid));
+        return;
+    }
+
+    const uint64_t parent_instance_id = observations_[*parent_idx].process_instance_id;
+
+    auto task_create_it = task_create_parent_instance_by_child_tid_.find(child_tid);
+
+    if (task_create_it != task_create_parent_instance_by_child_tid_.end() &&
+        task_create_it->second == parent_instance_id) {
+
+        task_create_parent_instance_by_child_tid_.erase(task_create_it);
+
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: fork exit matched earlier TaskCreate child_tid=" +
+            std::to_string(child_tid));
+
+        return;
+    }
+
+    //
     // clone3(&clone_args, sizeof(clone_args))
     //
     // arg0 is a userspace pointer to struct clone_args, NOT the flags.
@@ -542,17 +580,6 @@ void LineageAnalyzer::handle_fork_exit(
 
     size_t child_idx = ensure_process(child_tgid, child_tid, child_tgid);
 
-    auto parent_idx = find_active_process_node(parent_tgid);
-    if (!parent_idx.has_value()) {
-        Logger::log(
-            LogLevel::Debug,
-            "lineage: active parent process node missing for tgid=" +
-            std::to_string(parent_tgid));
-
-        return;
-    }
-
-    const uint64_t parent_instance_id = observations_[*parent_idx].process_instance_id;
     const uint64_t child_instance_id = observations_[child_idx].process_instance_id;
 
     const bool first_initialization = fd_inheritance_initialized_instances_.insert(child_instance_id).second;

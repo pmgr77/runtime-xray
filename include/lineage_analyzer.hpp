@@ -97,6 +97,8 @@ private:
     // overwrite FD changes already made by the child.
     std::unordered_set<uint64_t> fd_inheritance_initialized_instances_;
 
+    std::unordered_map<pid_t, uint64_t> task_create_parent_instance_by_child_tid_;
+
     void stamp_fd_resource(Observation& obs) const;
 
     void handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index);
