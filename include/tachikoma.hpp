@@ -85,6 +85,10 @@ struct SyscallEvent {
     // Already truncated by the backend to its capture limit; may be shorter
     // than the syscall's count argument.
     std::vector<std::byte> captured_payload;
+
+    bool has_captured_pipe_fds = false;
+    int captured_pipe_fd0 = -1;
+    int captured_pipe_fd1 = -1;
 };
 
 using SyscallCallback = std::function<void(const SyscallEvent&)>;

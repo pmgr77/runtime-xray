@@ -256,6 +256,12 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
                 handle_pipe_exit(ev, sys_idx);
             }
 
+            if (std::strcmp(name, "dup") == 0 ||
+                std::strcmp(name, "dup2") == 0 ||
+                std::strcmp(name, "dup3") == 0) {
+                handle_dup_exit(ev, sys_idx);
+            }
+
             if (std::strcmp(name, "close") == 0) {
                 handle_close_exit(ev, sys_idx);
             }
@@ -725,7 +731,10 @@ void LineageAnalyzer::stamp_fd_resource(Observation& obs) const {
         obs.syscall_name == "writev" ||
         obs.syscall_name == "recvfrom" ||
         obs.syscall_name == "sendto" ||
-        obs.syscall_name == "close";
+        obs.syscall_name == "close" ||
+        obs.syscall_name == "dup" ||
+        obs.syscall_name == "dup2" ||
+        obs.syscall_name == "dup3";
 
     if (!has_fd_arg) {
         return;
@@ -748,7 +757,7 @@ void LineageAnalyzer::stamp_fd_resource(Observation& obs) const {
 }
 
 void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index) {
-    if (ev.return_value != 0 || !backend_) {
+    if (ev.return_value != 0) {
         return;
     }
     if (syscall_index >= observations_.size()) {
@@ -760,18 +769,25 @@ void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_in
         return;
     }
 
-    const auto bytes = backend_->read_memory(ev.pid, pipefd_addr, sizeof(int) * 2);
-    if (bytes.size() != sizeof(int) * 2) {
-        Logger::log(
-            LogLevel::Debug,
-            "lineage: failed to read pipefd array from pid=" +
-            std::to_string(ev.pid) +
-            " addr=0x" + std::to_string(pipefd_addr));
-        return;
-    }
-
     int fds[2] = {-1, -1};
-    std::memcpy(fds, bytes.data(), sizeof(fds));
+    if (ev.has_captured_pipe_fds) {
+        fds[0] = ev.captured_pipe_fd0;
+        fds[1] = ev.captured_pipe_fd1;
+    } else {
+        if (!backend_) {
+            return;
+        }
+        const auto bytes = backend_->read_memory(ev.pid, pipefd_addr, sizeof(int) * 2);
+        if (bytes.size() != sizeof(int) * 2) {
+            Logger::log(
+                LogLevel::Debug,
+                "lineage: failed to read pipefd array from pid=" +
+                std::to_string(ev.pid) +
+                " addr=0x" + std::to_string(pipefd_addr));
+            return;
+        }
+        std::memcpy(fds, bytes.data(), sizeof(fds));
+    }
 
     if (fds[0] < 0 || fds[1] < 0) {
         Logger::log(
@@ -803,7 +819,7 @@ void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_in
 
 void LineageAnalyzer::handle_close_exit(const SyscallEvent& ev, size_t syscall_index) {
 
-    if (ev.return_value != 0 || !backend_ || syscall_index >= observations_.size()) {
+    if (ev.return_value != 0 || syscall_index >= observations_.size()) {
         return;
     }
 
@@ -816,6 +832,43 @@ void LineageAnalyzer::handle_close_exit(const SyscallEvent& ev, size_t syscall_i
 
     const int fd = static_cast<int>(close_obs.arg0);
     process_it->second.erase(fd);
+}
+
+void LineageAnalyzer::handle_dup_exit(const SyscallEvent& ev, size_t syscall_index)
+{
+    if (ev.return_value < 0 || syscall_index >= observations_.size()) {
+        return;
+    }
+
+    const Observation& dup_obs = observations_[syscall_index];
+
+    const int oldfd = static_cast<int>(dup_obs.arg0);
+    const int newfd = static_cast<int>(dup_obs.return_value);
+
+    auto instance_it = fd_bindings_by_instance_.find(dup_obs.process_instance_id);
+    if (instance_it == fd_bindings_by_instance_.end()) {
+        return;
+    }
+
+    auto& bindings = instance_it->second;
+
+    auto source_it = bindings.find(oldfd);
+    if (source_it != bindings.end()) {
+        /*
+         * dup* creates another FD referring to the exact same
+         * underlying resource endpoint.
+         */
+        bindings[newfd] = source_it->second;
+    } else {
+        /*
+         * Important for dup2/dup3:
+         *
+         * A successful duplication replaces newfd. If newfd used
+         * to refer to one of our tracked resources but oldfd is
+         * untracked, the old binding is no longer valid.
+         */
+        bindings.erase(newfd);
+    }
 }
 
 void LineageAnalyzer::link_pipe_dataflow(size_t read_index)

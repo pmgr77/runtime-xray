@@ -76,6 +76,11 @@ struct syscall_event {
     __u64 ret;
     __u8 is_entry;
     
+    __u8  has_pipe_fds;
+    __u8  pipe_pad[3];
+    __s32 pipe_fd0;
+    __s32 pipe_fd1;
+
      /* Which captured fields are populated in this event */
     __u8  has_path;
     __u8  has_sockaddr;
@@ -145,6 +150,13 @@ struct {
     __type(value, __u64);
 } pending_read_buf SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);
+    __type(value, __u64);
+} pending_pipefd_buf SEC(".maps");
+
 /* Counters kept from the original program for debug visibility. */
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -196,6 +208,8 @@ struct {
 #define NR_recvfrom   45
 #define NR_clone      56
 #define NR_clone3     435
+#define NR_pipe       22
+#define NR_pipe2      293
 
 #elif defined(__TARGET_ARCH_arm64)
 
@@ -210,6 +224,7 @@ struct {
 #define NR_recvfrom   207
 #define NR_clone      220
 #define NR_clone3     435
+#define NR_pipe2      59
 
 #else
 #error "Unsupported target architecture for RuntimeXRay eBPF program"
@@ -246,6 +261,15 @@ static __always_inline int is_write_like(__u32 id) {
 
 static __always_inline int is_read_like(__u32 id) {
     return id == NR_read || id == NR_recvfrom;
+}
+
+static __always_inline int is_pipe_like(__u32 id)
+{
+#if defined(__TARGET_ARCH_x86)
+    return id == NR_pipe || id == NR_pipe2;
+#else
+    return id == NR_pipe2;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -341,6 +365,16 @@ static __always_inline void fill_payload_on_entry(struct syscall_event *ev,
     }
 }
 
+static __always_inline void fill_pipefds(struct syscall_event *ev, struct sys_enter_ctx *ctx, __u32 *tid)
+{
+    __u64 pipefd = ctx->args[0];
+    if (pipefd)
+        bpf_map_update_elem(&pending_pipefd_buf,
+                            tid,
+                            &pipefd,
+                            BPF_ANY);
+}
+
 /* ------------------------------------------------------------------ */
 /* Programs                                                           */
 /* ------------------------------------------------------------------ */
@@ -386,6 +420,9 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
     ev->has_sockaddr = 0;
     ev->has_payload  = 0;
     ev->payload_len  = 0;
+    ev->has_pipe_fds = 0;
+    ev->pipe_fd0 = -1;
+    ev->pipe_fd1 = -1;
     for (int i = 0; i < MAX_ARGS; i++)
         ev->args[i] = ctx->args[i];
 
@@ -396,6 +433,8 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
         fill_sockaddr(ev, ctx);
     } else if (is_write_like(id)) {
         fill_payload_on_entry(ev, ctx);
+    } else if (is_pipe_like(id)) {
+        fill_pipefds(ev, ctx, &tid);
     }
     
     bpf_ringbuf_submit(ev, 0);
@@ -447,6 +486,9 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
     ev->has_sockaddr = 0;
     ev->has_payload  = 0;
     ev->payload_len  = 0;
+    ev->has_pipe_fds = 0;
+    ev->pipe_fd0 = -1;
+    ev->pipe_fd1 = -1;
     for (int i = 0; i < MAX_ARGS; i++)
         ev->args[i] = 0;
 
@@ -476,6 +518,17 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
             }
         }
         bpf_map_delete_elem(&pending_read_buf, &tid);
+    } else if (is_pipe_like(id)) {
+        __u64 *pipefdp = bpf_map_lookup_elem(&pending_pipefd_buf, &tid);
+        if (ctx->ret == 0 && pipefdp && *pipefdp) {
+            int fds[2];
+            if (bpf_probe_read_user(&fds, sizeof(fds), (void *)*pipefdp) == 0) {
+                ev->has_pipe_fds = 1;
+                ev->pipe_fd0 = fds[0];
+                ev->pipe_fd1 = fds[1];
+            }
+        }
+        bpf_map_delete_elem(&pending_pipefd_buf, &tid);
     }
 
     bpf_ringbuf_submit(ev, 0);

@@ -95,6 +95,8 @@ private:
 
     void handle_close_exit(const SyscallEvent& ev, size_t syscall_index);
 
+    void handle_dup_exit(const SyscallEvent& ev, size_t syscall_index);
+
     void link_pipe_dataflow(size_t read_index);
     
     // Graph storage

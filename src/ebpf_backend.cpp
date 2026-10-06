@@ -60,6 +60,11 @@ struct syscall_event {
     __u64 ret;
     __u8 is_entry;
 
+    __u8  has_pipe_fds;
+    __u8  pipe_pad[3];
+    __s32 pipe_fd0;
+    __s32 pipe_fd1;
+
     __u8  has_path;
     __u8  has_sockaddr;
     __u8  has_payload;
@@ -459,6 +464,11 @@ private:
                 reinterpret_cast<std::byte*>(ev->payload) + ev->payload_len);
         }
 
+        if (ev->has_pipe_fds) {
+            event.has_captured_pipe_fds = true;
+            event.captured_pipe_fd0 = ev->pipe_fd0;
+            event.captured_pipe_fd1 = ev->pipe_fd1;
+        }
         backend->handle_fork_event(ev);
 
         const bool is_exec = is_exec_syscall(static_cast<long>(ev->syscall_id));

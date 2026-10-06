@@ -35,6 +35,9 @@ target_compile_options(file_access_outcomes PRIVATE -O0)
 add_executable(thread_lifecycle_test thread_lifecycle_test.c)
 target_compile_options(thread_lifecycle_test PRIVATE -O0)
 
+add_executable(fd_alias_flow fd_alias_flow.c)
+target_compile_options(fd_alias_flow PRIVATE -O0)
+
 # Optionally, set output directory
 set_target_properties(dynamic_target 
     fork_test thread_test
@@ -45,4 +48,5 @@ set_target_properties(dynamic_target
     pipe_flow
     file_access_outcomes
     thread_lifecycle_test
+    fd_alias_flow
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

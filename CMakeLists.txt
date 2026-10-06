@@ -298,6 +298,13 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
             $<TARGET_FILE:pipe_flow>)
     set_tests_properties(check_ebpf_pipe_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
 
+    add_test(NAME check_ebpf_fd_alias_flow
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_alias_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:fd_alias_flow>
+            ebpf)
+    set_tests_properties(check_ebpf_fd_alias_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)
@@ -393,6 +400,13 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:runtimexray>
             $<TARGET_FILE:thread_lifecycle_test>)
     set_tests_properties(check_process_instance_lifetime PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
+
+    add_test(NAME check_ptrace_fd_alias_flow
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_alias_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:fd_alias_flow>
+            ptrace)
+    set_tests_properties(check_ptrace_fd_alias_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
     # Fork/thread tracing tests (ptrace)
     add_test(NAME check_trace_follow_forks
