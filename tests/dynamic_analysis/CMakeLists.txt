@@ -44,6 +44,9 @@ target_compile_options(fork_dup_exec_parent PRIVATE -O0)
 add_executable(fork_dup_exec_helper fork_dup_exec_helper.c)
 target_compile_options(fork_dup_exec_helper PRIVATE -O0)
 
+add_executable(vfork_dup_exec_parent vfork_dup_exec_parent.c)
+target_compile_options(vfork_dup_exec_parent PRIVATE -O0)
+
 # Optionally, set output directory
 set_target_properties(dynamic_target 
     fork_test thread_test
@@ -57,4 +60,5 @@ set_target_properties(dynamic_target
     fd_alias_flow
     fork_dup_exec_parent
     fork_dup_exec_helper
+    vfork_dup_exec_parent
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

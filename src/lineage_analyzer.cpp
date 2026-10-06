@@ -91,8 +91,7 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     if (auto existing = find_active_process_node(process_id)) {
         Observation& process_obs = observations_[*existing];
 
-        if (!program.empty() &&
-            process_obs.program_name.empty()) {
+        if (!program.empty() && process_obs.program_name.empty()) {
             process_obs.program_name = program;
         }
 
@@ -149,6 +148,11 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
 
 void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
 {
+    if (ev.type == TraceEventType::TaskCreate) {
+        handle_task_create(ev);
+        return;
+    }
+
     // Handle TraceEventType::Exec
     // This must happen before normal syscall handling.
     if (ev.type == TraceEventType::Exec) {
@@ -376,6 +380,83 @@ std::optional<uint64_t> LineageAnalyzer::last_exit_event_seq(pid_t pid, pid_t ti
     return seq;
 }
 
+void LineageAnalyzer::handle_task_create(const SyscallEvent& ev) {
+    if (ev.parent_tid <= 0 || ev.parent_tgid <= 0 ||
+        ev.child_tid <= 0 || ev.child_tgid <= 0) {
+        return;
+    }
+
+    auto parent_idx = find_active_process_node(ev.parent_tgid);
+    if (!parent_idx.has_value()) {
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: TaskCreate parent process missing tgid=" +
+            std::to_string(ev.parent_tgid));
+        return;
+    }
+
+    //
+    // New task belongs to the existing process/thread group.
+    //
+    if (ev.child_tgid == ev.parent_tgid) {
+        const uint64_t instance_id = observations_[*parent_idx].process_instance_id;
+
+        active_tids_by_instance_[instance_id].insert(ev.child_tid);
+
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: TaskCreate registered thread tid=" +
+            std::to_string(ev.child_tid) +
+            " process_instance=" +
+            std::to_string(instance_id));
+
+        return;
+    }
+
+    //
+    // New process.
+    //
+    const size_t child_idx = ensure_process(ev.child_tgid, ev.child_tid, ev.child_tgid);
+
+    const uint64_t parent_instance_id = observations_[*parent_idx].process_instance_id;
+
+    const uint64_t child_instance_id = observations_[child_idx].process_instance_id;
+
+    //
+    // This may also be encountered later through the fork/clone syscall
+    // exit. Initialize exactly once so the late parent syscall exit cannot
+    // overwrite close()/dup()/exec() changes already made by the child.
+    //
+    const bool first_initialization = fd_inheritance_initialized_instances_.insert(child_instance_id).second;
+    if (!first_initialization) {
+        return;
+    }
+
+    auto parent_bindings = fd_bindings_by_instance_.find(parent_instance_id);
+
+    //
+    // Always create a child FD-map entry, even if the parent currently has
+    // no tracked resources. Presence of this entry represents completed
+    // inheritance.
+    //
+    auto& child_bindings = fd_bindings_by_instance_[child_instance_id];
+
+    if (parent_bindings != fd_bindings_by_instance_.end()) {
+        child_bindings = parent_bindings->second;
+    } else {
+        child_bindings.clear();
+    }
+
+    add_edge(*parent_idx, child_idx, RelationType::Causality, "kernel task creation");
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: TaskCreate inherited FD bindings parent_instance=" +
+        std::to_string(parent_instance_id) +
+        " child_instance=" +
+        std::to_string(child_instance_id));
+}
+
 void LineageAnalyzer::handle_fork_exit(
     const SyscallEvent& ev,
     std::string syscall_name,
@@ -474,17 +555,27 @@ void LineageAnalyzer::handle_fork_exit(
     const uint64_t parent_instance_id = observations_[*parent_idx].process_instance_id;
     const uint64_t child_instance_id = observations_[child_idx].process_instance_id;
 
-    auto bindings_it = fd_bindings_by_instance_.find(parent_instance_id);
-    if (bindings_it != fd_bindings_by_instance_.end()) {
-        fd_bindings_by_instance_[child_instance_id] = bindings_it->second;
-    }
+    const bool first_initialization = fd_inheritance_initialized_instances_.insert(child_instance_id).second;
 
-    // Causality edge: parent process -> child process
-    add_edge(
-        *parent_idx,
-        child_idx,
-        RelationType::Causality,
-        syscall_name + " created child process");
+    if (first_initialization) {
+        auto bindings_it = fd_bindings_by_instance_.find(parent_instance_id);
+
+        auto& child_bindings = fd_bindings_by_instance_[child_instance_id];
+        if (bindings_it != fd_bindings_by_instance_.end()) {
+            child_bindings = bindings_it->second;
+        } else {
+            child_bindings.clear();
+        }
+
+        // Causality edge: parent process -> child process.
+        // TaskCreate normally creates this earlier. This is the fallback for
+        // backends that do not yet emit TaskCreate.
+        add_edge(
+            *parent_idx,
+            child_idx,
+            RelationType::Causality,
+            syscall_name + " created child process");
+    }
 }
 
 void LineageAnalyzer::handle_execve_entry(const SyscallEvent& ev) {

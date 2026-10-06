@@ -314,6 +314,17 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
             ebpf
     )
     set_tests_properties(check_ebpf_fork_dup_exec_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
+    add_test(NAME check_ebpf_vfork_dup_exec_flow
+            COMMAND sh
+            ${CMAKE_SOURCE_DIR}/tests/test_vfork_dup_exec_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:vfork_dup_exec_parent>
+            $<TARGET_FILE:fork_dup_exec_helper>
+            ebpf
+    )
+    set_tests_properties(check_ebpf_vfork_dup_exec_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
 endif()
 
 if(NOT SKIP_PTRACE_TESTS)
@@ -425,7 +436,16 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:fork_dup_exec_helper>
             ptrace)
     set_tests_properties(check_ptrace_fork_dup_exec_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
-    
+
+    add_test(NAME check_ptrace_vfork_dup_exec_flow
+            COMMAND sh
+            ${CMAKE_SOURCE_DIR}/tests/test_vfork_dup_exec_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:vfork_dup_exec_parent>
+            $<TARGET_FILE:fork_dup_exec_helper>
+            ptrace)
+    set_tests_properties(check_ptrace_vfork_dup_exec_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
     # Fork/thread tracing tests (ptrace)
     add_test(NAME check_trace_follow_forks
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)

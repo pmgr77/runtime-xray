@@ -37,7 +37,8 @@ namespace runtimexray {
 
 enum class TraceEventType {
     Syscall,
-    Exec
+    Exec,
+    TaskCreate
 };
 
 /**
@@ -64,6 +65,11 @@ struct SyscallEvent {
     // For TraceEventType::Exec, the pre-exec TID when Linux changed
     // thread identity during exec. -1 when not applicable/unknown.
     pid_t former_tid = -1;
+    // For TraceEventType::TaskCreate.
+    pid_t parent_tid = -1;
+    pid_t parent_tgid = -1;
+    pid_t child_tid = -1;
+    pid_t child_tgid = -1;
     bool is_entry = true;               ///< true = syscall entry, false = exit
 
     // ---- Bytes captured in-kernel, at tracepoint time --------------------

@@ -89,6 +89,14 @@ private:
     // process_instance_id -> fd -> resource
     std::unordered_map<uint64_t, std::unordered_map<int, FdResourceBinding>> fd_bindings_by_instance_;
 
+    // Process instances whose initial FD table has already been inherited
+    // from their parent.
+    //
+    // Needed because TaskCreate may initialize the child before the
+    // fork/clone syscall exit is observed. The later syscall exit must not
+    // overwrite FD changes already made by the child.
+    std::unordered_set<uint64_t> fd_inheritance_initialized_instances_;
+
     void stamp_fd_resource(Observation& obs) const;
 
     void handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index);
@@ -162,6 +170,7 @@ private:
     // Helper: add edge
     void add_edge(size_t from, size_t to, RelationType rel, const std::string& details = "");
 
+    void handle_task_create(const SyscallEvent& ev);
     // Specific handlers
     void handle_fork_exit(const SyscallEvent& ev, std::string syscall_name, uint64_t clone_flags);
 

@@ -65,6 +65,11 @@ struct syscall_event {
     __s32 pipe_fd0;
     __s32 pipe_fd1;
 
+    __u8  has_task_create;
+    __u8  task_create_pad[3];
+    __u32 parent_tid;
+    __u32 parent_tgid;
+
     __u8  has_path;
     __u8  has_sockaddr;
     __u8  has_payload;
@@ -469,6 +474,25 @@ private:
             event.captured_pipe_fd0 = ev->pipe_fd0;
             event.captured_pipe_fd1 = ev->pipe_fd1;
         }
+
+        if (ev->has_task_create) {
+            SyscallEvent task_event;
+
+            task_event.type = TraceEventType::TaskCreate;
+            task_event.parent_tid = static_cast<pid_t>(ev->parent_tid);
+            task_event.parent_tgid = static_cast<pid_t>(ev->parent_tgid);
+            //
+            // The normal syscall event already contains authoritative
+            // child TID/TGID from bpf_get_current_pid_tgid().
+            //
+            task_event.child_tid = static_cast<pid_t>(ev->tid);
+            task_event.child_tgid = static_cast<pid_t>(ev->pid);
+            task_event.pid = task_event.child_tid;
+            task_event.tid = task_event.child_tid;
+            task_event.tgid = task_event.child_tgid;
+            backend->callback_(task_event);
+        }
+
         backend->handle_fork_event(ev);
 
         const bool is_exec = is_exec_syscall(static_cast<long>(ev->syscall_id));

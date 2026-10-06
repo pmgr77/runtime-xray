@@ -362,13 +362,37 @@ namespace runtimexray {
     // Handle a ptrace event (fork, clone, etc.)
     bool Tachikoma::handle_ptrace_event(pid_t pid, int status, const SyscallCallback& cb) {
         (void)status;
-        (void)cb;
 
         unsigned long new_pid;
         if (ptrace(PTRACE_GETEVENTMSG, pid, nullptr, &new_pid) == -1) {
             return false;
         }
+
         pid_t child = static_cast<pid_t>(new_pid);
+
+        //
+        // PTRACE_EVENT_FORK/VFORK/CLONE occurs at child creation time,
+        // before the parent receives the corresponding syscall exit.
+        //
+        // In particular, CLONE_VFORK may not return in the parent until the
+        // child has already performed dup/close/exec. Notify lineage now so
+        // the child receives the parent's FD state before it can mutate it.
+        //
+        SyscallEvent task_event;
+        task_event.type = TraceEventType::TaskCreate;
+
+        task_event.parent_tid = pid;
+        task_event.parent_tgid = resolve_tgid(pid);
+
+        task_event.child_tid = child;
+        task_event.child_tgid = resolve_tgid(child);
+
+        // Keep normal task identity fields meaningful as well.
+        task_event.pid = child;
+        task_event.tid = child;
+        task_event.tgid = task_event.child_tgid;
+
+        cb(task_event);
 
         if (follow_forks_) {
             // The child was created by PTRACE_O_TRACECLONE/FORK/VFORK. The

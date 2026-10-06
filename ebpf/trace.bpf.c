@@ -81,6 +81,15 @@ struct syscall_event {
     __s32 pipe_fd0;
     __s32 pipe_fd1;
 
+    /*
+    * Set on the first syscall observed from a newly created task.
+    * Child identity is already carried by pid/tid above.
+    */
+    __u8  has_task_create;
+    __u8  task_create_pad[3];
+    __u32 parent_tid;
+    __u32 parent_tgid;
+
      /* Which captured fields are populated in this event */
     __u8  has_path;
     __u8  has_sockaddr;
@@ -140,6 +149,25 @@ struct {
     __type(key, __u32);
     __type(value, __u32);
 } pid_filter SEC(".maps");
+
+struct pending_task_parent {
+    __u32 parent_tid;
+    __u32 parent_tgid;
+};
+
+/*
+ * Child TID -> parent identity.
+ *
+ * sched_process_fork populates this before the child can execute.
+ * The child's first syscall consumes it and carries the information
+ * to userspace.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);
+    __type(value, struct pending_task_parent);
+} pending_task_parent_by_tid SEC(".maps");
 
 /* Stash read()/recvfrom() buffer pointers on entry, consume on exit.
  * Key: TID. Value: userspace buffer address from syscall entry. */
@@ -375,6 +403,24 @@ static __always_inline void fill_pipefds(struct syscall_event *ev, struct sys_en
                             BPF_ANY);
 }
 
+static __always_inline void fill_task_create(struct syscall_event *ev, __u32 tid)
+{
+    struct pending_task_parent *parent = bpf_map_lookup_elem(&pending_task_parent_by_tid, &tid);
+    if (!parent) {
+        return;
+    }
+
+    ev->has_task_create = 1;
+    ev->parent_tid = parent->parent_tid;
+    ev->parent_tgid = parent->parent_tgid;
+
+    /*
+     * Deliver TaskCreate exactly once: on the first successfully
+     * emitted syscall event from the child.
+     */
+    bpf_map_delete_elem(&pending_task_parent_by_tid, &tid);
+}
+
 /* ------------------------------------------------------------------ */
 /* Programs                                                           */
 /* ------------------------------------------------------------------ */
@@ -423,8 +469,12 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
     ev->has_pipe_fds = 0;
     ev->pipe_fd0 = -1;
     ev->pipe_fd1 = -1;
-    for (int i = 0; i < MAX_ARGS; i++)
+    ev->has_task_create = 0;
+    ev->parent_tid = 0;
+    ev->parent_tgid = 0;
+    for (int i = 0; i < MAX_ARGS; i++) {
         ev->args[i] = ctx->args[i];
+    }
 
     /* Capture userspace bytes now, while the target is on this CPU. */
     if (is_open_like(id) || is_exec_like(id)) {
@@ -436,7 +486,12 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
     } else if (is_pipe_like(id)) {
         fill_pipefds(ev, ctx, &tid);
     }
-    
+
+    /*
+    * No ctx dereferences after this point.
+    */
+    fill_task_create(ev, tid);
+
     bpf_ringbuf_submit(ev, 0);
     return 0;
 }
@@ -489,8 +544,12 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
     ev->has_pipe_fds = 0;
     ev->pipe_fd0 = -1;
     ev->pipe_fd1 = -1;
-    for (int i = 0; i < MAX_ARGS; i++)
+    ev->has_task_create = 0;
+    ev->parent_tid = 0;
+    ev->parent_tgid = 0;
+    for (int i = 0; i < MAX_ARGS; i++) {
         ev->args[i] = 0;
+    }
 
     /*
      * read / recvfrom: consume the buffer pointer stashed on entry,
@@ -531,6 +590,14 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
         bpf_map_delete_elem(&pending_pipefd_buf, &tid);
     }
 
+    /*
+    * Keep this after every ctx dereference for verifier safety.
+    *
+    * Normally TaskCreate is consumed by sys_enter. If the entry ring-buffer
+    * reservation failed, sys_exit gets a second chance to deliver it.
+    */
+    fill_task_create(ev, tid);
+
     bpf_ringbuf_submit(ev, 0);
     return 0;
 }
@@ -545,19 +612,26 @@ int trace_sched_process_fork(struct sched_process_fork_ctx *ctx)
      * pid_filter is keyed by TGID, matching raw_syscalls filtering.
      */
     __u64 pid_tgid = bpf_get_current_pid_tgid();
+
     __u32 parent_tgid = (__u32)(pid_tgid >> 32);
+    __u32 parent_tid = (__u32)pid_tgid;
 
     __u32 *tracked = bpf_map_lookup_elem(&pid_filter, &parent_tgid);
-
     if (!tracked) {
         return 0;
     }
 
     __u32 child_pid = (__u32)ctx->child_pid;
-
     if (child_pid == 0) {
         return 0;
     }
+
+    struct pending_task_parent parent = {
+        .parent_tid = parent_tid,
+        .parent_tgid = parent_tgid,
+    };
+
+    bpf_map_update_elem(&pending_task_parent_by_tid, &child_pid, &parent, BPF_ANY);
 
     __u32 value = child_pid;
 
