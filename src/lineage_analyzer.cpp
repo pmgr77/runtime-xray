@@ -27,6 +27,7 @@
 #include "logger.hpp"
 #include <cstring>
 #include <chrono>
+#include <fcntl.h>
 #include <linux/sched.h>
 
 namespace runtimexray {
@@ -264,6 +265,10 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
                 std::strcmp(name, "dup2") == 0 ||
                 std::strcmp(name, "dup3") == 0) {
                 handle_dup_exit(ev, sys_idx);
+            }
+
+            if (std::strcmp(name, "fcntl") == 0) {
+                handle_fcntl_exit(ev, sys_idx);
             }
 
             if (std::strcmp(name, "close") == 0) {
@@ -696,6 +701,28 @@ void LineageAnalyzer::handle_exec_success(const SyscallEvent& ev)
 
     Observation& process_obs = observations_[*process_idx];
     const uint64_t instance_id = process_obs.process_instance_id;
+
+    //
+    // Successful exec closes every descriptor marked FD_CLOEXEC.
+    //
+    // Remove those bindings before processing events from the new executable
+    // image so a later reuse of the same fd number cannot inherit stale
+    // RuntimeXRay resource metadata.
+    //
+    auto bindings_it = fd_bindings_by_instance_.find(instance_id);
+
+    if (bindings_it != fd_bindings_by_instance_.end()) {
+        auto& bindings = bindings_it->second;
+
+        for (auto it = bindings.begin(); it != bindings.end(); ) {
+            if (it->second.cloexec) {
+                it = bindings.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     uint64_t& generation = exec_generation_by_instance_[instance_id];
     ++generation;
 
@@ -875,6 +902,7 @@ void LineageAnalyzer::stamp_fd_resource(Observation& obs) const {
 }
 
 void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index) {
+
     if (ev.return_value != 0) {
         return;
     }
@@ -918,9 +946,13 @@ void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_in
 
     const uint64_t resource_id = next_resource_id_++;
 
+    const bool cloexec =
+        pipe_obs.syscall_name == "pipe2" &&
+        (pipe_obs.arg1 & O_CLOEXEC) != 0;
+
     auto& fd_map = fd_bindings_by_instance_[pipe_obs.process_instance_id];
-    fd_map[fds[0]] = {resource_id, "pipe", "read"};
-    fd_map[fds[1]] = {resource_id, "pipe", "write"};
+    fd_map[fds[0]] = {resource_id, "pipe", "read", cloexec};
+    fd_map[fds[1]] = {resource_id, "pipe", "write", cloexec};
     pipe_obs.resource_id = resource_id;
     pipe_obs.resource_type = "pipe";
     Logger::log(
@@ -970,22 +1002,96 @@ void LineageAnalyzer::handle_dup_exit(const SyscallEvent& ev, size_t syscall_ind
 
     auto& bindings = instance_it->second;
 
+    //
+    // dup2(oldfd, oldfd) is a successful no-op.
+    // It must not change FD_CLOEXEC.
+    //
+    if (dup_obs.syscall_name == "dup2" && oldfd == newfd) {
+        return;
+    }
+
     auto source_it = bindings.find(oldfd);
-    if (source_it != bindings.end()) {
-        /*
-         * dup* creates another FD referring to the exact same
-         * underlying resource endpoint.
-         */
-        bindings[newfd] = source_it->second;
-    } else {
-        /*
-         * Important for dup2/dup3:
-         *
-         * A successful duplication replaces newfd. If newfd used
-         * to refer to one of our tracked resources but oldfd is
-         * untracked, the old binding is no longer valid.
-         */
+    if (source_it == bindings.end()) {
+        //
+        // A successful dup2()/dup3() replaces newfd even when oldfd is
+        // not one of the resources RuntimeXRay currently tracks.
+        //
         bindings.erase(newfd);
+        return;
+    }
+
+    FdResourceBinding new_binding = source_it->second;
+
+    //
+    // Linux descriptor semantics:
+    //
+    // dup()  -> new descriptor has FD_CLOEXEC cleared
+    // dup2() -> new descriptor has FD_CLOEXEC cleared
+    // dup3() -> O_CLOEXEC controls FD_CLOEXEC on the new descriptor
+    //
+    new_binding.cloexec = false;
+
+    if (dup_obs.syscall_name == "dup3") {
+        new_binding.cloexec =
+            (dup_obs.arg2 & O_CLOEXEC) != 0;
+    }
+
+    bindings[newfd] = std::move(new_binding);
+}
+
+void LineageAnalyzer::handle_fcntl_exit(const SyscallEvent& ev, size_t syscall_index)
+{
+    if (ev.return_value < 0 || syscall_index >= observations_.size()) {
+        return;
+    }
+
+    const Observation& fcntl_obs = observations_[syscall_index];
+
+    const int fd = static_cast<int>(fcntl_obs.arg0);
+    const int cmd = static_cast<int>(fcntl_obs.arg1);
+
+    auto instance_it = fd_bindings_by_instance_.find(fcntl_obs.process_instance_id);
+    if (instance_it == fd_bindings_by_instance_.end()) {
+        return;
+    }
+
+    auto& bindings = instance_it->second;
+
+    //
+    // fcntl(fd, F_DUPFD, ...)
+    // fcntl(fd, F_DUPFD_CLOEXEC, ...)
+    //
+    if (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC) {
+        const int newfd = static_cast<int>(ev.return_value);
+
+        auto source_it = bindings.find(fd);
+        if (source_it == bindings.end()) {
+            bindings.erase(newfd);
+            return;
+        }
+
+        FdResourceBinding new_binding = source_it->second;
+
+        new_binding.cloexec =
+            (cmd == F_DUPFD_CLOEXEC);
+
+        bindings[newfd] = std::move(new_binding);
+        return;
+    }
+
+    //
+    // fcntl(fd, F_SETFD, flags)
+    //
+    if (cmd == F_SETFD) {
+        auto binding_it = bindings.find(fd);
+        if (binding_it == bindings.end()) {
+            return;
+        }
+
+        const int flags = static_cast<int>(fcntl_obs.arg2);
+
+        binding_it->second.cloexec =
+            (flags & FD_CLOEXEC) != 0;
     }
 }
 

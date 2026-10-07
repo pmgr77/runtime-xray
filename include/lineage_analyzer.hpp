@@ -80,6 +80,7 @@ private:
         uint64_t resource_id = 0;
         std::string type;
         std::string role;
+        bool cloexec = false;
     };
 
     // RuntimeXRay-local resource allocator.
@@ -106,6 +107,8 @@ private:
     void handle_close_exit(const SyscallEvent& ev, size_t syscall_index);
 
     void handle_dup_exit(const SyscallEvent& ev, size_t syscall_index);
+
+    void handle_fcntl_exit(const SyscallEvent& ev, size_t syscall_index);
 
     void link_pipe_dataflow(size_t read_index);
     
