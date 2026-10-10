@@ -25,12 +25,8 @@
 #define RUNTIMEXRAY_ANALYZE_COMMAND_HPP
 
 #include "icommand.hpp"
-#include "mapped_file.hpp"
 #include "elf_parser.hpp"
-#include "finding.hpp"
-#include <iostream>
 #include <string>
-#include <optional>
 
 namespace runtimexray
 {

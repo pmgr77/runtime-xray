@@ -26,8 +26,9 @@
 #include "commands/analyze_command.hpp"
 #include "commands/trace_command.hpp"
 #include "commands/mem_command.hpp"
+#include "detection_rule_registry.hpp"
+#include "register_builtin_detection_rules.hpp"
 #include "logger.hpp"
-#include "register_builtin_risk_assessments.hpp"
 
 #include <iostream>
 #include <memory>
@@ -80,14 +81,14 @@ int main(int argc, char* argv[]) {
     Logger::init(runtimexray::parse_log_level(common_opts.log_level), 
         common_opts.log_file, 
         common_opts.show_secrets);
-    
+
+    register_builtin_detection_rules(DetectionRuleRegistry::instance());
+
     // Pass specific args to the command
     ICommand& cmd = *it->second;
     if (!cmd.parse_specific_args(specific_args)) {
         return 1; // Error message already printed or help shown
     }
-
-    register_builtin_risk_assessments();
 
     // Execute the command
     return cmd.execute(common_opts);

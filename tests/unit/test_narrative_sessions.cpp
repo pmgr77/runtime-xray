@@ -114,27 +114,37 @@ int main()
     assert(s1.last_seq == 6);
     assert(s1.tgid == 100);
 
-    MemorySecretFindingDetails single_details;
-    single_details.secret_type = "password";
-    Finding single_session_finding(
-        FindingSeverity::High,
-        "Single-session finding",
-        "test",
-        single_details,
-        100);
+    Finding single_session_finding;
 
-    single_session_finding.evidence_observation_seqs = {2};
+    single_session_finding.finding_id = 1;
+    single_session_finding.rule_id = "test.single_session";
+    single_session_finding.kind = "test_finding";
+    single_session_finding.severity = FindingSeverity::High;
+    single_session_finding.title = "Single-session finding";
+    single_session_finding.summary = "test";
+    single_session_finding.attributes["secret_type"] =
+        std::string("password");
 
-    MemorySecretFindingDetails cross_details;
-    cross_details.secret_type = "password";
-    Finding cross_session_finding(
-        FindingSeverity::High,
-        "Cross-session finding",
-        "test",
-        cross_details,
-        100);
+    single_session_finding.evidence_observation_seqs = {
+        2
+    };
 
-    cross_session_finding.evidence_observation_seqs = {2, 3, 4};
+    Finding cross_session_finding;
+
+    cross_session_finding.finding_id = 2;
+    cross_session_finding.rule_id = "test.cross_session";
+    cross_session_finding.kind = "test_finding";
+    cross_session_finding.severity = FindingSeverity::High;
+    cross_session_finding.title = "Cross-session finding";
+    cross_session_finding.summary = "test";
+    cross_session_finding.attributes["secret_type"] =
+        std::string("password");
+
+    cross_session_finding.evidence_observation_seqs = {
+        2,
+        3,
+        4
+    };
 
     FindingList findings;
     findings.push_back(std::move(single_session_finding));

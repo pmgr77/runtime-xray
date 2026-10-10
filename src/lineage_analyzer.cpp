@@ -53,11 +53,17 @@ void LineageAnalyzer::add_edge(size_t from, size_t to,
     edge.to_index = to;
     edge.relation = rel;
     // Compute time delta if both observations have start_time
-    if (from < observations_.size() && to < observations_.size()) {
-        auto dt = observations_[to].start_time - observations_[from].start_time;
+    const auto zero_time = std::chrono::steady_clock::time_point{};
+    if (from < observations_.size() &&
+        to < observations_.size() &&
+        observations_[from].start_time != zero_time &&
+        observations_[to].start_time != zero_time) {
+
+        const auto dt = observations_[to].start_time - observations_[from].start_time;
+
         edge.time_delta = std::chrono::duration_cast<std::chrono::microseconds>(dt);
     } else {
-        edge.time_delta = std::chrono::microseconds(0);
+        edge.time_delta = std::chrono::microseconds{0};
     }
     edge.details = details;
     edges_.push_back(edge);
@@ -128,7 +134,12 @@ size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
     obs.exec_generation = 0;
     obs.program_name = process_program;
     obs.syscall_name = "process"; // marker
-    obs.is_entry = true;    
+    obs.is_entry = true;
+    //
+    // Process lifetime begins when RuntimeXRay first observes this process
+    // instance. end_time is filled when the process exits.
+    //
+    obs.start_time = std::chrono::steady_clock::now();
     // For process nodes, we'll use end_time when process exits
     size_t idx = add_observation(obs);
 

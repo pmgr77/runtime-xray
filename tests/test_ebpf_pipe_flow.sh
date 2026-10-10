@@ -109,11 +109,11 @@ J="$TMP/out.json"
 FP=$(jq -r '
     .findings[]
     | select(
-        .type == "memory_secret"
-        and .details.location == "memory"
-        and .fingerprint != ""
+        .kind == "sensitive_data_presence"
+        and .attributes.location == "memory"
+        and (.attributes.fingerprint // "") != ""
     )
-    | .fingerprint
+    | .attributes.fingerprint
 ' "$J" | head -n 1)
 
 [ -n "$FP" ] || {
@@ -329,10 +329,10 @@ echo "pipe DataFlow assertion passed"
 jq -e '
     all(
         .findings[];
-        (.details.location? // "") != "correlated"
+        .kind != "sensitive_data_flow"
     )
 ' "$J" >/dev/null || {
-    echo "FAIL: pipe/stdout flow incorrectly became a correlated file-to-socket finding"
+    echo "FAIL: pipe/stdout flow incorrectly became a sensitive_data_flow finding"
     exit 1
 }
 

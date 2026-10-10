@@ -1,9 +1,21 @@
 /**
  * @file    finding.hpp
- * @brief   Defines the data structures for security findings in RuntimeXRay.
+ * @brief   Defines security findings produced by RuntimeXRay detection rules.
+ *
+ * A Finding is the canonical security result produced by a DetectionRule.
+ *
+ * Detection rules analyze the LineageGraph and create Findings describing
+ * security-relevant behavior or properties discovered in that graph.
+ *
+ * Findings do not analyze the graph themselves. They contain the security
+ * conclusion, structured attributes, and stable references to the graph
+ * evidence supporting that conclusion.
+ *
+ * Composite detection rules may also reference Findings produced by an
+ * earlier detection stage.
  *
  * @author  Peter Magram
- * @date    2026-08-15
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -21,19 +33,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #ifndef RUNTIMEXRAY_FINDING_HPP
 #define RUNTIMEXRAY_FINDING_HPP
 
+#include "lineage.hpp"
+
+#include <cstdint>
+#include <map>
 #include <string>
 #include <variant>
 #include <vector>
-#include <cstdint>
 
 namespace runtimexray {
 
 /**
-* @brief Severity level of a security finding.
-*/
+ * @brief Severity of a security finding.
+ */
 enum class FindingSeverity {
     Critical = 0,
     High = 1,
@@ -43,114 +59,176 @@ enum class FindingSeverity {
 };
 
 /**
- * @brief Details specific to a binary hardening finding (NX, PIE, RELRO, Canary).
+ * @brief One graph relationship used as evidence for a Finding.
+ *
+ * Graph vector indices are intentionally not stored here because they are an
+ * internal representation detail. Findings reference observations through
+ * stable Observation::seq values.
  */
-struct HardeningFindingDetails {
-    std::string feature; /**< Name of the hardening feature, e.g., "NX", "PIE", "RELRO", "Canary". */
-    std::string status; /**< Current status, e.g., "Disabled", "Enabled", "Partial", "Full". */
-};
-
-struct DangerousApiFindingDetails {
-    std::string api;
-    std::string reason;
-    std::string recommendation;
-    std::string cwe_id; // Common Weakness Enumeration identifier
-};
-
-// ----- Dynamic analysis findings -----
-
-struct SensitiveFileAccessDetails {
-    std::string path;
-    std::string reason;     // human-readable; includes errno name
-    std::string outcome;    // "opened" | "denied" | "failed"
-    int         err = 0;     // 0 on success; errno otherwise
-};
-
-struct NetworkConnectionDetails {
-    std::string remote_addr;
-    uint16_t port;
-    std::string reason;
-};
-
-struct SensitiveDataWriteDetails {
-    std::string data_snippet;
-    std::string reason;
-};
-
-struct MemorySecretFindingDetails {
-    std::string raw_secret;       // Exact extracted value
-    std::string raw_snippet;      // Surrounding debugging context (max ~256 chars)
-    std::string fingerprint;      // HMAC‑SHA256 of raw_secret only
-    std::string secret_type;        // e.g., "password", "private_key"
-    size_t secret_length = 0;              // size of the secret in bytes
-    std::string location;           // e.g., "memory", "cmdline", "environment"
-    uintptr_t address = 0;          // memory address where the secret was found
+struct FindingEdgeEvidence {
+    uint64_t from_seq = 0;
+    uint64_t to_seq = 0;
+    RelationType relation = RelationType::Chronological;
 };
 
 /**
- * @brief A single step in an event chain.
+ * @brief Supported value types for rule-specific Finding attributes.
+ *
+ * Attributes allow detection rules to expose structured information without
+ * introducing a dedicated C++ details structure for every possible rule.
+ *
+ * Examples:
+ *
+ *     "path"        -> "/etc/shadow"
+ *     "outcome"     -> "denied"
+ *     "errno"       -> 13
+ *     "count"       -> 4
+ *     "destination" -> "10.0.0.5:443"
+ *
+ * Vector forms support composite Findings such as reconnaissance findings
+ * involving several paths or process instances.
  */
-struct EventLink {
-    std::string description; // e.g., "openat /lib/liblzma.so.5"
-    pid_t pid;
-    pid_t tid;
-    std::string syscall_name;
-    std::string details;    // optional extra info
-};
-
-/**
- * @brief A composite finding that represents a chain of events.
- */
-struct EventChainFindingDetails {
-    std::string chain_summary;  // e.g., "Library load → Network → Child process"
-    std::vector<EventLink> links;
-};
-
-// Variant type for all possible finding details
-using DetailsVariant = std::variant<
-    HardeningFindingDetails,
-    DangerousApiFindingDetails,
-    SensitiveFileAccessDetails,
-    NetworkConnectionDetails,
-    SensitiveDataWriteDetails,
-    MemorySecretFindingDetails,
-    EventChainFindingDetails
+using FindingAttributeValue = std::variant<
+    std::string,
+    int64_t,
+    uint64_t,
+    double,
+    bool,
+    std::vector<std::string>,
+    std::vector<int64_t>,
+    std::vector<uint64_t>
 >;
 
 /**
- * @brief Represents a single security finding.
+ * @brief Structured rule-specific Finding attributes.
  *
- * Contains common metadata (severity, description, evidence) and specific details
- * stored in a std::variant. Additional detail types can be added later.
+ * std::map is used rather than unordered_map to preserve deterministic
+ * iteration and report output.
  */
-class Finding {
-public:
-    FindingSeverity severity;
-    std::string description;
-    std::string evidence;
-    DetailsVariant details;
-    pid_t pid;   // process ID that owns this finding
-    // Stable lineage observations that support this finding.
-    //
-    // Values are Observation::seq, never vector indices.
-    // A finding may reference multiple observations.
+using FindingAttributes =
+    std::map<std::string, FindingAttributeValue>;
+
+/**
+ * @brief Canonical security result produced by a DetectionRule.
+ *
+ * A Finding answers:
+ *
+ *     "What security-relevant condition did RuntimeXRay conclude exists?"
+ *
+ * It does not discover new behavior by traversing the LineageGraph. That
+ * responsibility belongs exclusively to DetectionRule implementations.
+ *
+ * Evidence fields point back to the graph so NarrativeBuilder and reporters
+ * can explain and present the conclusion without duplicating graph data.
+ */
+struct Finding {
+    /**
+     * @brief Stable Finding identity within one RuntimeXRay analysis.
+     *
+     * Assigned by the detection engine after a rule produces the Finding.
+     * Zero means "not assigned".
+     *
+     * Composite Findings reference earlier Findings through this identity.
+     */
+    uint64_t finding_id = 0;
+
+    /**
+     * @brief Stable identity of the rule that produced this Finding.
+     *
+     * This identifies the implementation, not the semantic type of result.
+     *
+     * Examples:
+     *
+     *     "builtin.sensitive_file_access"
+     *     "acme.internal_secret_file"
+     */
+    std::string rule_id;
+
+    /**
+     * @brief Stable semantic type of the detected security condition.
+     *
+     * Composite rules should normally depend on kind rather than rule_id so
+     * compatible third-party rules can participate in higher-level analysis.
+     *
+     * Examples:
+     *
+     *     "sensitive_resource_access"
+     *     "sensitive_data_flow"
+     *     "credential_reconnaissance"
+     */
+    std::string kind;
+
+    /**
+     * @brief Severity assigned by the rule that produced this Finding.
+     */
+    FindingSeverity severity = FindingSeverity::Info;
+
+    /**
+     * @brief Short user-facing name of the security result.
+     */
+    std::string title;
+
+    /**
+     * @brief Concise user-facing explanation of the security conclusion.
+     *
+     * This describes what was concluded, not the complete evidence narrative.
+     * Detailed evidence explanation belongs to NarrativeBuilder.
+     */
+    std::string summary;
+
+    /**
+     * @brief Stable graph observations directly supporting this Finding.
+     *
+     * Values are Observation::seq identifiers, never graph vector indices.
+     */
     std::vector<uint64_t> evidence_observation_seqs;
 
     /**
-     * @brief Constructs a Finding.
-     * @param sev Severity level.
-     * @param desc Human-readable description of the finding.
-     * @param ev Evidence supporting the finding.
-     * @param det Specific details (variant).
-     * @param p Process ID that owns this finding.
+     * @brief Explicit graph relationships supporting this Finding.
+     *
+     * Unary Findings such as a single sensitive-file access may leave this
+     * empty. Flow or causality Findings should record the relationships that
+     * support those claims.
      */
-    Finding(FindingSeverity sev, std::string desc, std::string ev, DetailsVariant det, pid_t p = -1)
-    : severity(sev), description(std::move(desc)), evidence(std::move(ev)), details(std::move(det)), pid(p)
-    {}
+    std::vector<FindingEdgeEvidence> evidence_edges;
+
+    /**
+     * @brief Findings from an earlier detection stage supporting this result.
+     *
+     * Used primarily by composite rules.
+     *
+     * Example:
+     *
+     *     several sensitive_resource_access Findings
+     *            ->
+     *     one credential_reconnaissance Finding
+     *
+     * Values are Finding::finding_id identifiers.
+     */
+    std::vector<uint64_t> supporting_finding_ids;
+
+    /**
+     * @brief Optional CWE identifiers associated with this Finding.
+     *
+     * Rules should populate these only when the observed evidence justifies
+     * the CWE claim. A suspicious behavior or risky API is not automatically
+     * proof that a corresponding CWE exists.
+     */
+    std::vector<std::string> cwe_ids;
+
+    /**
+     * @brief Structured rule-specific facts describing the Finding.
+     *
+     * These values carry product-relevant context without duplicating the
+     * LineageGraph itself.
+     */
+    FindingAttributes attributes;
 };
 
-    /** Container for all findings from a single analysis. */
-    using FindingList = std::vector<Finding>;
+/**
+ * @brief Container for Findings from one RuntimeXRay analysis.
+ */
+using FindingList = std::vector<Finding>;
 
 } // namespace runtimexray
 

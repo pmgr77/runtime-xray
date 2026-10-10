@@ -1,9 +1,9 @@
 /**
- * @file    register_builtin_risk_assessments.cpp
- * @brief   Registers all built‑in risk assessments.
+ * @file    register_builtin_detection_rules.hpp
+ * @brief   Declares registration of built-in RuntimeXRay detection rules.
  *
  * @author  Peter Magram
- * @date    2026-09-07
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -22,18 +22,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "risk_assessment_registry.hpp"
-#include "cross_boundary_risk_assessment.hpp"
-#include <memory>
+#ifndef RUNTIMEXRAY_REGISTER_BUILTIN_DETECTION_RULES_HPP
+#define RUNTIMEXRAY_REGISTER_BUILTIN_DETECTION_RULES_HPP
 
 namespace runtimexray {
 
-// Forward declaration
-class CrossBoundaryRiskAssessment;
+class DetectionRuleRegistry;
 
-void register_builtin_risk_assessments() {
-    auto& registry = RiskAssessmentRegistry::instance();
-    registry.register_risk_assessment(std::make_unique<CrossBoundaryRiskAssessment>());
-}
+/**
+ * @brief Register all built-in RuntimeXRay detection rules.
+ *
+ * The supplied registry owns all registered rule instances.
+ */
+void register_builtin_detection_rules(
+    DetectionRuleRegistry& registry);
 
 } // namespace runtimexray
+
+#endif // RUNTIMEXRAY_REGISTER_BUILTIN_DETECTION_RULES_HPP

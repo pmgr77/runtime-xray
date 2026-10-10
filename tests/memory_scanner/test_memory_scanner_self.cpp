@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 #include <unistd.h>
 
 static const char* memory_secret = "password=memory_secret_test";
@@ -42,33 +43,41 @@ int main(int argc, char* argv[]) {
         cmdline_secret = argv[1];
     }
 
-    runtimexray::FindingList findings;
-    runtimexray::scan_process_for_secrets(getpid(), findings, 100);
+    std::vector<runtimexray::Observation> observations;
+
+    runtimexray::scan_process_for_secrets(
+        getpid(),
+        observations,
+        100);
 
     bool found_memory = false;
     bool found_env = false;
     bool found_cmdline = false;
 
-    for (const auto& f : findings) {
-        std::visit([&](const auto& details) {
-            using T = std::decay_t<decltype(details)>;
-            if constexpr (std::is_same_v<T, runtimexray::MemorySecretFindingDetails>) {
-                if (details.location == "memory" &&
-                    details.raw_snippet.find(memory_secret) != std::string::npos) {
-                    found_memory = true;
-                }
-                if (details.location == "environment" &&
-                    !env_secret.empty() &&
-                    details.raw_snippet.find(env_secret) != std::string::npos) {
-                    found_env = true;
-                }
-                if (details.location == "cmdline" &&
-                    !cmdline_secret.empty() &&
-                    details.raw_snippet.find(cmdline_secret) != std::string::npos) {
-                    found_cmdline = true;
-                }
-            }
-        }, f.details);
+    for (const auto& observation : observations) {
+        if (observation.type != runtimexray::ObservationType::Data) {
+            continue;
+        }
+
+        if (observation.data_type == "memory" &&
+            observation.data_snippet.find(memory_secret) != std::string::npos) {
+
+            found_memory = true;
+        }
+
+        if (observation.data_type == "environment" &&
+            !env_secret.empty() &&
+            observation.data_snippet.find(env_secret) != std::string::npos) {
+
+            found_env = true;
+        }
+
+        if (observation.data_type == "cmdline" &&
+            !cmdline_secret.empty() &&
+            observation.data_snippet.find(cmdline_secret) != std::string::npos) {
+
+            found_cmdline = true;
+        }
     }
 
     bool success = true;

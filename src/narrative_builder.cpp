@@ -99,6 +99,21 @@ ResolvedFdResource resolve_fd_resource_at(
     return resource;
 }
 
+const std::string* find_string_attribute(
+    const runtimexray::Finding& finding,
+    const std::string& name)
+{
+    const auto it =
+        finding.attributes.find(name);
+
+    if (it == finding.attributes.end()) {
+        return nullptr;
+    }
+
+    return std::get_if<std::string>(
+        &it->second);
+}
+
 } // anonymous namespace
 namespace runtimexray {
 
@@ -135,28 +150,41 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
     }
 
     for (size_t finding_index = 0; finding_index < findings.size(); ++finding_index) {
+
         const Finding& finding = findings[finding_index];
-
-        const auto* details = std::get_if<MemorySecretFindingDetails>(&finding.details);
-
         //
         // Initial NarrativeBuilder support is intentionally narrow.
         //
-        // Only the existing correlated sensitive-object finding is converted
-        // into a story here. Other finding types will be added explicitly as
-        // their narrative semantics become defined.
+        // Only a composite sensitive-data-flow Finding is converted into a
+        // multi-step narrative here. Primary Findings such as simple sensitive
+        // data presence are already self-explanatory and do not require this
+        // correlation narrative.
         //
-        if (!details ||
-            details->location != "correlated" ||
-            details->fingerprint.empty()) {
+        if (finding.kind != "sensitive_data_flow") {
             continue;
         }
 
-        NarrativeStory story;
+        const std::string* fingerprint =
+            find_string_attribute(
+                finding,
+                "fingerprint");
+
+        if (!fingerprint ||
+            fingerprint->empty()) {
+            continue;
+        }
+
+        const std::string* secret_type =
+            find_string_attribute(
+                finding,
+                "secret_type");
+                NarrativeStory story;
 
         story.finding_index = finding_index;
-        story.title = finding.description;
-        story.fingerprint = details->fingerprint;
+
+        story.title = finding.title;
+
+        story.fingerprint = *fingerprint;
 
         //
         // Record every executable session containing evidence for this
@@ -199,7 +227,7 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
             // Do not attach an observation merely because its sequence number
             // was referenced if it does not carry the same fingerprint.
             //
-            if (obs.fingerprint != details->fingerprint) {
+            if (obs.fingerprint != *fingerprint) {
                 continue;
             }
 
@@ -218,12 +246,20 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
                  obs.syscall_name == "recvfrom")) {
                 std::ostringstream text;
 
+                text << "A ";
+
+                if (secret_type &&
+                    !secret_type->empty()) {
+                    text << *secret_type << " ";
+                } else {
+                    text << "sensitive ";
+                }
+
                 text <<
-                    "A " <<
-                    details->secret_type <<
-                    " value was observed in data returned by " <<
+                    "value was observed in data returned by " <<
                     obs.syscall_name <<
                     "()";
+
                 //
                 // read() arg0 is the source file descriptor.
                 //

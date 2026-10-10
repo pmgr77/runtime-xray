@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(RuntimeXRay VERSION 0.1.0 LANGUAGES CXX)
 option(SKIP_PTRACE_TESTS "Skip ptrace-based dynamic tests (useful for emulated environments)" OFF)
-option(BUILD_EXAMPLES "Build custom analyzer examples" OFF)
 option(SKIP_EBPF_TESTS "Skip eBPF-based integration tests (useful for CI without eBPF)" OFF)
 option(BUILD_EBPF_BACKEND "Build the eBPF tracing backend" ON)
 
@@ -38,8 +37,6 @@ set(RUNTIMEXRAY_SOURCES
     src/syscall_names.cpp
     src/dynamic_analysis.cpp
     src/memory_scanner.cpp
-    src/analyzer_registry.cpp
-    src/builtin_analyzers.cpp
     src/finding_filter.cpp
     src/reporter.cpp
     src/finding_reporter.cpp
@@ -47,11 +44,18 @@ set(RUNTIMEXRAY_SOURCES
     src/logger.cpp
     src/lineage_analyzer.cpp
     src/secret_fingerprinter.cpp
-    src/risk_assessment_registry.cpp
-    src/register_builtin_risk_assessments.cpp
-    src/cross_boundary_risk_assessment.cpp
     src/narrative.cpp
     src/narrative_builder.cpp
+    src/detection_rule_registry.cpp
+    src/detection_engine.cpp
+    src/sensitive_file_access_rule.cpp
+    src/register_builtin_detection_rules.cpp
+    src/secret_extractor.cpp
+    src/sensitive_data_presence_rule.cpp
+    src/hardening_rule.cpp
+    src/dangerous_api_rule.cpp
+    src/network_rule.cpp
+    src/sensitive_data_flow_rule.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -207,11 +211,9 @@ set_tests_properties(check_mem_lineage PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 2
 # Memory scanner unit tests
 add_executable(test_memory_scanner
     tests/memory_scanner/test_memory_scanner.cpp
-    src/analyzer_registry.cpp
-    src/builtin_analyzers.cpp
-    src/dynamic_analysis.cpp
-    src/logger.cpp
+    src/secret_extractor.cpp
     src/secret_fingerprinter.cpp
+    src/logger.cpp
 )
 target_include_directories(test_memory_scanner PRIVATE include)
 target_compile_options(test_memory_scanner PRIVATE -Wall -Wextra)
@@ -229,19 +231,6 @@ add_executable(test_dynamic_helpers
 target_include_directories(test_dynamic_helpers PRIVATE include)
 target_compile_options(test_dynamic_helpers PRIVATE -Wall -Wextra)
 add_test(NAME check_dynamic_helpers COMMAND $<TARGET_FILE:test_dynamic_helpers>)
-
-# Analyzer registry tests
-add_executable(test_analyzer_registry
-    tests/analyzer_registry/test_analyzer_registry.cpp
-    src/analyzer_registry.cpp
-    src/builtin_analyzers.cpp
-    src/secret_fingerprinter.cpp
-    src/logger.cpp
-)
-target_include_directories(test_analyzer_registry PRIVATE include)
-target_compile_options(test_analyzer_registry PRIVATE -Wall -Wextra)
-target_link_libraries(test_analyzer_registry PRIVATE OpenSSL::Crypto)
-add_test(NAME check_analyzer_registry COMMAND test_analyzer_registry)
 
 # JSON validation for analyze
 add_test(NAME check_json_analyze
@@ -350,8 +339,7 @@ if(NOT SKIP_PTRACE_TESTS)
     add_executable(test_memory_scanner_self
         tests/memory_scanner/test_memory_scanner_self.cpp
         src/memory_scanner.cpp
-        src/analyzer_registry.cpp
-        src/builtin_analyzers.cpp
+        src/secret_extractor.cpp
         src/dynamic_analysis.cpp
         src/logger.cpp
         src/secret_fingerprinter.cpp
@@ -378,11 +366,11 @@ if(NOT SKIP_PTRACE_TESTS)
 
     add_test(NAME check_dynamic_write_secret
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_dynamic_write_secret PROPERTIES PASS_REGULAR_EXPRESSION "Sensitive data found in memory")
+    set_tests_properties(check_dynamic_write_secret PROPERTIES PASS_REGULAR_EXPRESSION "Sensitive data observed")
 
     add_test(NAME check_dynamic_output_scan
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_dynamic_output_scan PROPERTIES PASS_REGULAR_EXPRESSION "Sensitive data found in memory")
+    set_tests_properties(check_dynamic_output_scan PROPERTIES PASS_REGULAR_EXPRESSION "Sensitive data observed")
 
     add_test(NAME check_trace_timeout
              COMMAND $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/sleep 10)
@@ -390,27 +378,27 @@ if(NOT SKIP_PTRACE_TESTS)
 
     add_test(NAME check_trace_critical_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Critical $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_critical_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/sudoers")
+    set_tests_properties(check_trace_critical_show PROPERTIES PASS_REGULAR_EXPRESSION "path: /etc/sudoers")
 
     add_test(NAME check_trace_high_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity High $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_high_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /tmp/fake_secret_file")
+    set_tests_properties(check_trace_high_show PROPERTIES PASS_REGULAR_EXPRESSION "path: /tmp/fake_secret_file")
 
     add_test(NAME check_trace_medium_show
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_medium_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/passwd")
+    set_tests_properties(check_trace_medium_show PROPERTIES PASS_REGULAR_EXPRESSION "path: /etc/passwd")
 
     add_test(NAME check_trace_low_hide_default
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_low_hide_default PROPERTIES FAIL_REGULAR_EXPRESSION "Path: /etc/hosts")
+    set_tests_properties(check_trace_low_hide_default PROPERTIES FAIL_REGULAR_EXPRESSION "path: /etc/hosts")
 
     add_test(NAME check_trace_low_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Low $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_low_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/hosts")
+    set_tests_properties(check_trace_low_show PROPERTIES PASS_REGULAR_EXPRESSION "path: /etc/hosts")
 
     add_test(NAME check_trace_info_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Info $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_info_show PROPERTIES PASS_REGULAR_EXPRESSION "Path: /etc/hostname")
+    set_tests_properties(check_trace_info_show PROPERTIES PASS_REGULAR_EXPRESSION "path: /etc/hostname")
 
     add_test(NAME check_ptrace_sensitive_object_flow
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ptrace_sensitive_object_flow.sh
@@ -495,12 +483,8 @@ if(NOT SKIP_PTRACE_TESTS)
          COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_program_name.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:exec_echo_test>)
     set_tests_properties(check_capture_program_name PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
-    add_test(NAME check_cross_boundary_risk
-         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cross_boundary.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:cross_boundary_test>)
-    set_tests_properties(check_cross_boundary_risk PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+    add_test(NAME check_cross_boundary_evidence
+        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cross_boundary.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:cross_boundary_test>)
+    set_tests_properties(check_cross_boundary_evidence PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
-endif()
-
-if(BUILD_EXAMPLES)
-    add_subdirectory(examples/custom_analyzers)
 endif()

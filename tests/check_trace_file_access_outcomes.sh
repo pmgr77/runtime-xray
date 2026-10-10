@@ -68,11 +68,19 @@ with open(sys.argv[1]) as f:
     data = json.load(f)
 
 found = {}
+
 for finding in data.get("findings", []):
-    if finding.get("type") != "sensitive_file":
+    if finding.get("kind") != "sensitive_resource_access":
         continue
-    d = finding.get("details", {})
-    found[(d.get("outcome"), d.get("err"))] = d.get("path", "?")
+
+    attributes = finding.get("attributes", {})
+
+    found[
+        (
+            attributes.get("outcome"),
+            attributes.get("errno")
+        )
+    ] = attributes.get("path", "?")
 
 expected = [
     ("opened", 0),

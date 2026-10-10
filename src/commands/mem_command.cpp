@@ -28,6 +28,9 @@
 #include "logger.hpp"
 #include "finding_reporter.hpp"
 #include "lineage.hpp"
+#include "detection_engine.hpp"
+#include "detection_rule_registry.hpp"
+
 #include <iostream>
 #include <chrono>
 namespace runtimexray
@@ -74,12 +77,12 @@ namespace runtimexray
     int MemCommand::execute(const CommonOptions &common) {
         auto start_time = std::chrono::steady_clock::now();
 
-        runtimexray::FindingList findings;
+        std::vector<Observation> secret_observations;
         size_t pages_scanned = 0;
 
         // ---- Scan process memory ----
         try {
-            runtimexray::scan_process_for_secrets(pid_, findings, 50, max_pages_, &pages_scanned);
+            runtimexray::scan_process_for_secrets(pid_, secret_observations, 50, max_pages_, &pages_scanned);
             Logger::log(LogLevel::Info, "Scanned " + std::to_string(pages_scanned) + " pages for PID " + std::to_string(pid_));
             // -- debug --
             Logger::log(LogLevel::Info, "Starting mem scan for PID " + std::to_string(pid_));
@@ -89,7 +92,6 @@ namespace runtimexray
                 Logger::log(LogLevel::Debug, "Region: 0x" + std::to_string(region.start) + " - 0x" + std::to_string(region.end) + " (" + region.perms + ")");
             }
             // end of debug
-            runtimexray::filter_findings(findings, common.min_severity, false);
         } catch (const std::exception& e) {
             Logger::log(LogLevel::Error, std::string("Memory scan failed: ") + e.what());
             return 1;
@@ -126,49 +128,40 @@ namespace runtimexray
         size_t proc_idx = append_observation(graph, std::move(proc_obs));
         
         // Data nodes for memory secrets
-        for (const auto& f: findings) {
-            if (auto* details = std::get_if<MemorySecretFindingDetails>(&f.details)) {
-                std::string snippet_for_graph;
-                if (common.show_secrets) {
-                    // Show raw snippet (includes the secret)
-                    snippet_for_graph = details->raw_snippet;
-                } else {
-                    // Redact the secret within the snippet
-                    snippet_for_graph = details->raw_snippet;
-                    if (!details->raw_secret.empty()) {
-                        size_t pos = 0;
-                        while ((pos = snippet_for_graph.find(details->raw_secret, pos)) != std::string::npos) {
-                            snippet_for_graph.replace(pos, details->raw_secret.size(), "<redacted>");
-                            pos += 9; // length of "<redacted>"
-                        }
-                    }
-                }
-                Observation data_obs;
-                data_obs.type = ObservationType::Data;
-                data_obs.data_type = details->secret_type;
-                data_obs.data_snippet = snippet_for_graph;
-                data_obs.fingerprint = details->fingerprint;
-                data_obs.address = details->address;
-                data_obs.size = details->raw_secret.size();
-                data_obs.pid = pid_;
-                data_obs.tid = pid_;
-                data_obs.tgid = pid_;
-                data_obs.process_instance_id = process_instance_id;
-                data_obs.exec_generation = 0;
-                data_obs.start_time = start_time;
-                data_obs.end_time = end_time;
-                size_t data_idx = append_observation(graph, std::move(data_obs));
+        for (auto& observation : secret_observations) {
+            observation.pid = pid_;
+            observation.tid = pid_;
+            observation.tgid = pid_;
+            observation.process_instance_id =
+                process_instance_id;
+            observation.exec_generation = 0;
 
-                // Edge: process -> data
-                LineageEdge edge;
-                edge.from_index = proc_idx;
-                edge.to_index = data_idx;
-                edge.relation = RelationType::StaticAssociated;
-                edge.details = "Memory secret found";
-                graph.edges.push_back(edge);
-            }
+            const size_t data_idx =
+                append_observation(
+                    graph,
+                    std::move(observation));
+
+            LineageEdge edge;
+            edge.from_index = proc_idx;
+            edge.to_index = data_idx;
+            edge.relation = RelationType::ObservedIn;
+            edge.details = "Sensitive data observed in process";
+
+            graph.edges.push_back(
+                std::move(edge));
         }
-        
+
+        DetectionEngine detection_engine(
+            DetectionRuleRegistry::instance());
+
+        FindingList findings =
+            detection_engine.detect(graph);
+
+        filter_findings(
+            findings,
+            common.min_severity,
+            false);
+
         ReportContext ctx;
         ctx.command = "mem";
         ctx.target = std::to_string(pid_);

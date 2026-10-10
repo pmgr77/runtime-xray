@@ -1,9 +1,9 @@
 /**
- * @file    cloud_credential_analyzer.hpp
- * @brief   Cloud credential pattern analyzer example.
+ * @file    dangerous_api_rule.hpp
+ * @brief   Detection rule for dangerous imported APIs.
  *
  * @author  Peter Magram
- * @date    2026-08-24
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -22,19 +22,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RUNTIMEXRAY_EXAMPLE_CLOUD_CREDENTIAL_ANALYZER_HPP
-#define RUNTIMEXRAY_EXAMPLE_CLOUD_CREDENTIAL_ANALYZER_HPP
+#ifndef RUNTIMEXRAY_DANGEROUS_API_RULE_HPP
+#define RUNTIMEXRAY_DANGEROUS_API_RULE_HPP
 
-#include <ianalyzer.hpp>
-#include <evidence.hpp>
-#include <finding.hpp>
+#include "idetection_rule.hpp"
 
-class CloudCredentialAnalyzer : public runtimexray::IAnalyzer {
+namespace runtimexray {
+
+class DangerousApiRule final : public IDetectionRule {
 public:
-    std::string name() const override;
+    std::string id() const override;
     std::string description() const override;
-    runtimexray::AnalyzerCategory category() const override;
-    runtimexray::FindingList analyze(const runtimexray::Evidence& evidence) const override;
+    DetectionStage stage() const override;
+
+    FindingList detect(
+        const DetectionContext& context) const override;
 };
 
-#endif
+} // namespace runtimexray
+
+#endif // RUNTIMEXRAY_DANGEROUS_API_RULE_HPP

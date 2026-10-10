@@ -45,12 +45,19 @@ if [ $STATUS -ne 0 ]; then
     exit 1
 fi
 
-# Check for redacted secret in lineage graph
-if echo "$OUTPUT" | grep -q "<redacted>"; then
-    echo "Lineage graph contains data observation."
+# Verify that the mem command produced scanner-derived Data observations.
+#
+# Secret contents are intentionally not serialized into normal JSON output.
+# Presence is represented by structured observation metadata and fingerprint.
+if echo "$OUTPUT" | grep -q '"type": "data"' &&
+   echo "$OUTPUT" | grep -q '"data_type": "memory"' &&
+   echo "$OUTPUT" | grep -q '"kind": "sensitive_data_presence"' &&
+   echo "$OUTPUT" | grep -q '"fingerprint": "hmac-sha256:'; then
+
+    echo "Lineage graph contains sensitive memory data observations."
     exit 0
 else
-    echo "Lineage graph does not contain any secret."
+    echo "Lineage graph does not contain expected sensitive data observations."
     echo "$OUTPUT"
     exit 1
 fi

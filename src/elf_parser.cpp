@@ -25,10 +25,7 @@
 
 #include "elf_parser.hpp"
 #include "mapped_file.hpp"
-#include "finding.hpp"
-#include "finding_filter.hpp"
-#include "evidence.hpp"
-#include "analyzer_registry.hpp"
+
 #include <iostream>
 #include <ostream>
 #include <cstddef>
@@ -38,6 +35,7 @@
 #include <string>
 #include <cstdint>
 #include <endian.h>
+#include <unordered_set>
 
 namespace runtimexray
 {
@@ -401,6 +399,237 @@ namespace runtimexray
         return symbols;
     }
 
+    std::vector<std::string> get_imported_symbol_names(
+        const std::byte* data,
+        ElfClass elf_class,
+        ElfData elf_data)
+    {
+        std::vector<std::string> symbols;
+        std::unordered_set<std::string> seen;
+
+        uint64_t e_shoff = 0;
+        uint16_t e_shentsize = 0;
+        uint16_t e_shnum = 0;
+
+        if (elf_class == ElfClass::Elf64) {
+            e_shoff =
+                read_u64(
+                    data,
+                    40,
+                    elf_data);
+
+            e_shentsize =
+                read_u16(
+                    data,
+                    58,
+                    elf_data);
+
+            e_shnum =
+                read_u16(
+                    data,
+                    60,
+                    elf_data);
+        } else {
+            e_shoff =
+                read_u32(
+                    data,
+                    32,
+                    elf_data);
+
+            e_shentsize =
+                read_u16(
+                    data,
+                    46,
+                    elf_data);
+
+            e_shnum =
+                read_u16(
+                    data,
+                    48,
+                    elf_data);
+        }
+
+        if (e_shnum == 0 ||
+            e_shentsize == 0) {
+
+            return symbols;
+        }
+
+        constexpr uint16_t SHN_UNDEF = 0;
+
+        for (uint16_t i = 0;
+            i < e_shnum;
+            ++i) {
+
+            const std::size_t sh_offset =
+                static_cast<std::size_t>(
+                    e_shoff +
+                    i * e_shentsize);
+
+            const uint32_t sh_type =
+                read_u32(
+                    data,
+                    sh_offset + 4,
+                    elf_data);
+
+            //
+            // Imported symbols are represented by undefined entries
+            // in the dynamic symbol table.
+            //
+            if (sh_type != SHT_DYNSYM) {
+                continue;
+            }
+
+            uint32_t sh_link = 0;
+            uint64_t sh_size = 0;
+            uint64_t symbol_table_offset = 0;
+
+            if (elf_class == ElfClass::Elf64) {
+                sh_link =
+                    read_u32(
+                        data,
+                        sh_offset + 40,
+                        elf_data);
+
+                sh_size =
+                    read_u64(
+                        data,
+                        sh_offset + 32,
+                        elf_data);
+
+                symbol_table_offset =
+                    read_u64(
+                        data,
+                        sh_offset + 24,
+                        elf_data);
+            } else {
+                sh_link =
+                    read_u32(
+                        data,
+                        sh_offset + 24,
+                        elf_data);
+
+                sh_size =
+                    read_u32(
+                        data,
+                        sh_offset + 20,
+                        elf_data);
+
+                symbol_table_offset =
+                    read_u32(
+                        data,
+                        sh_offset + 16,
+                        elf_data);
+            }
+
+            const std::size_t string_section_offset =
+                static_cast<std::size_t>(
+                    e_shoff +
+                    sh_link * e_shentsize);
+
+            uint64_t string_table_offset = 0;
+            uint64_t string_table_size = 0;
+
+            if (elf_class == ElfClass::Elf64) {
+                string_table_offset =
+                    read_u64(
+                        data,
+                        string_section_offset + 24,
+                        elf_data);
+
+                string_table_size =
+                    read_u64(
+                        data,
+                        string_section_offset + 32,
+                        elf_data);
+            } else {
+                string_table_offset =
+                    read_u32(
+                        data,
+                        string_section_offset + 16,
+                        elf_data);
+
+                string_table_size =
+                    read_u32(
+                        data,
+                        string_section_offset + 20,
+                        elf_data);
+            }
+
+            const std::size_t symbol_size =
+                elf_class == ElfClass::Elf64
+                    ? 24
+                    : 16;
+
+            const uint64_t symbol_count =
+                sh_size /
+                symbol_size;
+
+            for (uint64_t j = 0;
+                j < symbol_count;
+                ++j) {
+
+                const std::size_t symbol_offset =
+                    static_cast<std::size_t>(
+                        symbol_table_offset +
+                        j * symbol_size);
+
+                const uint32_t st_name =
+                    read_u32(
+                        data,
+                        symbol_offset,
+                        elf_data);
+
+                const std::size_t shndx_offset =
+                    elf_class == ElfClass::Elf64
+                        ? 6
+                        : 14;
+
+                const uint16_t st_shndx =
+                    read_u16(
+                        data,
+                        symbol_offset +
+                            shndx_offset,
+                        elf_data);
+
+                //
+                // Defined inside the binary/library => not an import.
+                //
+                if (st_shndx != SHN_UNDEF) {
+                    continue;
+                }
+
+                if (st_name == 0 ||
+                    st_name >= string_table_size) {
+
+                    continue;
+                }
+
+                const char* symbol_name =
+                    reinterpret_cast<const char*>(
+                        data +
+                        string_table_offset +
+                        st_name);
+
+                if (*symbol_name == '\0') {
+                    continue;
+                }
+
+                const std::string name(
+                    symbol_name);
+
+                //
+                // A symbol should appear only once in collected evidence.
+                //
+                if (seen.insert(name).second) {
+                    symbols.push_back(name);
+                }
+            }
+        }
+
+        return symbols;
+    }
+
     bool has_stack_canary(const std::byte* data, ElfClass elf_class, ElfData elf_data)
     {
         auto symbols = get_symbol_names(data, elf_class, elf_data);
@@ -536,93 +765,211 @@ namespace runtimexray
         return info;
     }
 
-    FindingList analyze_binary(const std::string& path,
-                            FindingSeverity min_severity,
-                            bool verbose,
-                            ElfMetadata* metadata) {
+    LineageGraph collect_elf_observations(
+        const std::string& path,
+        ElfMetadata* metadata)
+    {
         MappedFile mapped(path);
+
         if (!mapped.is_valid()) {
-            throw std::runtime_error("Failed to map file " + path);
+            throw std::runtime_error(
+                "Failed to map file " + path);
         }
 
         const std::byte* data = mapped.data();
+
         const std::size_t size = mapped.size();
 
         if (!is_elf(data, size)) {
-            throw std::runtime_error(path + " is not an ELF file.");
+            throw std::runtime_error(
+                path + " is not an ELF file.");
         }
 
         if (size < ELF_IDENT_SIZE) {
-            throw std::runtime_error("ELF file is too short: " + std::to_string(size) + " bytes.");
+            throw std::runtime_error(
+                "ELF file is too short: " +
+                std::to_string(size) +
+                " bytes.");
         }
 
         const unsigned char elf_class_byte = static_cast<unsigned char>(data[EI_CLASS]);
-        const unsigned char elf_data_byte  = static_cast<unsigned char>(data[EI_DATA]);
 
-        ElfClass elf_class = to_elf_class(elf_class_byte);
-        ElfData elf_data   = to_elf_data(elf_data_byte);
+        const unsigned char elf_data_byte = static_cast<unsigned char>(data[EI_DATA]);
 
-        if (elf_class == ElfClass::None || elf_data == ElfData::None) {
-            throw std::runtime_error("Unsupported ELF class or data encoding.");
+        const ElfClass elf_class = to_elf_class(elf_class_byte);
+
+        const ElfData elf_data = to_elf_data(elf_data_byte);
+
+        if (elf_class == ElfClass::None ||
+            elf_data == ElfData::None) {
+
+            throw std::runtime_error(
+                "Unsupported ELF class or data encoding.");
         }
 
-        constexpr std::size_t offset_e_type      = 16;
-        constexpr std::size_t offset_e_machine   = 18;
-        constexpr std::size_t offset_e_version   = 20;
-        constexpr std::size_t offset_e_entry     = 24;
+        constexpr std::size_t offset_e_type = 16;
+        constexpr std::size_t offset_e_machine = 18;
+        constexpr std::size_t offset_e_version = 20;
+        constexpr std::size_t offset_e_entry = 24;
 
-        const uint16_t e_type    = read_u16(data, offset_e_type, elf_data);
-        const uint16_t e_machine = read_u16(data, offset_e_machine, elf_data);
-        const uint32_t e_version = read_u32(data, offset_e_version, elf_data);
+        const uint16_t e_type = read_u16(data, offset_e_type, elf_data);
+
+        const uint16_t e_machine =
+            read_u16(
+                data,
+                offset_e_machine,
+                elf_data);
+
+        const uint32_t e_version =
+            read_u32(
+                data,
+                offset_e_version,
+                elf_data);
 
         uint64_t e_entry = 0;
+
         if (elf_class == ElfClass::Elf64) {
-            e_entry = read_u64(data, offset_e_entry, elf_data);
+            e_entry =
+                read_u64(
+                    data,
+                    offset_e_entry,
+                    elf_data);
         } else {
-            e_entry = read_u32(data, offset_e_entry, elf_data);
+            e_entry =
+                read_u32(
+                    data,
+                    offset_e_entry,
+                    elf_data);
         }
 
         if (metadata) {
-            metadata->path          = path;
-            metadata->size_bytes    = size;
-            metadata->elf_class     = elf_class_to_string(elf_class);
-            metadata->data_encoding = elf_data_to_string(elf_data);
-            metadata->elf_type      = elf_type_to_string(static_cast<ElfType>(e_type));
-            metadata->machine       = elf_machine_to_string(static_cast<ElfMachine>(e_machine));
-            metadata->version       = e_version;
-            metadata->entry_point   = e_entry;
+            metadata->path =
+                path;
+
+            metadata->size_bytes =
+                size;
+
+            metadata->elf_class =
+                elf_class_to_string(
+                    elf_class);
+
+            metadata->data_encoding =
+                elf_data_to_string(
+                    elf_data);
+
+            metadata->elf_type =
+                elf_type_to_string(
+                    static_cast<ElfType>(
+                        e_type));
+
+            metadata->machine =
+                elf_machine_to_string(
+                    static_cast<ElfMachine>(
+                        e_machine));
+
+            metadata->version =
+                e_version;
+
+            metadata->entry_point =
+                e_entry;
         }
 
-        FindingList findings;
+        LineageGraph graph;
 
-        // 1. Hardening checks: convert to HardeningEvidence and feed to registry
-        ElfSecurityInfo sec_info = check_security_features(data, elf_class, elf_data, e_type);
-        // For each hardening feature, create an evidence and run analyzers
-        auto add_hardening_evidence = [&](const std::string& feature, const std::string& status) {
-            HardeningEvidence h{feature, status};
-            auto res = AnalyzerRegistry::instance().analyze_evidence(h);
-            findings.insert(findings.end(), res.begin(), res.end());
+        //
+        // Hardening observations.
+        //
+        const ElfSecurityInfo security =
+            check_security_features(
+                data,
+                elf_class,
+                elf_data,
+                e_type);
+
+        const auto add_hardening_observation =
+            [&](const std::string& feature,
+                const std::string& status)
+        {
+            Observation observation;
+
+            observation.type =
+                ObservationType::Static;
+
+            observation.static_category =
+                "hardening";
+
+            observation.static_field =
+                feature;
+
+            observation.static_value =
+                status;
+
+            append_observation(
+                graph,
+                std::move(observation));
         };
 
-        add_hardening_evidence("NX",    sec_info.nx_enabled    ? "Enabled" : "Disabled");
-        add_hardening_evidence("PIE",   sec_info.pie_enabled   ? "Enabled" : "Disabled");
-        std::string relro_status = sec_info.relro_full ? "Full" :
-                                   (sec_info.relro_partial ? "Partial" : "Disabled");
-        add_hardening_evidence("RELRO", relro_status);
-        add_hardening_evidence("Canary", sec_info.canary_enabled ? "Enabled" : "Disabled");
+        add_hardening_observation(
+            "NX",
+            security.nx_enabled
+                ? "Enabled"
+                : "Disabled");
 
-        // 2. Dangerous API detection
-        auto symbols = get_symbol_names(data, elf_class, elf_data);
-        for (const auto& sym : symbols) {
-            SymbolEvidence s{sym, "import"};
-            auto res = AnalyzerRegistry::instance().analyze_evidence(s);
-            findings.insert(findings.end(), res.begin(), res.end());
+        add_hardening_observation(
+            "PIE",
+            security.pie_enabled
+                ? "Enabled"
+                : "Disabled");
+
+        const std::string relro_status =
+            security.relro_full
+                ? "Full"
+                : security.relro_partial
+                    ? "Partial"
+                    : "Disabled";
+
+        add_hardening_observation(
+            "RELRO",
+            relro_status);
+
+        add_hardening_observation(
+            "Canary",
+            security.canary_enabled
+                ? "Enabled"
+                : "Disabled");
+
+        //
+        // Imported-symbol observations.
+        //
+        const auto symbols =
+            get_imported_symbol_names(
+                data,
+                elf_class,
+                elf_data);
+
+        for (const auto& symbol : symbols) {
+            Observation observation;
+
+            observation.type =
+                ObservationType::Static;
+
+            observation.static_category =
+                "imported_symbol";
+
+            observation.static_field =
+                symbol;
+
+            append_observation(
+                graph,
+                std::move(observation));
         }
 
-        // Apply central filtering
-        filter_findings(findings, min_severity, verbose);
+        graph.summary =
+            "Static ELF evidence with " +
+            std::to_string(
+                graph.observations.size()) +
+            " observations";
 
-        return findings;
+        return graph;
     }
-
 } // namespace runtimexray

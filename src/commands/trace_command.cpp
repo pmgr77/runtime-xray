@@ -28,21 +28,22 @@
 #include "tachikoma.hpp"
 #include "memory_scanner.hpp"
 #include "finding.hpp"
-#include "analyzer_registry.hpp"
-#include "evidence.hpp"
 #include "finding_filter.hpp"
 #include "logger.hpp"
 #include "finding_reporter.hpp"
 #include "dynamic_analysis.hpp"
 #include "lineage_analyzer.hpp"
-#include "risk_assessment_registry.hpp"
 #include "lineage.hpp"
-#include "narrative.hpp"
+#include "detection_engine.hpp"
+#include "detection_rule_registry.hpp"
+#include "secret_extractor.hpp"
 
 #include <iostream>
 #include <string>
 #include <vector>
 #include <sys/socket.h>
+#include <sys/uio.h>
+#include <utility>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <cstring>
@@ -55,64 +56,8 @@
 #include <cstddef>
 #include <unordered_set>
 
+
 namespace {
-
-    // ---------------------------------------------------------------------------
-    // resolve_fd_at
-    //
-    // Given a pid, an fd, and an observation index, walk the graph's events for
-    // that pid from the beginning up to `at_index` and return the resource the
-    // fd currently points to.
-    //
-    // The graph keeps one observation per syscall (created on entry, updated
-    // on exit). So:
-    //   - open/openat: .source holds the path (stamped on entry by the callback),
-    //                  .return_value holds the fd (set on exit by the analyzer)
-    //   - connect:     .source holds "ip:port" (stamped on entry),
-    //                  .return_value == 0 on success, .arg0 == fd
-    //   - close:       .arg0 == fd, .return_value == 0 on success
-    //
-    // A close() clears both path and endpoint for that fd, so subsequent
-    // reuse of the same fd number starts clean.
-    // ---------------------------------------------------------------------------
-    struct FdResource {
-        std::string path;
-        std::string endpoint;
-    };
-
-    FdResource resolve_fd_at(
-        const runtimexray::LineageGraph& graph,
-        pid_t pid,
-        int fd,
-        size_t at_index)
-    {
-        FdResource r;
-        for (size_t i = 0; i < at_index && i < graph.observations.size(); ++i) {
-            const auto& obs = graph.observations[i];
-            if (obs.pid != pid)
-                continue;
-            if (obs.type != runtimexray::ObservationType::Event)
-                continue;
-
-            if (obs.syscall_name == "open" || obs.syscall_name == "openat") {
-                if (obs.return_value == fd && !obs.source.empty()) {
-                    r.path = obs.source;
-                }
-            } else if (obs.syscall_name == "connect") {
-                if (obs.return_value == 0 &&
-                    static_cast<int>(obs.arg0) == fd &&
-                    !obs.source.empty()) {
-                    r.endpoint = obs.source;
-                }
-            } else if (obs.syscall_name == "close") {
-                if (obs.return_value == 0 && static_cast<int>(obs.arg0) == fd) {
-                    r.path.clear();
-                    r.endpoint.clear();
-                }
-            }
-        }
-        return r;
-    }
 
     // Prefer bytes captured in-kernel by the backend. Fall back to reading
     // target memory only when the backend did not capture (ptrace path).
@@ -154,6 +99,168 @@ namespace {
         return backend->read_memory(ev.pid, addr, len);
     }
 
+    void append_data_observations_to_graph(
+        runtimexray::LineageGraph& graph,
+        std::vector<runtimexray::Observation>& observations)
+    {
+        for (auto& data_obs : observations) {
+            size_t context_index = SIZE_MAX;
+
+            //
+            // Resolve the execution context that existed when the scanner
+            // observation was produced.
+            //
+            for (size_t i = 0;
+                i < graph.observations.size();
+                ++i) {
+
+                const auto& candidate =
+                    graph.observations[i];
+
+                if (candidate.process_instance_id == 0) {
+                    continue;
+                }
+
+                if (candidate.pid != data_obs.pid &&
+                    candidate.tgid != data_obs.pid) {
+                    continue;
+                }
+
+                if (candidate.start_time >
+                    data_obs.start_time) {
+                    continue;
+                }
+
+                if (context_index == SIZE_MAX ||
+                    candidate.start_time >
+                        graph.observations[context_index].start_time ||
+                    (candidate.start_time ==
+                        graph.observations[context_index].start_time &&
+                    candidate.seq >
+                        graph.observations[context_index].seq)) {
+
+                    context_index = i;
+                }
+            }
+
+            size_t process_index = SIZE_MAX;
+
+            if (context_index != SIZE_MAX) {
+                const auto& context =
+                    graph.observations[context_index];
+
+                data_obs.process_instance_id =
+                    context.process_instance_id;
+
+                data_obs.exec_generation =
+                    context.exec_generation;
+
+                data_obs.tgid =
+                    context.tgid > 0
+                        ? context.tgid
+                        : context.pid;
+
+                //
+                // Find the process node belonging to the resolved process instance.
+                //
+                for (size_t i = graph.observations.size();
+                    i-- > 0;) {
+
+                    const auto& candidate =
+                        graph.observations[i];
+
+                    if (candidate.type ==
+                            runtimexray::ObservationType::Event &&
+                        candidate.syscall_name == "process" &&
+                        candidate.process_instance_id ==
+                            data_obs.process_instance_id) {
+
+                        process_index = i;
+                        break;
+                    }
+                }
+            }
+
+            //
+            // Scanner may observe a process that was not represented by the
+            // trace graph. Create a standalone process identity in that case.
+            //
+            if (process_index == SIZE_MAX) {
+                uint64_t next_instance_id = 1;
+
+                for (const auto& existing :
+                    graph.observations) {
+
+                    if (existing.process_instance_id >=
+                        next_instance_id) {
+
+                        next_instance_id =
+                            existing.process_instance_id + 1;
+                    }
+                }
+
+                runtimexray::Observation process;
+
+                process.type = runtimexray::ObservationType::Event;
+
+                process.syscall_name = "process";
+
+                process.pid = data_obs.pid;
+
+                process.tid = data_obs.pid;
+
+                process.tgid = data_obs.pid;
+
+                process.process_instance_id = next_instance_id;
+
+                process.exec_generation = 0;
+
+                process.start_time = data_obs.start_time;
+
+                process.end_time = data_obs.end_time;
+
+                process.program_name = runtimexray::get_process_name(data_obs.pid);
+
+                process_index = runtimexray::append_observation(graph, std::move(process));
+
+                data_obs.process_instance_id = next_instance_id;
+
+                data_obs.exec_generation = 0;
+
+                data_obs.tgid = data_obs.pid;
+            }
+
+            const size_t data_index = runtimexray::append_observation(graph, std::move(data_obs));
+
+            runtimexray::LineageEdge edge;
+
+            edge.from_index = process_index;
+
+            edge.to_index = data_index;
+
+            edge.relation = runtimexray::RelationType::ObservedIn;
+
+            const auto zero_time = std::chrono::steady_clock::time_point{};
+
+            const auto& process_obs = graph.observations[process_index];
+
+            const auto& stored_data_obs = graph.observations[data_index];
+
+            if (process_obs.start_time != zero_time &&
+                stored_data_obs.start_time != zero_time) {
+
+                edge.time_delta =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        stored_data_obs.start_time -
+                        process_obs.start_time);
+            }
+
+            edge.details = "Sensitive data observed in process";
+
+            graph.edges.push_back(std::move(edge));
+        }
+    }
+
     // Capture the path on syscall entry and expose it to the caller so the
     // observation can be stamped for later fd -> path resolution. Findings
     // are NOT emitted here: at entry the syscall has not returned, so we
@@ -176,68 +283,94 @@ namespace {
     void handle_syscall_connect(
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
         std::string& extra_info,
-        runtimexray::FindingList& findings,
         const runtimexray::SyscallEvent& ev,
         std::string& resolved_endpoint)
     {
-        uint64_t sockaddr_ptr = ev.arg1;
-        uint64_t addrlen = ev.arg2;
-        if (sockaddr_ptr > 0 && addrlen > 0 && addrlen <= 256) {
-            //auto bytes = backend->read_memory(ev.pid, sockaddr_ptr, static_cast<size_t>(addrlen));
-            auto bytes = get_sockaddr_bytes(backend, ev, sockaddr_ptr, static_cast<size_t>(addrlen));
-            auto parsed = runtimexray::parse_sockaddr(bytes);
-            if (parsed.valid) {
-                resolved_endpoint = parsed.ip + ":" + std::to_string(parsed.port);
-                extra_info = " addr=" + resolved_endpoint;
-                runtimexray::NetworkEvidence ne{parsed.ip, parsed.port, ev.pid, "outbound"};
-                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(ne);
-                for (auto& f : res) {
-                    f.pid = ev.pid;   // set PID
-                    findings.push_back(f);
-                }
-            }
+        const uint64_t sockaddr_ptr = ev.arg1;
+
+        const uint64_t addrlen = ev.arg2;
+
+        if (sockaddr_ptr == 0 ||  addrlen == 0 || addrlen > 256) {
+            return;
         }
+
+        const auto bytes =
+            get_sockaddr_bytes(
+                backend,
+                ev,
+                sockaddr_ptr,
+                static_cast<size_t>(addrlen));
+
+        const auto parsed = runtimexray::parse_sockaddr(bytes);
+
+        if (!parsed.valid) {
+            return;
+        }
+
+        resolved_endpoint =  parsed.ip + ":" + std::to_string(parsed.port);
+
+        extra_info = " addr=" + resolved_endpoint;
     }
 
     void handle_syscall_sendto(
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
         std::string& extra_info,
-        runtimexray::FindingList& findings,
-        const runtimexray::SyscallEvent& ev)
+        const runtimexray::SyscallEvent& ev,
+        std::string& detected_fingerprint,
+        std::vector<runtimexray::Observation>& secret_observations)
     {
-        uint64_t buf_ptr = ev.arg1;
-        uint64_t count   = ev.arg2;
+        const uint64_t buf_ptr =
+            ev.arg1;
 
-        // Debug: log pointer and length
-        runtimexray::Logger::log(runtimexray::LogLevel::Debug, "sendto: buf_ptr=0x" + std::to_string(buf_ptr) +
-                ", count=" + std::to_string(count));
+        const uint64_t count =
+            ev.arg2;
 
-        if (buf_ptr > 0 && count > 0 && count <= 4096) {
-            //auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
-            auto bytes = get_buffer_bytes(backend, ev, buf_ptr, static_cast<size_t>(count));
-            if (!bytes.empty()) {
-                if (runtimexray::Logger::is_enabled(runtimexray::LogLevel::Debug)) {
-                    // Log raw hex for debugging
-                    std::string hex;
-                    for (size_t i = 0; i < std::min(bytes.size(), (size_t)32); ++i) {
-                        char buf[4];
-                        snprintf(buf, sizeof(buf), "%02x", static_cast<unsigned char>(bytes[i]));
-                        hex += buf;
-                        if (i % 16 == 15) hex += " ";
-                    }
-                    runtimexray::Logger::log(runtimexray::LogLevel::Debug, "sendto raw bytes (hex): " + hex);
-                }
-                std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-                std::string data_str = runtimexray::sanitize_data(bytes);   // log-only
-                extra_info = " sockfd=" + std::to_string(ev.arg0) + " data=\"" + data_str + "\"";
-                runtimexray::MemoryChunkEvidence mce{raw, "sendto_data", ev.pid};
-                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-                for (auto& f : res) {
-                    f.pid = ev.pid;
-                    findings.push_back(f);
-                }
-            } else {
-                runtimexray::Logger::log(runtimexray::LogLevel::Debug, "sendto: read_memory returned empty");
+        if (buf_ptr == 0 ||
+            count == 0 ||
+            count > 4096) {
+            return;
+        }
+
+        const auto bytes =
+            get_buffer_bytes(
+                backend,
+                ev,
+                buf_ptr,
+                static_cast<size_t>(count));
+
+        if (bytes.empty()) {
+            return;
+        }
+
+        const std::string raw(
+            reinterpret_cast<const char*>(
+                bytes.data()),
+            bytes.size());
+
+        const std::string data_str =
+            runtimexray::sanitize_data(bytes);
+
+        extra_info =
+            " sockfd=" +
+            std::to_string(ev.arg0) +
+            " data=\"" +
+            data_str +
+            "\"";
+
+        auto extracted =
+            runtimexray::extract_secret_observations(
+                raw,
+                "sendto_data",
+                ev.pid,
+                static_cast<uintptr_t>(buf_ptr));
+
+        if (!extracted.empty()) {
+            detected_fingerprint =
+                extracted.front().fingerprint;
+
+            for (auto& observation : extracted) {
+                secret_observations.push_back(
+                    std::move(observation));
             }
         }
     }
@@ -245,26 +378,72 @@ namespace {
     void handle_syscall_write(
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
         std::string& extra_info,
-        runtimexray::FindingList& findings,
-        const runtimexray::SyscallEvent& ev)
+        const runtimexray::SyscallEvent& ev,
+        std::string& detected_fingerprint,
+        std::vector<runtimexray::Observation>& secret_observations)
     {
-        uint64_t fd = ev.arg0;
-        uint64_t buf_ptr = ev.arg1;
-        uint64_t count = ev.arg2;
-        if (buf_ptr > 0 && count > 0 && count <= 4096) {
-            //auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
-            auto bytes = get_buffer_bytes(backend, ev, buf_ptr, static_cast<size_t>(count));
-            if (!bytes.empty()) {
-                std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-                std::string data_str = runtimexray::sanitize_data(bytes);   // log-only
-                extra_info = " fd=" + std::to_string(fd) + " data=\"" + data_str + "\"";
-                std::string location = (fd == 1) ? "stdout" : (fd == 2) ? "stderr" : "write_data";
-                runtimexray::MemoryChunkEvidence mce{raw, location, ev.pid};
-                auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-                for (auto& f : res) {
-                    f.pid = ev.pid;   // set PID
-                    findings.push_back(f);
-                }
+        const uint64_t fd =
+            ev.arg0;
+
+        const uint64_t buf_ptr =
+            ev.arg1;
+
+        const uint64_t count =
+            ev.arg2;
+
+        if (buf_ptr == 0 ||
+            count == 0 ||
+            count > 4096) {
+            return;
+        }
+
+        const auto bytes =
+            get_buffer_bytes(
+                backend,
+                ev,
+                buf_ptr,
+                static_cast<size_t>(count));
+
+        if (bytes.empty()) {
+            return;
+        }
+
+        const std::string raw(
+            reinterpret_cast<const char*>(
+                bytes.data()),
+            bytes.size());
+
+        const std::string data_str =
+            runtimexray::sanitize_data(bytes);
+
+        extra_info =
+            " fd=" +
+            std::to_string(fd) +
+            " data=\"" +
+            data_str +
+            "\"";
+
+        const std::string location =
+            (fd == 1)
+                ? "stdout"
+                : (fd == 2)
+                    ? "stderr"
+                    : "write_data";
+
+        auto extracted =
+            runtimexray::extract_secret_observations(
+                raw,
+                location,
+                ev.pid,
+                static_cast<uintptr_t>(buf_ptr));
+
+        if (!extracted.empty()) {
+            detected_fingerprint =
+                extracted.front().fingerprint;
+
+            for (auto& observation : extracted) {
+                secret_observations.push_back(
+                    std::move(observation));
             }
         }
     }
@@ -272,215 +451,118 @@ namespace {
     void handle_syscall_writev(
         std::unique_ptr<runtimexray::ITraceBackend>& backend,
         std::string& extra_info,
-        runtimexray::FindingList& findings,
-        const runtimexray::SyscallEvent& ev)
+        const runtimexray::SyscallEvent& ev,
+        std::string& detected_fingerprint,
+        std::vector<runtimexray::Observation>& secret_observations)
     {
-        // writev(int fd, const struct iovec *iov, int iovcnt)
-        uint64_t fd = ev.arg0;
-        uint64_t iov_ptr = ev.arg1;
-        uint64_t iovcnt = ev.arg2;
+        const uint64_t fd =
+            ev.arg0;
 
-        if (iov_ptr == 0 || iovcnt == 0 || iovcnt > 1024) {
-            return; // sane limit
-        }
+        const uint64_t iov_ptr =
+            ev.arg1;
 
-        // Read the iovec array from the target process
-        size_t iov_size = iovcnt * sizeof(struct iovec);
-        //auto iov_bytes = backend->read_memory(ev.pid, iov_ptr, iov_size);
-        auto iov_bytes = get_buffer_bytes(backend, ev, iov_ptr, static_cast<size_t>(iov_size));
-        if (iov_bytes.empty()) {
+        const uint64_t iovcnt =
+            ev.arg2;
+
+        if (iov_ptr == 0 ||
+            iovcnt == 0 ||
+            iovcnt > 1024) {
             return;
         }
 
-        const struct iovec* iov = reinterpret_cast<const struct iovec*>(iov_bytes.data());
+        const size_t iov_size =
+            iovcnt * sizeof(struct iovec);
 
-        // For each iovec, read the buffer and scan for secrets
-        for (uint64_t i = 0; i < iovcnt; ++i) {
-            uint64_t buf_ptr = reinterpret_cast<uint64_t>(iov[i].iov_base);
-            uint64_t count = static_cast<uint64_t>(iov[i].iov_len);
-            if (buf_ptr == 0 || count == 0 || count > 4096) {
+        const auto iov_bytes =
+            backend->read_memory(
+            ev.pid,
+            iov_ptr,
+            iov_size);
+
+        if (iov_bytes.size() < iov_size) {
+            return;
+        }
+
+        const auto* iov =
+            reinterpret_cast<const struct iovec*>(
+                iov_bytes.data());
+
+        for (uint64_t i = 0;
+            i < iovcnt;
+            ++i) {
+
+            const uint64_t buf_ptr =
+                reinterpret_cast<uint64_t>(
+                    iov[i].iov_base);
+
+            const uint64_t count =
+                static_cast<uint64_t>(
+                    iov[i].iov_len);
+
+            if (buf_ptr == 0 ||
+                count == 0 ||
+                count > 4096) {
                 continue;
             }
 
-            //auto bytes = backend->read_memory(ev.pid, buf_ptr, static_cast<size_t>(count));
-            auto bytes = get_buffer_bytes(backend, ev, buf_ptr, static_cast<size_t>(count));
+            const auto bytes =
+                backend->read_memory(
+                    ev.pid,
+                    buf_ptr,
+                    static_cast<size_t>(count));
+
             if (bytes.empty()) {
                 continue;
             }
-            std::string raw(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            std::string data_str = runtimexray::sanitize_data(bytes);   // log-only
-            // Differentiate stdout/stderr
-            std::string location = (fd == 1) ? "stdout" : (fd == 2) ? "stderr" : "writev_data";
-            runtimexray::MemoryChunkEvidence mce{raw, location, ev.pid};
-            auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-            for (auto& f : res) {
-                f.pid = ev.pid;
-                findings.push_back(f);
+
+            const std::string raw(
+                reinterpret_cast<const char*>(
+                    bytes.data()),
+                bytes.size());
+
+            const std::string data_str =
+                runtimexray::sanitize_data(bytes);
+
+            const std::string location =
+                (fd == 1)
+                    ? "stdout"
+                    : (fd == 2)
+                        ? "stderr"
+                        : "writev_data";
+
+            auto extracted =
+                runtimexray::extract_secret_observations(
+                    raw,
+                    location,
+                    ev.pid,
+                    static_cast<uintptr_t>(buf_ptr));
+
+            if (!extracted.empty()) {
+                if (detected_fingerprint.empty()) {
+                    detected_fingerprint =
+                        extracted.front().fingerprint;
+                }
+
+                for (auto& observation : extracted) {
+                    secret_observations.push_back(
+                        std::move(observation));
+                }
             }
-            // Append data to extra_info (optional)
-            if (!extra_info.empty())
+
+            if (!extra_info.empty()) {
                 extra_info += " ";
-            extra_info += "iov[" + std::to_string(i) + "]=" + data_str;
+            }
+
+            extra_info +=
+                "iov[" +
+                std::to_string(i) +
+                "]=" +
+                data_str;
         }
     }
 } // anonymous namespace
 
 namespace runtimexray {
-
-    // Helper to add data nodes from memory scan to lineage graph
-    // Memory Finding
-    //  |
-    //  └── evidence_observation_seqs += Data Observation seq
-    //
-    void add_data_nodes_to_graph(
-        LineageGraph& graph,
-        Finding& finding,
-        pid_t pid)
-    {
-        // Does this Finding type require a new Data observation?
-        auto* details = std::get_if<MemorySecretFindingDetails>(&finding.details);
-        if (!details) {
-            return;
-        }
-
-        // 1. Resolve process node.
-        size_t proc_idx = SIZE_MAX;
-
-        // Search newest -> oldest because Linux can reuse a PID/TGID.
-        // The latest matching process node represents the most recent
-        // RuntimeXRay process instance for this numeric Linux identity.
-        for (size_t i = graph.observations.size(); i-- > 0;)
-        {
-            const auto& obs = graph.observations[i];
-            if (obs.type == ObservationType::Event &&
-                obs.syscall_name == "process" &&
-                (obs.pid == pid || obs.tgid == pid))
-            {
-                proc_idx = i;
-                break;
-            }
-        }
-
-        // Second: pid may actually be a worker TID.
-        // Resolve TID -> process_instance_id -> process node.
-        if (proc_idx == SIZE_MAX) {
-            uint64_t instance_id = 0;
-            for (auto it = graph.observations.rbegin(); it != graph.observations.rend(); ++it) {
-                if (it->tid == pid && it->process_instance_id != 0) {
-                    instance_id = it->process_instance_id;
-                    break;
-                }
-            }
-
-            // Resolve that process instance back to its process node.
-            if (instance_id != 0) {
-                for (size_t i = graph.observations.size(); i-- > 0;) {
-                    const auto& obs = graph.observations[i];
-                    if (obs.type == ObservationType::Event &&
-                        obs.syscall_name == "process" &&
-                        obs.process_instance_id == instance_id) {
-                        proc_idx = i;
-                        break;
-                    }
-                }
-            }
-        }
-
-        Logger::log(LogLevel::Debug, "add_data_nodes_to_graph: proc_idx=" + std::to_string(proc_idx));
-
-        // Last resort: process wasn't known to the trace.
-        if (proc_idx == SIZE_MAX) {
-            //
-            // This process was not present in the existing lineage graph.
-            // Allocate a new RuntimeXRay process instance after all instances
-            // already present in the graph.
-            //
-            uint64_t next_instance_id = 1;
-
-            for (const auto& obs : graph.observations) {
-                if (obs.process_instance_id >= next_instance_id) {
-                    next_instance_id = obs.process_instance_id + 1;
-                }
-            }
-
-            Observation proc_obs;
-            proc_obs.type = ObservationType::Event;
-            proc_obs.syscall_name = "process";
-            proc_obs.pid = pid;
-            proc_obs.tid = pid;
-            proc_obs.tgid = pid;
-            proc_obs.process_instance_id = next_instance_id;
-            proc_obs.start_time = std::chrono::steady_clock::now();
-            proc_obs.program_name = runtimexray::get_process_name(pid);
-            proc_idx = append_observation(graph, std::move(proc_obs));
-        }
-
-        // 2. Resolve identity inherited by the new Data observation.
-        const Observation& process_obs = graph.observations[proc_idx];
-        const uint64_t process_instance_id = process_obs.process_instance_id;
-        uint64_t exec_generation = 0;
-        for (auto it = graph.observations.rbegin(); it != graph.observations.rend(); ++it) {
-            if (it->process_instance_id == process_instance_id &&
-                it->syscall_name != "process") {
-                exec_generation = it->exec_generation;
-                break;
-            }
-        }
-        const pid_t process_tgid = (process_obs.tgid > 0) ? process_obs.tgid : process_obs.pid;
-
-        // 4. Materialize the memory finding as a Data observation.
-        Observation data_obs;
-        data_obs.type = ObservationType::Data;
-        data_obs.data_type = details->location.empty() ? details->secret_type : details->location;
-        data_obs.secret_type = details->secret_type;
-        data_obs.fingerprint = details->fingerprint;
-        data_obs.data_snippet = details->raw_snippet;
-        data_obs.address = details->address;
-        data_obs.size = details->raw_secret.size();
-
-        //
-        // Transitional identity:
-        //
-        // pid/tid are kept as before so we don't break current
-        // correlation code.
-        //
-        // TGID and process_instance_id provide the process-level
-        // identity.
-        //
-        data_obs.pid = pid;
-        data_obs.tid = pid;
-        data_obs.tgid = process_tgid;
-
-        data_obs.process_instance_id = process_instance_id;
-        data_obs.exec_generation = exec_generation;
-        data_obs.start_time = std::chrono::steady_clock::now();
-        const size_t data_idx = append_observation(graph, std::move(data_obs));
-        Logger::log(
-            LogLevel::Debug,
-            "add_data_nodes_to_graph: Adding data node with fingerprint " +
-            details->fingerprint +
-            " for TGID " +
-            std::to_string(process_tgid) +
-            " process_instance=" +
-            std::to_string(process_instance_id) +
-            " at index " +
-            std::to_string(data_idx));
-
-        // 5. Connect Finding -> stable Observation seq.
-        const uint64_t data_seq = graph.observations[data_idx].seq;
-        if (data_seq != 0) {
-            finding.evidence_observation_seqs.push_back(data_seq);
-        }
-
-        // 6. Connect process node -> Data observation.
-        LineageEdge edge;
-        edge.from_index = proc_idx;
-        edge.to_index = data_idx;
-        edge.relation = RelationType::StaticAssociated;
-        edge.details = "Memory secret found";
-
-        graph.edges.push_back(std::move(edge));
-    }
 
     bool TraceCommand::parse_specific_args(const std::vector<std::string> &args) {
         program_.clear();
@@ -538,7 +620,7 @@ namespace runtimexray {
     int TraceCommand::execute(const CommonOptions &common) {
         auto start_time = std::chrono::steady_clock::now();
 
-        runtimexray::FindingList findings;
+        std::vector<Observation> secret_observations;
 
         std::optional<nlohmann::json> extra;
         std::string child_output;
@@ -583,13 +665,6 @@ namespace runtimexray {
             // the parent's.
             std::unordered_set<pid_t> memory_scanned_pids;
 
-            // Entry-captured paths for open/openat, keyed by tid. The eBPF
-            // backend captures the path bytes in-kernel at sys_enter_openat;
-            // the exit event does not carry them, so we save the entry path
-            // here and reuse it on exit. ptrace keeps the buffer readable, so
-            // this map is simply preferred over re-reading.
-            std::unordered_map<pid_t, std::string> pending_open_paths;
-
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // Feed the analyzer first. It creates the entry observation and later
                 // updates the same observation on exit. All set_* calls below depend
@@ -618,63 +693,74 @@ namespace runtimexray {
                 // =======================================================================
                 if (ev.is_entry) {
                     // ----- Outbound: buffer is valid on entry -----
-                    // After the handler runs, stamp the send observation with the first
-                    // fingerprint it produced. This is what lets the correlated emit
-                    // match the send event to a read event and a memory node.
-                    const size_t findings_before = findings.size();
+                    //
+                    // If sensitive data is recognized in the syscall payload, stamp the
+                    // syscall Observation with the exact-value fingerprint for later
+                    // graph-based correlation.
+                    std::string payload_fingerprint;
 
                     if (std::strcmp(syscall_name, "write") == 0) {
-                        handle_syscall_write(backend, extra_info, findings, ev);
+                        handle_syscall_write(
+                            backend,
+                            extra_info,
+                            ev,
+                            payload_fingerprint,
+                            secret_observations);
                     } else if (std::strcmp(syscall_name, "writev") == 0) {
-                        handle_syscall_writev(backend, extra_info, findings, ev);
+                        handle_syscall_writev(
+                            backend,
+                            extra_info,
+                            ev,
+                            payload_fingerprint,
+                            secret_observations);
                     } else if (std::strcmp(syscall_name, "sendto") == 0) {
-                        handle_syscall_sendto(backend, extra_info, findings, ev);
+                        handle_syscall_sendto(
+                            backend,
+                            extra_info,
+                            ev,
+                            payload_fingerprint,
+                            secret_observations);
                     }
 
-                    for (size_t k = findings_before; k < findings.size(); ++k) {
-                        if (auto* d = std::get_if<runtimexray::MemorySecretFindingDetails>(&findings[k].details)) {
-                            lineage_analyzer.set_pending_event_fingerprint(ev.pid, ev.tid, d->fingerprint);
-                            break;   // one fingerprint per syscall is enough for Phase 1
-                        }
+                    if (!payload_fingerprint.empty()) {
+                        lineage_analyzer.set_pending_event_fingerprint(
+                            ev.pid,
+                            ev.tid,
+                            payload_fingerprint);
                     }
 
-                    // ----- Inbound setup: capture resolved strings on entry -----
-                    // The path pointer for openat and the sockaddr pointer for connect
-                    // are only valid on entry. Stamp them onto the entry observation so
-                    // the fd resolver can read them back later.
                     std::string resolved;
-                    if (std::strcmp(syscall_name, "open") == 0 || std::strcmp(syscall_name,"openat") == 0) {
-                        handle_syscall_open_entry(syscall_name, backend, extra_info, ev, resolved);
-                        if (!resolved.empty()) {
-                            lineage_analyzer.set_pending_event_source(ev.pid, ev.tid, resolved);
-                            pending_open_paths[ev.tid] = resolved;
-                            // Bound the map: entries are only removed on exit, so a
-                            // thread that dies between entry and exit would leak one
-                            // entry forever. 4096 is far above any realistic
-                            // in-flight open/openat concurrency.
-                            if (pending_open_paths.size() > 4096) {
-                                pending_open_paths.clear();
-                            }                            
-                        }
-                    } else if (std::strcmp(syscall_name, "connect") == 0) {
-                        handle_syscall_connect(backend, extra_info, findings, ev, resolved);
-                        if (!resolved.empty()) {
-                            lineage_analyzer.set_pending_event_source(ev.pid, ev.tid, resolved);
-                        }
-                    }
 
-                    //
-                    // Findings created while processing a syscall entry are supported
-                    // by the syscall observation that is currently pending.
-                    //
-                    // This covers connect, write, writev and sendto.
-                    //
-                    if (findings.size() > findings_before) {
-                        const auto observation_seq = lineage_analyzer.pending_event_seq(ev.pid, ev.tid);
-                        if (observation_seq.has_value()) {
-                            for (size_t k = findings_before; k < findings.size(); ++k) {
-                                findings[k].evidence_observation_seqs.push_back(*observation_seq);
-                            }
+                    if (std::strcmp(syscall_name, "open") == 0 ||
+                        std::strcmp(syscall_name, "openat") == 0) {
+
+                        handle_syscall_open_entry(
+                            syscall_name,
+                            backend,
+                            extra_info,
+                            ev,
+                            resolved);
+
+                        if (!resolved.empty()) {
+                            lineage_analyzer.set_pending_event_source(
+                                ev.pid,
+                                ev.tid,
+                                resolved);
+                        }
+
+                    } else if (std::strcmp(syscall_name, "connect") == 0) {
+
+                        handle_syscall_connect(
+                            backend,
+                            extra_info,
+                            ev,
+                            resolved);
+
+                        if (!resolved.empty()) {
+                            lineage_analyzer.set_pending_event_source(
+                                ev.pid,
+                                ev.tid,
+                                resolved);
                         }
                     }
 
@@ -718,54 +804,6 @@ namespace runtimexray {
                     Logger::log(LogLevel::Debug, line);
                 }
 
-                // ----- File access: report every attempt -----
-                // The kernel returns >= 0 on success and -errno on failure.
-                // Emitting on entry (the old behaviour) could not
-                // distinguish success from failure at all. Now every
-                // attempt is reported with the outcome carried in
-                // FileAccessEvidence::err. Severity is a function of the
-                // path only; the outcome differentiates the finding for
-                // consumers (opened / denied / failed).                
-                // Path retrieval priority:
-                //   1. ev.captured_path if the backend populated it on exit
-                //      (future eBPF backends may do this)
-                //   2. the entry-time path saved in pending_open_paths
-                //      (required for the current eBPF backend)
-                //   3. a fresh re-read via get_path_bytes (ptrace fallback;
-                //      safe because the thread is stopped at the exit trap)
-                if (strcmp(name, "open") == 0 || strcmp(name, "openat") == 0) {
-                    int err = 0;
-                    if (ev.return_value < 0) {
-                        err = static_cast<int>(-ev.return_value);
-                    }
-
-                    std::string path = ev.captured_path;
-                    if (path.empty()) {
-                        auto it = pending_open_paths.find(ev.tid);
-                        if (it != pending_open_paths.end()) {
-                            path = it->second;
-                            pending_open_paths.erase(it);
-                        }
-                    }
-                    if (path.empty()) {
-                        uint64_t path_addr = (strcmp(name, "open") == 0) ? ev.arg0 : ev.arg1;
-                        path = get_path_bytes(backend, ev, path_addr);
-                    }
-                    
-                    if (!path.empty()) {
-                        runtimexray::FileAccessEvidence fe{path, 0, ev.pid, err};
-                        auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(fe);
-                        const auto observation_seq = lineage_analyzer.last_exit_event_seq(ev.pid, ev.tid);
-                        for (auto& f : res) {
-                            f.pid = ev.pid;
-                            if (observation_seq.has_value()) {
-                                f.evidence_observation_seqs.push_back(*observation_seq);
-                            }
-                            findings.push_back(std::move(f));
-                        }
-                    }
-                }
-
                 // ----- Inbound: userspace buffer is only valid on exit -----
                 // read(fd, buf, count) and recvfrom(sockfd, buf, len, ...) both put the
                 // received bytes in arg1 and return the valid byte count.
@@ -792,29 +830,28 @@ namespace runtimexray {
                         std::string printable = runtimexray::sanitize_data(bytes);
                         std::string location = (std::strcmp(name, "read") == 0) ? "read" : "recvfrom";
 
-                        uintptr_t addr_hint = ev.arg1;   // 0 on eBPF; harmless
-                        runtimexray::MemoryChunkEvidence mce{raw, location, ev.pid, addr_hint};
-                        auto res = runtimexray::AnalyzerRegistry::instance().analyze_evidence(mce);
-                        const auto observation_seq = lineage_analyzer.last_exit_event_seq(ev.pid, ev.tid);
-                        for (auto& f : res) {
-                            f.pid = ev.pid;
-                            if (observation_seq.has_value()) {
-                                f.evidence_observation_seqs.push_back(*observation_seq);
-                            }
-                        }
+                        auto extracted =
+                            extract_secret_observations(
+                                raw,
+                                location,
+                                ev.pid,
+                                static_cast<uintptr_t>(ev.arg1));
 
-                        // Stamp the read-exit observation with the first fingerprint
-                        // so the correlated emit can find the read event by fp.
-                        for (const auto& f : res) {
-                            if (auto* d = std::get_if<runtimexray::MemorySecretFindingDetails>(&f.details)) {
-                                lineage_analyzer.set_last_exit_fingerprint(ev.pid, ev.tid, d->fingerprint);
-                                break;
-                            }
-                        }
+                        const bool sensitive_payload = !extracted.empty();
+                        if (sensitive_payload) {
+                            //
+                            // Fingerprint on the syscall Event means the sensitive value was
+                            // observed in this syscall payload.
+                            //
+                            lineage_analyzer.set_last_exit_fingerprint(
+                                ev.pid,
+                                ev.tid,
+                                extracted.front().fingerprint);
 
-                        // Detection result is no longer needed locally.
-                        for (auto& f : res) {
-                            findings.push_back(std::move(f));
+                            for (auto& observation : extracted) {
+                                secret_observations.push_back(
+                                    std::move(observation));
+                            }
                         }
 
                         // One-shot memory scan per process, while that process is still alive.
@@ -823,17 +860,22 @@ namespace runtimexray {
                         // the secret is resident in the child's memory, not the parent's.
                         // `insert(...).second` is true only the first time we see this pid, so
                         // the scan runs once per process.
-                        if (scan_memory_ && !res.empty() &&
+                        if (scan_memory_ &&
+                            sensitive_payload &&
                             memory_scanned_pids.insert(ev.pid).second)
                         {
-                            FindingList mem_findings;
                             size_t pages_scanned = 0;
-                            scan_process_for_secrets(ev.pid, mem_findings, 50, 1000, &pages_scanned);
-                            findings.insert(findings.end(),
-                                            mem_findings.begin(), mem_findings.end());
+
+                            scan_process_for_secrets(
+                                ev.pid,
+                                secret_observations,
+                                50,
+                                1000,
+                                &pages_scanned);
+
                             Logger::log(LogLevel::Debug,
                                 "During-trace memory scan for PID " + std::to_string(ev.pid) +
-                                ": " + std::to_string(mem_findings.size()) + " findings, " +
+                                ": " + std::to_string(secret_observations.size()) + " observations, " +
                                 std::to_string(pages_scanned) + " pages");
                         }
 
@@ -862,173 +904,74 @@ namespace runtimexray {
 
             backend->trace(config);
 
-            // ---- Produce lineage graph and scan memory for secrets ----
+            // ---- Produce completed lineage graph ----
             auto graph = lineage_analyzer.produce_graph();
 
+            //
+            // Perform final memory scans for processes that were not already scanned
+            // during tracing.
+            //
+            // memory_scanned_pids prevents scanning the same process twice.
+            //
             if (scan_memory_) {
-                pid_t parent_pid = backend->get_pid();
-                if (parent_pid > 0) {
-                    FindingList parent_findings;
+                const pid_t parent_pid = backend->get_pid();
+
+                if (parent_pid > 0 &&
+                    memory_scanned_pids.insert(parent_pid).second) {
+
                     size_t pages_scanned = 0;
-                    scan_process_for_secrets(parent_pid, parent_findings, 50, 1000, &pages_scanned);
-                    findings.insert(findings.end(), parent_findings.begin(), parent_findings.end());
+
+                    scan_process_for_secrets(
+                        parent_pid,
+                        secret_observations,
+                        50,
+                        1000,
+                        &pages_scanned);
                 }
+
                 for (pid_t child : child_pids) {
-                    FindingList child_findings;
+                    if (!memory_scanned_pids.insert(child).second) {
+                        continue;
+                    }
+
                     size_t pages_scanned = 0;
-                    scan_process_for_secrets(child, child_findings, 50, 1000, &pages_scanned);
-                    findings.insert(findings.end(), child_findings.begin(), child_findings.end());
+
+                    scan_process_for_secrets(
+                        child,
+                        secret_observations,
+                        50,
+                        1000,
+                        &pages_scanned);
                 }
             }
 
-            // ---- Child output handling (works for any backend that saves it) ----
+            // ---- Child output handling ----
             child_output = backend->child_output_path();
+
             if (!child_output.empty()) {
-                Logger::log(LogLevel::Debug, "Child output saved to " + child_output + " (for debugging)");
+                Logger::log(
+                    LogLevel::Debug,
+                    "Child output saved to " +
+                        child_output +
+                        " (for debugging)");
             }
 
-            // ---- Now add ALL findings as data nodes in the graph ----
-            for (auto& f : findings) {
-                if (f.pid > 0) {
-                    add_data_nodes_to_graph(graph, f, f.pid);
-                }
-            }
-
-            // -----------------------------------------------------------------------
-            // Emit the strong file -> memory -> socket correlation only when:
             //
-            //   1. the same fingerprint appears in read, scanner memory, and output;
-            //   2. all three observations belong to the same process/exec session;
-            //   3. the input FD resolves to a file path;
-            //   4. the output FD resolves to a socket endpoint.
+            // Memory scanner produced Observations, not Findings.
             //
-            // Fingerprint equality establishes value identity, not causality.
-            // Cross-process flows require explicit resource lineage and are therefore
-            // intentionally excluded here.
-            // -----------------------------------------------------------------------
-            {
-                // fingerprint -> observation indices carrying it
-                std::unordered_map<std::string, std::vector<size_t>> fp_indices;
-                for (size_t i = 0; i < graph.observations.size(); ++i) {
-                    const auto& obs = graph.observations[i];
-                    if (!obs.fingerprint.empty()) {
-                        fp_indices[obs.fingerprint].push_back(i);
-                    }
-                }
+            // Attach those observations to the completed lineage graph before any
+            // security detection is executed.
+            //
+            append_data_observations_to_graph(
+                graph,
+                secret_observations);
 
-                for (const auto& [fp, indices] : fp_indices) {
-                    size_t read_idx = SIZE_MAX;
-                    size_t send_idx = SIZE_MAX;
-                    size_t mem_idx  = SIZE_MAX;
-                    std::string secret_type;
+            //
+            // Security detection starts only after the complete evidence graph exists.
+            //
+            DetectionEngine detection_engine(DetectionRuleRegistry::instance());
 
-                    for (size_t idx : indices) {
-                        const auto& obs = graph.observations[idx];
-                        if (obs.type == ObservationType::Event) {
-                            if (obs.syscall_name == "read" || obs.syscall_name == "recvfrom") {
-                                read_idx = idx;
-                            } else if (obs.syscall_name == "write"  ||
-                                    obs.syscall_name == "writev" ||
-                                    obs.syscall_name == "sendto") {
-                                send_idx = idx;
-                            }
-                        } else if (obs.type == ObservationType::Data) {
-                            if (obs.data_type == "memory") {
-                                mem_idx = idx;
-                            }
-                            if (!obs.secret_type.empty())
-                                secret_type = obs.secret_type;
-                        }
-                    }
-
-                    if (read_idx == SIZE_MAX || send_idx == SIZE_MAX || mem_idx == SIZE_MAX) {
-                        continue;   // not fully observed; nothing to correlate
-                    }
-
-                    const auto& read_obs = graph.observations[read_idx];
-                    const auto& send_obs = graph.observations[send_idx];
-                    const auto& mem_obs  = graph.observations[mem_idx];
-
-                    const int   read_fd  = static_cast<int>(read_obs.arg0);
-                    const int   send_fd  = static_cast<int>(send_obs.arg0);
-                    const pid_t read_pid = read_obs.pid;
-                    const pid_t send_pid = send_obs.pid;
-
-                    const FdResource read_res = resolve_fd_at(graph, read_pid, read_fd, read_idx);
-                    const FdResource send_res = resolve_fd_at(graph, send_pid, send_fd, send_idx);
-
-                    //
-                    // This finding makes a strong semantic claim:
-                    //
-                    //     file -> read -> memory -> send -> socket
-                    //
-                    // Fingerprint equality alone proves value identity, not causal flow.
-                    // Until RuntimeXRay has explicit cross-process resource lineage, require
-                    // the entire flow to stay inside one executable session and require both
-                    // endpoint resources to be resolved.
-                    //
-                    const bool same_session =
-                        read_obs.process_instance_id == mem_obs.process_instance_id &&
-                        read_obs.process_instance_id == send_obs.process_instance_id &&
-                        read_obs.exec_generation == mem_obs.exec_generation &&
-                        read_obs.exec_generation == send_obs.exec_generation;
-
-                    if (!same_session) {
-                        continue;
-                    }
-
-                    if (read_res.path.empty() || send_res.endpoint.empty()) {
-                        continue;
-                    }
-
-                    std::ostringstream oss;
-                    oss << "sensitive_object_type="
-                            << (secret_type.empty() ? "unknown" : secret_type)
-                        << "; source_file="
-                            << (read_res.path.empty() ? "<unresolved>" : read_res.path)
-                        << "; read_event{syscall=" << read_obs.syscall_name
-                            << " pid=" << read_obs.pid
-                            << " tid=" << read_obs.tid
-                            << " fd="  << read_fd
-                            << " observation_id=read:" << fp << "}"
-                        << "; memory_observation{pid=" << mem_obs.pid
-                            << " address=0x" << std::hex << mem_obs.address << std::dec
-                            << " observation_id=memory:" << fp << "}"
-                        << "; send_event{syscall=" << send_obs.syscall_name
-                            << " pid=" << send_obs.pid
-                            << " tid=" << send_obs.tid
-                            << " fd="  << send_fd
-                            << " observation_id=send:" << fp << "}"
-                        << "; socket_destination="
-                            << (send_res.endpoint.empty() ? "<unresolved>" : send_res.endpoint)
-                        << "; confidence=exact-fingerprint-match"
-                        << "; note=An attacker capable of reading process memory could "
-                           "recover the observed secret while it is resident. "
-                           "Requires --scan-memory: without a scanner-derived memory "
-                           "observation the flow is not fully observed and no correlated "
-                           "finding is emitted.";
-
-                    MemorySecretFindingDetails det;
-                    det.fingerprint = fp;
-                    det.secret_type = secret_type;
-                    det.address     = mem_obs.address;
-                    det.location    = "correlated";
-                    det.secret_length = mem_obs.size;   // set by add_data_nodes_to_graph
-                    // det.raw_snippet stays empty; the snippet lives on the raw memory finding
-
-                    findings.emplace_back(
-                        FindingSeverity::High,
-                        "Sensitive object observed from file to socket",
-                        oss.str(),
-                        det,
-                        read_obs.pid);
-
-                    auto& correlated_finding = findings.back();
-                    correlated_finding.evidence_observation_seqs.push_back(read_obs.seq);
-                    correlated_finding.evidence_observation_seqs.push_back(mem_obs.seq);
-                    correlated_finding.evidence_observation_seqs.push_back(send_obs.seq);
-                }
-            }
+            FindingList findings = detection_engine.detect(graph);
 
             // Build extra JSON metadata (for JSON reporter)
             extra.emplace();
@@ -1049,9 +992,6 @@ namespace runtimexray {
             ctx.target = program_;
             ctx.started_at = runtimexray::current_iso8601_utc();
             ctx.duration_ms = duration_ms;
-
-            // After filtering findings, but before reporting:
-            RiskAssessmentRegistry::instance().assess_findings(findings, ctx, &graph);
 
             return report_findings(common,
                 std::move(ctx),
@@ -1082,8 +1022,7 @@ namespace runtimexray {
         std::cout << "  --timeout SECONDS     Stop tracing after SECONDS\n";
         std::cout << "  --follow-forks        Trace child processes (default)\n";
         std::cout << "  --no-follow-forks     Do not trace child processes\n";
-        std::cout << "  --scan-memory         Scan process memory for secrets; required for the\n";
-        std::cout << "                        file -> read -> memory -> send -> socket correlated finding\n";
+        std::cout << "  --scan-memory         Scan process memory for secrets\n";
         std::cout << "  --backend BACKEND     Select tracing backend (ptrace or ebpf, default: ptrace)\n";
         std::cout << "  --help                Show this help\n";
     }

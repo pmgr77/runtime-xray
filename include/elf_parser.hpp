@@ -1,9 +1,14 @@
 /**
  * @file    elf_parser.hpp
- * @brief   Declares the ELF parsing interface for RuntimeXRay.
+ * @brief   Declares ELF evidence collection for RuntimeXRay.
+ *
+ * The ELF parser is a collector. It extracts factual static observations
+ * from an ELF binary but does not make security decisions.
+ *
+ * Security conclusions are produced later by DetectionEngine rules.
  *
  * @author  Peter Magram
- * @date    2026-08-12
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -25,9 +30,11 @@
 #ifndef RUNTIMEXRAY_ELF_PARSER_HPP
 #define RUNTIMEXRAY_ELF_PARSER_HPP
 
-#include "finding.hpp"   // for FindingSeverity
+#include "lineage.hpp"
+
+#include <cstddef>
+#include <cstdint>
 #include <string>
-#include <optional>
 
 namespace runtimexray {
 
@@ -43,18 +50,20 @@ struct ElfMetadata {
 };
 
 /**
- * @brief Analyzes an ELF binary and returns collected findings.
- * @param path Path to the ELF file.
- * @param min_severity Minimum severity threshold for findings.
- * @param verbose If true, include informational findings.
- * @param metadata Optional output parameter; if not null, filled with ELF metadata.
- * @return FindingList with static analysis results.
- * @throws std::runtime_error on fatal errors (cannot open, not ELF, unsupported, etc.).
+ * @brief Collect factual static observations from an ELF binary.
+ *
+ * The collector performs no security classification and creates no Findings.
+ * Hardening properties and imported symbols are represented as Static
+ * Observations in the returned LineageGraph.
+ *
+ * @param path Path to the ELF binary.
+ * @param metadata Optional ELF metadata output.
+ * @return LineageGraph containing static observations.
+ * @throws std::runtime_error if the file cannot be parsed as a supported ELF.
  */
-FindingList analyze_binary(const std::string& path,
-                           FindingSeverity min_severity = FindingSeverity::Medium,
-                           bool verbose = false,
-                           ElfMetadata* metadata = nullptr);
+LineageGraph collect_elf_observations(
+    const std::string& path,
+    ElfMetadata* metadata = nullptr);
 
 } // namespace runtimexray
 

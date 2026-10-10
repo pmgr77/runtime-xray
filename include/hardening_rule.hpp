@@ -1,9 +1,9 @@
 /**
- * @file    builtin_analyzers.hpp
- * @brief   Declaration of built-in analyzer registration.
+ * @file    hardening_rule.hpp
+ * @brief   Detection rule for ELF hardening observations.
  *
  * @author  Peter Magram
- * @date    2026-08-24
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -22,15 +22,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RUNTIMEXRAY_BULTIN_ANALYZERS_HPP
-#define RUNTIMEXRAY_BULTIN_ANALYZERS_HPP
+#ifndef RUNTIMEXRAY_HARDENING_RULE_HPP
+#define RUNTIMEXRAY_HARDENING_RULE_HPP
 
-#include "analyzer_registry.hpp"
+#include "idetection_rule.hpp"
 
 namespace runtimexray {
 
-void register_builtin_analyzers(AnalyzerRegistry& registry);
+class HardeningRule final : public IDetectionRule {
+public:
+    std::string id() const override;
+    std::string description() const override;
+    DetectionStage stage() const override;
+
+    FindingList detect(
+        const DetectionContext& context) const override;
+};
 
 } // namespace runtimexray
 
-#endif // RUNTIMEXRAY_BULTIN_ANALYZERS_HPP
+#endif // RUNTIMEXRAY_HARDENING_RULE_HPP

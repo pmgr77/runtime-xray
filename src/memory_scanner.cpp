@@ -23,10 +23,11 @@
 // limitations under the License.
 
 #include "memory_scanner.hpp"
-#include "analyzer_registry.hpp"
-#include "evidence.hpp"
+#include "secret_extractor.hpp"
 #include "logger.hpp"
 
+#include <chrono>
+#include <utility>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -40,6 +41,47 @@
 namespace runtimexray {
 
 namespace {
+
+size_t append_secret_observations(
+    std::vector<Observation>& output,
+    const std::string& data,
+    const std::string& location,
+    pid_t pid,
+    uintptr_t address,
+    size_t max_to_add)
+{
+    if (max_to_add == 0) {
+        return 0;
+    }
+
+    auto extracted =
+        extract_secret_observations(
+            data,
+            location,
+            pid,
+            address);
+
+    size_t added = 0;
+
+    for (auto& observation : extracted) {
+        if (added >= max_to_add) {
+            break;
+        }
+
+        const auto now =
+            std::chrono::steady_clock::now();
+
+        observation.start_time = now;
+        observation.end_time = now;
+
+        output.push_back(
+            std::move(observation));
+
+        ++added;
+    }
+
+    return added;
+}
 
 // Reads the contents of /proc/<pid>/<name> as a string.
 std::string read_proc_file(pid_t pid, const std::string& name) {
@@ -119,10 +161,13 @@ std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
     return regions;
 }
 
-void scan_memory_for_secrets(pid_t pid, FindingList& findings,
-                             size_t max_findings,
-                             size_t max_pages,
-                             size_t* pages_scanned) {
+void scan_memory_for_secrets(
+    pid_t pid,
+    std::vector<Observation>& observations,
+    size_t max_observations,
+    size_t max_pages,
+    size_t* pages_scanned)
+{
     // Fast path: no memory pages should be scanned
     if (max_pages == 0) {
         if (pages_scanned) {
@@ -159,7 +204,7 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
         uint64_t address = region.start;
         Logger::log(LogLevel::Debug, "Scanning region 0x" + std::to_string(address) +
                    " - 0x" + std::to_string(region.end) + " (" + region.perms + ")");        
-        while (address < region.end && found < max_findings && scanned < max_pages) {
+        while (address < region.end && found < max_observations && scanned < max_pages) {
             size_t to_read = std::min<size_t>(chunk_size, region.end - address);
 
             struct iovec local;
@@ -191,16 +236,15 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
             if (chunk.find("password=") != std::string::npos) {
                 Logger::log(LogLevel::Debug, "Found 'password=' in chunk at 0x" + std::to_string(address));
             }
-            // Create evidence and send to registry
-            MemoryChunkEvidence ev{chunk, "memory", pid, address};
-            FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
-            for (auto& f : results) {
-                f.pid = pid;            // set PID
-                if (found >= max_findings) 
-                    break;
-                findings.push_back(f);
-                ++found;
-            }
+
+            const size_t remaining = max_observations - found;
+            found += append_secret_observations(
+                observations,
+                chunk,
+                "memory",
+                pid,
+                static_cast<uintptr_t>(address),
+                remaining);
 
             address += static_cast<uint64_t>(n);
         }
@@ -211,16 +255,20 @@ void scan_memory_for_secrets(pid_t pid, FindingList& findings,
     }
 }
 
-void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findings) {
+void scan_cmdline_for_secrets(
+    pid_t pid,
+    std::vector<Observation>& observations,
+    size_t max_observations)
+{
     std::string cmdline = read_proc_file(pid, "cmdline");
     if (Logger::is_enabled(LogLevel::Debug)) {
-        std::string preview = cmdline.size() > 20 ? cmdline.substr(0, 10) + "..." : cmdline;
         Logger::log_sensitive(
             LogLevel::Debug,
-            "scan_cmdline_for_secrets: cmdline length = " + std::to_string(cmdline.size()) +
-                ", preview = " + preview,
-            "scan_cmdline_for_secrets: cmdline = " + cmdline
-        );
+            "scan_cmdline_for_secrets: cmdline length = " +
+                std::to_string(cmdline.size()) +
+                ", content=<redacted>",
+            "scan_cmdline_for_secrets: cmdline = " +
+                cmdline);
     }
     if (cmdline.empty()) {
         return;
@@ -242,17 +290,20 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
 
     size_t found = 0;
 
-    auto emit = [&](const std::string& c) -> bool {
-        MemoryChunkEvidence ev{c, "cmdline", pid, 0};
-        FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
-        for (auto& f : results) {
-            f.pid = pid;
-            if (found >= max_findings)
-                return false;
-            findings.push_back(f);
-            ++found;
+    auto emit = [&](const std::string& content) -> bool {
+        if (found >= max_observations) {
+            return false;
         }
-        return true;
+
+        found += append_secret_observations(
+            observations,
+            content,
+            "cmdline",
+            pid,
+            0,
+            max_observations - found);
+
+        return found < max_observations;
     };
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -270,7 +321,11 @@ void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
     }
 }
 
-void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findings) {
+void scan_environ_for_secrets(
+    pid_t pid,
+    std::vector<Observation>& observations,
+    size_t max_observations)
+{
     std::string environ = read_proc_file(pid, "environ");
     Logger::log(LogLevel::Debug, "scan_environ_for_secrets: environ length = " + std::to_string(environ.size()));
     if (environ.empty()) {
@@ -280,49 +335,74 @@ void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findi
 
     auto env_vars = split_nul_strings(environ);
     size_t found = 0;
+
     for (const auto& var : env_vars) {
-        // Create evidence from this environment variable string.
-        MemoryChunkEvidence ev{var, "environment", pid, 0};
-        Logger::log(LogLevel::Debug, "scan_environ_for_secrets: checking env var: " + var);
-        FindingList results = AnalyzerRegistry::instance().analyze_evidence(ev);
-        for (auto& f : results) {
-            f.pid = pid;            // set PID
-            if (found >= max_findings) {
-                return;
-            }
-            findings.push_back(f);
-            ++found;
+        if (found >= max_observations) {
+            return;
         }
+
+        Logger::log(
+            LogLevel::Debug,
+            "scan_environ_for_secrets: checking environment variable");
+
+        found += append_secret_observations(
+            observations,
+            var,
+            "environment",
+            pid,
+            0,
+            max_observations - found);
     }
 }
 
-void scan_process_for_secrets(pid_t pid, FindingList& findings,
-                              size_t max_findings,
-                              size_t max_pages,
-                              size_t* pages_scanned) {
-    size_t before = findings.size();
-    // cmdline and environ do not scan memory page by page, so pages_scanned is counted only for memory
-    scan_cmdline_for_secrets(pid, findings, max_findings);
-    size_t after_cmd = findings.size();
-    if ((after_cmd - before) >= max_findings) {
+void scan_process_for_secrets(
+    pid_t pid,
+    std::vector<Observation>& observations,
+    size_t max_observations,
+    size_t max_pages,
+    size_t* pages_scanned)
+{
+    const size_t before = observations.size();
+
+    scan_cmdline_for_secrets(
+        pid,
+        observations,
+        max_observations);
+
+    size_t produced =
+        observations.size() - before;
+
+    if (produced >= max_observations) {
         if (pages_scanned) {
             *pages_scanned = 0;
         }
         return;
     }
 
-    scan_environ_for_secrets(pid, findings, max_findings - (after_cmd - before));
-    size_t after_env = findings.size();
-    if ((after_env - before) >= max_findings) {
+    scan_environ_for_secrets(
+        pid,
+        observations,
+        max_observations - produced);
+
+    produced =
+        observations.size() - before;
+
+    if (produced >= max_observations) {
         if (pages_scanned) {
             *pages_scanned = 0;
         }
         return;
     }
 
-    size_t remaining = max_findings - (after_env - before);
     size_t scanned = 0;
-    scan_memory_for_secrets(pid, findings, remaining, max_pages, &scanned);
+
+    scan_memory_for_secrets(
+        pid,
+        observations,
+        max_observations - produced,
+        max_pages,
+        &scanned);
+
     if (pages_scanned) {
         *pages_scanned = scanned;
     }

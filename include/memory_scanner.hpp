@@ -25,7 +25,7 @@
 #define RUNTIMEXRAY_MEMORY_SCANNER_HPP
 
 
-#include "finding.hpp"
+#include "lineage.hpp"
 
 #include <cstdint>
 #include <string>
@@ -50,44 +50,54 @@ namespace runtimexray {
     /**
      * @brief Scans /proc/<pid>/cmdline for secrets.
      * @param pid Process ID.
-     * @param findings Output list to append findings to.
-     * @param max_findings Maximum number of findings to add.
+     * @param observations Output list to append Data observations to.
+     * @param max_observations Maximum number of observations to add.
      */
-    void scan_cmdline_for_secrets(pid_t pid, FindingList& findings, size_t max_findings = 20);
+    void scan_cmdline_for_secrets(
+        pid_t pid,
+        std::vector<Observation>& observations,
+        size_t max_observations = 20);
 
     /**
      * @brief Scans /proc/<pid>/environ for secrets.
      * @param pid Process ID.
-     * @param findings Output list to append findings to.
-     * @param max_findings Maximum number of findings to add.
+     * @param observations Output list to append Data observations to.
+     * @param max_observations Maximum number of observations to add.
      */
-    void scan_environ_for_secrets(pid_t pid, FindingList& findings, size_t max_findings = 20);
+    void scan_environ_for_secrets(
+        pid_t pid,
+        std::vector<Observation>& observations,
+        size_t max_observations = 20);
 
     /**
      * @brief Scans all primary process data (memory, cmdline, environ) for secrets.
      * @param pid Process ID.
-     * @param findings Output list to append findings to.
-     * @param max_findings Total maximum number of findings.
+     * @param observations Output list to append Data observations to.
+     * @param max_observations Total maximum number of observations to add.
      * @param max_pages Maximum number of memory pages to scan.
      * @param pages_scanned Optional output parameter; set to number of memory pages actually scanned.
      */
-    void scan_process_for_secrets(pid_t pid, FindingList& findings,
-                                size_t max_findings = 50,
-                                size_t max_pages = 1000,
-                                size_t* pages_scanned = nullptr);
+    void scan_process_for_secrets(
+        pid_t pid,
+        std::vector<Observation>& observations,
+        size_t max_observations = 50,
+        size_t max_pages = 1000,
+        size_t* pages_scanned = nullptr);
 
     /**
      * @brief Scans readable memory of a process for secrets.
      * @param pid Process ID.
-     * @param findings Output list to append findings to.
-     * @param max_findings Maximum number of findings to add.
+     * @param observations Output list to append Data observations to.
+     * @param max_observations Maximum number of observations to add.
      * @param max_pages Maximum number of memory pages to scan.
-     * @param pages_scanned Optional output parameter; will be set to the number of pages actually scanned.
+     * @param pages_scanned Optional output parameter; set to number of memory pages actually scanned.
      */
-    void scan_memory_for_secrets(pid_t pid, FindingList& findings,
-                                 size_t max_findings = 50,
-                                 size_t max_pages = 1000,
-                                 size_t* pages_scanned = nullptr);
+    void scan_memory_for_secrets(
+        pid_t pid,
+        std::vector<Observation>& observations,
+        size_t max_observations = 50,
+        size_t max_pages = 1000,
+        size_t* pages_scanned = nullptr);
 
     /**
      * @brief Get the process name (comm) for a given PID.

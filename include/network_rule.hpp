@@ -1,9 +1,9 @@
 /**
- * @file    credit_card_analyzer.hpp
- * @brief   Credit card number memory analyzer example.
+ * @file    network_rule.hpp
+ * @brief   Detection rule for connections to security-sensitive network ports.
  *
  * @author  Peter Magram
- * @date    2026-08-24
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -22,19 +22,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RUNTIMEXRAY_EXAMPLE_CREDIT_CARD_ANALYZER_HPP
-#define RUNTIMEXRAY_EXAMPLE_CREDIT_CARD_ANALYZER_HPP
+#ifndef RUNTIMEXRAY_NETWORK_RULE_HPP
+#define RUNTIMEXRAY_NETWORK_RULE_HPP
 
-#include <ianalyzer.hpp>
-#include <evidence.hpp>
-#include <finding.hpp>
+#include "idetection_rule.hpp"
 
-class CreditCardAnalyzer : public runtimexray::IAnalyzer {
+namespace runtimexray {
+
+class NetworkRule final : public IDetectionRule {
 public:
-    std::string name() const override;
+    std::string id() const override;
     std::string description() const override;
-    runtimexray::AnalyzerCategory category() const override;
-    runtimexray::FindingList analyze(const runtimexray::Evidence& evidence) const override;
+    DetectionStage stage() const override;
+
+    FindingList detect(
+        const DetectionContext& context) const override;
 };
 
-#endif
+} // namespace runtimexray
+
+#endif // RUNTIMEXRAY_NETWORK_RULE_HPP

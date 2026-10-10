@@ -134,19 +134,26 @@ int main()
 
     report.lineage_graph = graph;
 
-    MemorySecretFindingDetails details;
-    details.secret_type = "password";
-    details.location = "correlated";
-    details.fingerprint = "fp-password";
+    Finding finding;
 
-    Finding finding(
-        FindingSeverity::High,
-        "Sensitive object observed from file to socket",
-        "test evidence",
-        details,
-        100);
+    finding.finding_id = 1;
+    finding.rule_id = "test.sensitive_data_flow";
+    finding.kind = "sensitive_data_flow";
+    finding.severity = FindingSeverity::High;
+    finding.title = "Sensitive object observed from file to socket";
+    finding.summary = "test evidence";
 
-    finding.evidence_observation_seqs = { 3, 4, 6 };
+    finding.attributes["secret_type"] =
+        std::string("password");
+
+    finding.attributes["fingerprint"] =
+        std::string("fp-password");
+
+    finding.evidence_observation_seqs = {
+        3,
+        4,
+        6
+    };
 
     report.findings.push_back(std::move(finding));
 
@@ -154,7 +161,7 @@ int main()
 
     const auto j = nlohmann::json::parse(json_text);
 
-    assert(j["schema_version"] == "1.3");
+    assert(j["schema_version"] == "2.0");
 
     assert(j["narratives"].is_array());
 

@@ -1,9 +1,9 @@
 /**
- * @file    ioc_analyzer.hpp
- * @brief   Indicator of compromise memory analyzer example.
+ * @file    sensitive_data_presence_rule.hpp
+ * @brief   Detects sensitive data observations in the lineage graph.
  *
  * @author  Peter Magram
- * @date    2026-08-24
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
@@ -22,19 +22,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef RUNTIMEXRAY_EXAMPLE_IOC_ANALYZER_HPP
-#define RUNTIMEXRAY_EXAMPLE_IOC_ANALYZER_HPP
+#ifndef RUNTIMEXRAY_SENSITIVE_DATA_PRESENCE_RULE_HPP
+#define RUNTIMEXRAY_SENSITIVE_DATA_PRESENCE_RULE_HPP
 
-#include <ianalyzer.hpp>
-#include <evidence.hpp>
-#include <finding.hpp>
+#include "idetection_rule.hpp"
 
-class IocAnalyzer : public runtimexray::IAnalyzer {
+namespace runtimexray {
+
+class SensitiveDataPresenceRule : public IDetectionRule {
 public:
-    std::string name() const override;
+    std::string id() const override;
     std::string description() const override;
-    runtimexray::AnalyzerCategory category() const override;
-    runtimexray::FindingList analyze(const runtimexray::Evidence& evidence) const override;
+    DetectionStage stage() const override;
+
+    FindingList detect(
+        const DetectionContext& context) const override;
 };
 
-#endif
+} // namespace runtimexray
+
+#endif // RUNTIMEXRAY_SENSITIVE_DATA_PRESENCE_RULE_HPP

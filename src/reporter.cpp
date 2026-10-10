@@ -32,6 +32,7 @@
 #include <chrono>
 #include <iomanip>
 #include <ctime>
+#include <type_traits>
 
 namespace runtimexray {
 
@@ -41,6 +42,7 @@ namespace runtimexray {
             case RelationType::Causality:           return "causality";
             case RelationType::DataFlow:            return "dataflow";
             case RelationType::Calls:               return "calls";
+            case RelationType::ObservedIn:          return "observed_in";
             case RelationType::StaticAssociated:    return "static_associated";
             default: return "unknown";
         }
@@ -72,42 +74,56 @@ namespace runtimexray {
         return "Unknown";
     }
 
-    // Redact all occurrences of a secret in a snippet
-    static std::string redact_secret(const std::string& snippet, const std::string& secret) {
-        if (secret.empty()) {
-            return snippet;
-        }
-        std::string result = snippet;
-        size_t pos = 0;
-        while ((pos = result.find(secret, pos)) != std::string::npos) {
-            result.replace(pos, secret.size(), "<redacted>");
-            pos+=9; // lenght of "<redacted>"
-        }
-        return result;
+    static std::string finding_attribute_to_text(const FindingAttributeValue& value)
+    {
+        return std::visit(
+            [](const auto& v) -> std::string {
+                using T =
+                    std::decay_t<decltype(v)>;
+
+                if constexpr (
+                    std::is_same_v<T, std::string>) {
+                    return v;
+
+                } else if constexpr (
+                    std::is_same_v<T, bool>) {
+                    return v ? "true" : "false";
+
+                } else if constexpr (
+                    std::is_arithmetic_v<T>) {
+                    std::ostringstream out;
+                    out << v;
+                    return out.str();
+
+                } else {
+                    std::ostringstream out;
+                    out << "[";
+
+                    for (size_t i = 0;
+                        i < v.size();
+                        ++i) {
+
+                        if (i != 0) {
+                            out << ", ";
+                        }
+
+                        out << v[i];
+                    }
+
+                    out << "]";
+                    return out.str();
+                }
+            },
+            value);
     }
 
-    static void append_secret_fields(
-        std::ostream& out,
-        const MemorySecretFindingDetails& details,
-        const ReportingOptions& opts)
+    static nlohmann::json finding_attribute_to_json(const FindingAttributeValue& value)
     {
-        if (details.raw_secret.empty()) {
-            return;
-        }
-
-        out << " value: "
-            << (opts.show_secrets
-                    ? details.raw_secret
-                    : "<redacted>");
-
-        if (details.raw_snippet.empty()) {
-            return;
-        }
-
-        out << " context: "
-            << (opts.show_secrets
-                    ? details.raw_snippet
-                    : redact_secret(details.raw_snippet, details.raw_secret));
+        return std::visit(
+            [](const auto& v) -> nlohmann::json {
+                return v;
+            },
+            value);
     }
 
     static nlohmann::json serialize_narratives(
@@ -227,6 +243,8 @@ namespace runtimexray {
         else if (obs.type == ObservationType::Static) {
             if (!obs.static_field.empty()) { j["field"] = obs.static_field; }
 
+            if (!obs.static_value.empty()) { j["value"] = obs.static_value; }
+
             if (!obs.static_category.empty()) { j["category"] = obs.static_category; }
 
             if (!obs.static_description.empty()) { j["description"] = obs.static_description; }
@@ -312,118 +330,98 @@ namespace runtimexray {
 
         out << "\n";
 
-        // ---- Command-specific formatting ----
-        if (!r.findings.empty()) {
-            if (r.context.command == "analyze") {
-                // --- Hardening checks ---
-                out << ">  Hardening checks:\n";
-                bool has_hardening = false;
-                for (const auto& f : r.findings) {
-                    if (std::holds_alternative<HardeningFindingDetails>(f.details)) {
-                        const auto& details = std::get<HardeningFindingDetails>(f.details);
-                        out << "    " << details.feature << ": " << details.status << "\n";
-                        has_hardening = true;
-                    }
-                }
-                if (!has_hardening) {
-                    out << "    No findings at this severity level.\n";
+        // ---- Findings ----
+        if (r.findings.empty()) {
+            out << "No findings.\n";
+        } else {
+            out << "Findings ("
+                << r.findings.size()
+                << "):\n";
+
+            for (const auto& finding :
+                r.findings) {
+
+                out << "  ["
+                    << severity_to_string(
+                        finding.severity)
+                    << "] "
+                    << finding.title
+                    << "\n";
+
+                if (!finding.summary.empty()) {
+                    out << "      "
+                        << finding.summary
+                        << "\n";
                 }
 
-                // --- Dangerous API usage ---
-                bool has_api = false;
-                for (const auto& f : r.findings) {
-                    if (std::holds_alternative<DangerousApiFindingDetails>(f.details)) {
-                        const auto& details = std::get<DangerousApiFindingDetails>(f.details);
-                        if (!has_api) {
-                            out << ">  Dangerous API usage:\n";
-                            has_api = true;
-                        }
-                        out << "    Dangerous API: " << details.api
-                            << " (reason: " << details.reason
-                            << ", recommendation: " << details.recommendation
-                            << ", cwe: " << details.cwe_id << ")\n";
-                    }
+                if (!finding.kind.empty()) {
+                    out << "      Kind: "
+                        << finding.kind
+                        << "\n";
                 }
-                if (!has_api) {
-                    out << "    No dangerous API usage found.\n";
-                }
-            } else if (r.context.command == "mem") {
-                // ---- Memory scanning specific output ----
-                if (r.findings.empty()) {
-                    out << "No sensitive data found in memory of PID " << r.context.target << ".\n";
-                } else {
-                    size_t pages_scanned = 0;
-                    if (extra && extra->contains("pages_scanned")) {
-                        pages_scanned = (*extra)["pages_scanned"].get<size_t>();
-                    }
-                    out << "Found " << r.findings.size() << " potential secrets (scanned " << pages_scanned << " pages):\n";
-                    for (const auto& f : r.findings) {
-                        std::visit([&](const auto& details) {
-                            using T = std::decay_t<decltype(details)>;
-                            if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
-                                out << " - " << f.description
-                                    << " data=\"" << details.data_snippet << "\"\n";
-                            } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                                out << " - " << f.description;
-                                out << " type=" << details.secret_type;
-                                out << " location=" << details.location;
-                                if (details.address != 0) {
-                                    out << " address: 0x" << std::hex << details.address << std::dec;
-                                }
-                                out << " length: " << details.secret_length;
-                                out << " fingerprint: " << details.fingerprint;
 
-                                append_secret_fields(out, details, r.report_opts);
-                            } else {
-                                out << " - " << f.description << "\n";
-                            }
-                        }, f.details);
-                    }
+                if (!finding.rule_id.empty()) {
+                    out << "      Rule: "
+                        << finding.rule_id
+                        << "\n";
                 }
-            } else { // Generic (trace)
-                out << "Findings (" << r.findings.size() << "):\n";
-                for (const auto& f : r.findings) {
-                    out << "  [" << severity_to_string(f.severity) << "] " << f.description << "\n";
-                    std::visit([&](const auto& details) {
-                        using T = std::decay_t<decltype(details)>;
-                        if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
-                            out << "      Feature: " << details.feature << ", Status: " << details.status << "\n";
-                        } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
-                            out << "      API: " << details.api
-                                << ", CWE: " << details.cwe_id
-                                << ", Recommendation: " << details.recommendation << "\n";
-                        } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
-                            out << "      Path: " << details.path
-                                << ", Reason: " << details.reason
-                                << ", Outcome: " << details.outcome
-                                << ", Error: " << details.err << "\n";
-                        } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
-                            out << "      Remote: " << details.remote_addr << ":" << details.port
-                                << ", Reason: " << details.reason << "\n";
-                        } else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
-                            out << "      Data: " << details.data_snippet
-                                << ", Reason: " << details.reason << "\n";
-                        } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                            out << "      Type: " << details.secret_type
-                                << ", Location: " << details.location
-                                << ", Length: " << details.secret_length
-                                << ", Fingerprint: " << details.fingerprint;
 
-                            append_secret_fields(out, details, r.report_opts);
-                            out << "\n";
-                        }
-                    }, f.details);
-                    if (!f.evidence_observation_seqs.empty()) {
-                        out << "      Evidence observations:";
-                        for (uint64_t seq : f.evidence_observation_seqs) {
-                            out << " seq=" << seq;
-                        }
-                        out << "\n";
+                for (const auto& [name, value] :
+                    finding.attributes) {
+
+                    out << "      "
+                        << name
+                        << ": "
+                        << finding_attribute_to_text(value)
+                        << "\n";
+                }
+
+                if (!finding.cwe_ids.empty()) {
+                    out << "      CWE:";
+
+                    for (const auto& cwe :
+                        finding.cwe_ids) {
+                        out << " " << cwe;
                     }
+
+                    out << "\n";
+                }
+
+                if (!finding.evidence_observation_seqs.empty()) {
+                    out << "      Evidence observations:";
+
+                    for (uint64_t seq :
+                        finding.evidence_observation_seqs) {
+                        out << " seq=" << seq;
+                    }
+
+                    out << "\n";
+                }
+
+                if (!finding.supporting_finding_ids.empty()) {
+                    out << "      Supporting findings:";
+
+                    for (uint64_t id :
+                        finding.supporting_finding_ids) {
+                        out << " id=" << id;
+                    }
+
+                    out << "\n";
+                }
+
+                for (const auto& edge :
+                    finding.evidence_edges) {
+
+                    out << "      Evidence edge: seq="
+                        << edge.from_seq
+                        << " -> seq="
+                        << edge.to_seq
+                        << " ["
+                        << relation_to_string(
+                            edge.relation)
+                        << "]\n";
                 }
             }
-        } else {
-            out << "No findings.\n";
         }
 
         // ---- Evidence-backed narratives ----
@@ -505,7 +503,44 @@ namespace runtimexray {
                         }
                     }
                 } else if (obs.type == ObservationType::Data) {
-                    out << "Data: " << obs.data_type << " = " << obs.data_snippet;
+                    out << "Data: "
+                        << obs.data_type;
+
+                    if (!obs.secret_type.empty()) {
+                        out << " secret_type="
+                            << obs.secret_type;
+                    }
+
+                    if (!obs.fingerprint.empty()) {
+                        out << " fingerprint="
+                            << obs.fingerprint;
+                    }
+
+                    if (!obs.data_snippet.empty()) {
+                        out << " data=";
+
+                        if (r.report_opts.show_secrets) {
+                            out << obs.data_snippet;
+                        } else {
+                            out << "<redacted>";
+                        }
+                    }
+                } else if (obs.type == ObservationType::Static) {
+                    out << "Static: ";
+
+                    if (!obs.static_category.empty()) {
+                        out << obs.static_category;
+                    }
+
+                    if (!obs.static_field.empty()) {
+                        out << " field="
+                            << obs.static_field;
+                    }
+
+                    if (!obs.static_value.empty()) {
+                        out << " value="
+                            << obs.static_value;
+                    }
                 }
                 out << "\n";
             }
@@ -521,68 +556,85 @@ namespace runtimexray {
         return out.str();
     }
 
-    void Reporter::serialize_findings(const FindingList& findings, nlohmann::json& findings_arr, const ReportingOptions& opts) {
-        for (const auto& f : findings) {
+    void Reporter::serialize_findings(
+        const FindingList& findings,
+        nlohmann::json& findings_arr,
+        const ReportingOptions&)
+    {
+        for (const auto& finding :
+            findings) {
+
             nlohmann::json fj;
-            fj["severity"] = severity_to_string(f.severity);
-            fj["description"] = f.description;
-            fj["evidence"] = f.evidence;
-            fj["evidence_observation_seqs"] = f.evidence_observation_seqs;
 
-            std::visit([&](const auto& details) {
-                using T = std::decay_t<decltype(details)>;
-                if constexpr (std::is_same_v<T, HardeningFindingDetails>) {
-                    fj["type"] = "hardening";
-                    fj["details"]["feature"] = details.feature;
-                    fj["details"]["status"] = details.status;
-                } else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) {
-                    fj["type"] = "dangerous_api";
-                    fj["details"]["api_name"] = details.api;
-                    fj["details"]["reason"] = details.reason;
-                    fj["details"]["recommendation"] = details.recommendation;
-                    fj["cwe"] = details.cwe_id;
-                } else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) {
-                    fj["type"] = "sensitive_file";
-                    fj["details"]["path"] = details.path;
-                    fj["details"]["reason"] = details.reason;
-                    fj["details"]["outcome"] = details.outcome;
-                    fj["details"]["err"] = details.err;
-                } else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) {
-                    fj["type"] = "network";
-                    fj["details"]["remote_addr"] = details.remote_addr;
-                    fj["details"]["port"] = details.port;
-                    fj["details"]["reason"] = details.reason;
-                } else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) {
-                    fj["type"] = "sensitive_data";
-                    fj["details"]["data_snippet"] = details.data_snippet;
-                    fj["details"]["reason"] = details.reason;
-                } else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) {
-                    fj["type"] = "memory_secret";
-                    fj["details"]["secret_type"] = details.secret_type;
-                    fj["details"]["location"] = details.location;
-                    if (details.address != 0) fj["address"] = details.address;
-                    fj["length"] = details.secret_length;
-                    fj["fingerprint"] = details.fingerprint;
-                    if (opts.show_secrets) {
-                        fj["value"] = details.raw_secret;
-                        fj["snippet"] = details.raw_snippet;
-                        fj["secret_exposed"] = true;
-                    } else {
-                        fj["value"] = nullptr;
-                        fj["snippet"] = redact_secret(details.raw_snippet, details.raw_secret);
-                        fj["secret_exposed"] = false;
-                    }
-                }
-            }, f.details);
+            fj["finding_id"] =
+                finding.finding_id;
 
-            findings_arr.push_back(fj);
+            fj["rule_id"] =
+                finding.rule_id;
+
+            fj["kind"] =
+                finding.kind;
+
+            fj["severity"] =
+                severity_to_string(
+                    finding.severity);
+
+            fj["title"] =
+                finding.title;
+
+            fj["summary"] =
+                finding.summary;
+
+            fj["evidence_observation_seqs"] =
+                finding.evidence_observation_seqs;
+
+            fj["supporting_finding_ids"] =
+                finding.supporting_finding_ids;
+
+            fj["cwe_ids"] =
+                finding.cwe_ids;
+
+            fj["attributes"] =
+                nlohmann::json::object();
+
+            for (const auto& [name, value] :
+                finding.attributes) {
+
+                fj["attributes"][name] =
+                    finding_attribute_to_json(value);
+            }
+
+            fj["evidence_edges"] =
+                nlohmann::json::array();
+
+            for (const auto& edge :
+                finding.evidence_edges) {
+
+                nlohmann::json ej;
+
+                ej["from_seq"] =
+                    edge.from_seq;
+
+                ej["to_seq"] =
+                    edge.to_seq;
+
+                ej["relation"] =
+                    relation_to_string(
+                        edge.relation);
+
+                fj["evidence_edges"].push_back(
+                    std::move(ej));
+            }
+
+            findings_arr.push_back(
+                std::move(fj));
         }
     }
 
     std::string Reporter::to_json(const Report& r, const nlohmann::json* extra) {
         nlohmann::json j;
 
-        j["schema_version"] = "1.3";
+        j["schema_version"] = "2.0";
         j["tool"] = r.context.tool_name;
         j["tool_version"] = r.context.tool_version;
         j["command"] = r.context.command;
@@ -597,23 +649,30 @@ namespace runtimexray {
 
         // Summary
         std::map<std::string, int> by_severity;
-        std::map<std::string, int> by_type;
-        for (const auto& f : r.findings) {
-            by_severity[severity_to_string(f.severity)]++;
-            std::visit([&](const auto& details) {
-                using T = std::decay_t<decltype(details)>;
-                if constexpr (std::is_same_v<T, HardeningFindingDetails>) by_type["hardening"]++;
-                else if constexpr (std::is_same_v<T, DangerousApiFindingDetails>) by_type["dangerous_api"]++;
-                else if constexpr (std::is_same_v<T, SensitiveFileAccessDetails>) by_type["sensitive_file"]++;
-                else if constexpr (std::is_same_v<T, NetworkConnectionDetails>) by_type["network"]++;
-                else if constexpr (std::is_same_v<T, SensitiveDataWriteDetails>) by_type["sensitive_data"]++;
-                else if constexpr (std::is_same_v<T, MemorySecretFindingDetails>) by_type["memory_secret"]++;
-            }, f.details);
+        std::map<std::string, int> by_kind;
+
+        for (const auto& finding : r.findings) {
+            ++by_severity[
+                severity_to_string(finding.severity)];
+
+            ++by_kind[
+                finding.kind.empty()
+                    ? "unknown"
+                    : finding.kind];
         }
 
-        j["summary"]["total"] = r.findings.size();
-        for (const auto& [k, v] : by_severity) j["summary"]["by_severity"][k] = v;
-        for (const auto& [k, v] : by_type) j["summary"]["by_type"][k] = v;
+        j["summary"]["total"] =
+            r.findings.size();
+
+        for (const auto& [name, count] : by_severity) {
+            j["summary"]["by_severity"][name] =
+                count;
+        }
+
+        for (const auto& [name, count] : by_kind) {
+            j["summary"]["by_kind"][name] =
+                count;
+        }
 
         if (extra) {
            for (auto& [key, value] : extra->items()) {

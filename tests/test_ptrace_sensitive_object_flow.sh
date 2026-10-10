@@ -69,35 +69,128 @@ T="$TMP/out.txt"
 [ -f "$J" ] || { echo "FAIL: no JSON report produced"; exit 1; }
 [ -f "$T" ] || { echo "FAIL: no TEXT report produced"; exit 1; }
 
-echo "--- correlated json findings ---"
-grep -o '"location": *"correlated"' "$J" || echo "(none)"
-echo "--- correlated text findings ---"
-grep 'Location: correlated' "$T" || echo "(none)"
+echo "--- composite flow finding ---"
+
+jq -e '
+    any(
+        .findings[];
+        .kind == "sensitive_data_flow"
+        and .rule_id == "builtin.sensitive_data_flow"
+        and .title == "Sensitive object observed from file to socket"
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: no sensitive_data_flow finding; exit 1; }
 
 echo "--- assertions ---"
-grep -q 'correlated'                  "$J" || { echo FAIL: no correlated finding;  exit 1; }
-grep -q "cred.txt"                    "$J" || { echo FAIL: no source_file;         exit 1; }
-grep -q 'read_event'                  "$J" || { echo FAIL: no read_event;          exit 1; }
-grep -q 'memory_observation'          "$J" || { echo FAIL: no memory_observation;  exit 1; }
-# Strengthened: the correlated finding must be backed by a genuine
-# scanner-derived memory observation, not just the read buffer.
-#
-# (a) At least one raw finding with location "memory" exists.
-#     That is the marker the scanner writes.
-MEM_COUNT=$(grep -c '"location": "memory"' "$J" 2>/dev/null || echo 0)
-[ "$MEM_COUNT" -ge 1 ] \
-    || { echo FAIL: no scanner-derived memory observation; exit 1; }
 
-# (b) The correlated finding's memory_observation carries a non-zero
-#     address. If the emit ever falls back to a non-scanner Data node,
-#     this catches it — the read-buffer fallback produces 0x0 under eBPF.
-grep -q 'memory_observation{[^}]*address=0x0 ' "$J" \
-    && { echo FAIL: correlated memory address is 0x0; exit 1; } || true
-grep -q 'memory_observation{[^}]*address=0x[1-9a-f][0-9a-f]*' "$J" \
-    || { echo FAIL: correlated memory address missing or zero; exit 1; }
-grep -q 'send_event'                  "$J" || { echo FAIL: no send_event;          exit 1; }
-grep -q "127.0.0.1:$PORT"             "$J" || { echo FAIL: no socket_destination;  exit 1; }
-grep -q 'exact-fingerprint-match'     "$J" || { echo FAIL: no confidence tag;      exit 1; }
+#
+# Validate the semantic finding and its structured attributes.
+#
+jq -e --arg endpoint "127.0.0.1:$PORT" '
+    any(
+        .findings[];
+        .kind == "sensitive_data_flow"
+        and (.attributes.source_file | endswith("/cred.txt"))
+        and .attributes.socket_destination == $endpoint
+        and .attributes.confidence == "exact-fingerprint-match"
+        and .attributes.secret_type == "password"
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: sensitive_data_flow attributes are incomplete; exit 1; }
+
+#
+# The flow must be backed by a genuine read/recvfrom Event.
+#
+jq -e '
+    . as $doc
+    |
+    any(
+        .findings[];
+        .kind == "sensitive_data_flow"
+        and (
+            .evidence_observation_seqs as $evidence
+            |
+            any(
+                $doc.lineage.observations[];
+                (.seq as $seq | $evidence | index($seq)) != null
+                and .type == "event"
+                and (
+                    .syscall == "read"
+                    or .syscall == "recvfrom"
+                )
+            )
+        )
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: flow has no read-event evidence; exit 1; }
+
+#
+# The flow must contain scanner-derived memory evidence with a real address.
+#
+jq -e '
+    . as $doc
+    |
+    any(
+        .findings[];
+        .kind == "sensitive_data_flow"
+        and (
+            .evidence_observation_seqs as $evidence
+            |
+            any(
+                $doc.lineage.observations[];
+                (.seq as $seq | $evidence | index($seq)) != null
+                and .type == "data"
+                and .data_type == "memory"
+                and (.address // 0) > 0
+            )
+        )
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: flow has no scanner-derived memory evidence; exit 1; }
+
+#
+# The flow must contain an outbound syscall carrying the same value.
+#
+jq -e '
+    . as $doc
+    |
+    any(
+        .findings[];
+        .kind == "sensitive_data_flow"
+        and (
+            .evidence_observation_seqs as $evidence
+            |
+            any(
+                $doc.lineage.observations[];
+                (.seq as $seq | $evidence | index($seq)) != null
+                and .type == "event"
+                and (
+                    .syscall == "write"
+                    or .syscall == "writev"
+                    or .syscall == "sendto"
+                )
+            )
+        )
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: flow has no outbound-event evidence; exit 1; }
+
+#
+# Composite finding must explicitly reference the Primary findings
+# from which it was derived.
+#
+jq -e '
+    any(
+        .findings[];
+        .kind == "sensitive_data_flow"
+        and (.supporting_finding_ids | length) > 0
+    )
+' "$J" >/dev/null \
+    || { echo FAIL: flow has no supporting primary findings; exit 1; }
+
+#
+# RuntimeXRay reports observations, not unsupported intent claims.
+#
 ! grep -Eiq 'malware|exfiltration|backdoor|attack detected' "$J" \
     || { echo FAIL: forbidden claim; exit 1; }
 
@@ -124,7 +217,7 @@ grep -q 'Evidence: seq=' "$T" \
 
 echo "--- narrative JSON assertions ---"
 
-jq -e '.schema_version == "1.3"' "$J" >/dev/null \
+jq -e '.schema_version == "2.0"' "$J" >/dev/null \
     || { echo FAIL: wrong JSON schema version; exit 1; }
 
 jq -e '.narratives | type == "array" and length > 0' "$J" >/dev/null \

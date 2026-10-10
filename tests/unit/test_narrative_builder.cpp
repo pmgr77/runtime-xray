@@ -95,17 +95,18 @@ int main()
 
     graph.observations.push_back(send);
 
-    MemorySecretFindingDetails details;
-    details.secret_type = "password";
-    details.location = "correlated";
-    details.fingerprint = "fp-password";
+    Finding finding;
 
-    Finding finding(
-        FindingSeverity::High,
-        "Sensitive object observed from file to socket",
-        "test evidence",
-        details,
-        100);
+    finding.finding_id = 1;
+    finding.rule_id = "test.sensitive_data_flow";
+    finding.kind = "sensitive_data_flow";
+    finding.severity = FindingSeverity::High;
+    finding.title = "Sensitive object observed from file to socket";
+    finding.summary = "test evidence";
+
+    finding.attributes["secret_type"] = std::string("password");
+
+    finding.attributes["fingerprint"] = std::string("fp-password");
 
     finding.evidence_observation_seqs = {
         3,

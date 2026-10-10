@@ -95,6 +95,7 @@ struct Observation {
 
     // Static-specific fields
     std::string static_field;
+    std::string static_value;
     std::string static_category;        // "hardening", "dangerous_api"
     std::string static_description;
     std::string static_recommendation;
@@ -106,14 +107,15 @@ enum class RelationType {
     Causality,       // A caused B (fork → child process)
     DataFlow,        // A's data was used by B (read → buffer)
     Calls,           // Process A called syscall B
+    ObservedIn,      // Data was observed in this process/session
     StaticAssociated // Static finding associated with a node
 };
 
 struct LineageEdge {
-    size_t from_index;
-    size_t to_index;
-    RelationType relation;
-    std::chrono::microseconds time_delta;
+    size_t from_index = 0;
+    size_t to_index = 0;
+    RelationType relation = RelationType::Chronological;
+    std::chrono::microseconds time_delta{0};
     std::string details;
 };
 

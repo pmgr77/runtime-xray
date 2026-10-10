@@ -1,12 +1,13 @@
 /**
  * @file    test_memory_scanner.cpp
- * @brief   Tests for the analyzer registry using memory evidence.
+ * @brief   Unit tests for sensitive-data extraction from runtime memory.
  *
  * @author  Peter Magram
- * @date    2026-08-24
+ * @date    2026-10-10
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
+
 // Copyright 2026 Peter Magram
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,62 +22,75 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "analyzer_registry.hpp"
-#include "evidence.hpp"
-#include "finding.hpp"
+#include "secret_extractor.hpp"
+#include "lineage.hpp"
 
 #include <iostream>
 #include <string>
 #include <vector>
 #include <unistd.h>
 
-// Helper: check if the findings contain a memory secret of a given type.
-bool contains_memory_secret(const runtimexray::FindingList& findings,
-                            const std::string& secret_type) {
-    for (const auto& f : findings) {
-        if (auto* details = std::get_if<runtimexray::MemorySecretFindingDetails>(&f.details)) {
-            if (details->secret_type == secret_type) {
-                return true;
-            }
+namespace {
+
+bool contains_secret_type(
+    const std::vector<runtimexray::Observation>& observations,
+    const std::string& secret_type)
+{
+    for (const auto& observation : observations) {
+        if (observation.type !=
+            runtimexray::ObservationType::Data) {
+            continue;
+        }
+
+        if (observation.secret_type ==
+            secret_type) {
+            return true;
         }
     }
+
     return false;
 }
 
-int main() {
-    auto& registry = runtimexray::AnalyzerRegistry::instance();
+} // anonymous namespace
 
-    // Built-in analyzers should be registered.
-    auto analyzer_names = registry.list_analyzers();
-    if (analyzer_names.empty()) {
-        std::cerr << "No analyzers registered.\n";
+int main()
+{
+    const pid_t pid = getpid();
+
+    const auto password_observations =
+        runtimexray::extract_secret_observations(
+            "some text password=supersecret123 more text",
+            "memory",
+            pid);
+
+    if (!contains_secret_type(
+            password_observations,
+            "password")) {
+
+        std::cerr
+            << "Secret extractor failed to detect password.\n";
         return 1;
     }
 
-    // 1. Password evidence should produce a finding with secret_type == "password".
-    runtimexray::MemoryChunkEvidence password_ev{
-        "some text password=supersecret123 more text",
-        "memory",
-        getpid()
-    };
-    auto password_findings = registry.analyze_evidence(password_ev);
-    if (!contains_memory_secret(password_findings, "password")) {
-        std::cerr << "Password analyzer failed to detect password evidence.\n";
+    const auto key_observations =
+        runtimexray::extract_secret_observations(
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "MIIEow...\n"
+            "-----END RSA PRIVATE KEY-----",
+            "memory",
+            pid);
+
+    if (!contains_secret_type(
+            key_observations,
+            "private_key")) {
+
+        std::cerr
+            << "Secret extractor failed to detect private key.\n";
         return 1;
     }
 
-    // 2. Private key evidence should produce a finding with secret_type == "private_key".
-    runtimexray::MemoryChunkEvidence key_ev{
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----",
-        "memory",
-        getpid()
-    };
-    auto key_findings = registry.analyze_evidence(key_ev);
-    if (!contains_memory_secret(key_findings, "private_key")) {
-        std::cerr << "Private key analyzer failed to detect private key evidence.\n";
-        return 1;
-    }
+    std::cout
+        << "Secret extractor tests passed.\n";
 
-    std::cout << "Memory scanner analyzer tests passed.\n";
     return 0;
 }
