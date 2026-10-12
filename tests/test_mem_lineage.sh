@@ -34,8 +34,44 @@ export ENV_SECRET="password=env345"
 PID=$!
 sleep 2
 
+MAX_PAGES=$(
+    python3 - "$PID" <<'PY'
+import sys
+
+pid = sys.argv[1]
+pages = 0
+
+with open(f"/proc/{pid}/maps", "r", encoding="utf-8") as maps:
+    for line in maps:
+        parts = line.split()
+
+        if len(parts) < 2:
+            continue
+
+        if not parts[1].startswith("r"):
+            continue
+
+        start_text, end_text = parts[0].split("-", 1)
+        start = int(start_text, 16)
+        end = int(end_text, 16)
+
+        pages += (end - start + 4095) // 4096
+
+print(pages)
+PY
+)
+
+if [ -z "$MAX_PAGES" ] || [ "$MAX_PAGES" -le 0 ]; then
+    echo "Failed to determine readable page count for PID $PID"
+    kill "$PID" 2>/dev/null || true
+    exit 1
+fi
+
+echo "Scanning $MAX_PAGES readable pages"
+
 # Run mem with JSON output to stdout and suppress text
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --json /dev/stdout --report /dev/null --max-pages 5000 $PID 2>&1)
+OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" mem --json /dev/stdout --report /dev/null --max-pages "$MAX_PAGES" "$PID" 2>&1
+)
 STATUS=$?
 kill $PID 2>/dev/null || true
 
