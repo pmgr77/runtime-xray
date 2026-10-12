@@ -56,6 +56,7 @@ set(RUNTIMEXRAY_SOURCES
     src/dangerous_api_rule.cpp
     src/network_rule.cpp
     src/sensitive_data_flow_rule.cpp
+    src/sensitive_value_cross_process_pipe_chain_rule.cpp
 )
 
 # ---------------------------------------------------------------------------

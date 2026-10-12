@@ -31,6 +31,7 @@
 #include "sensitive_file_access_rule.hpp"
 #include "network_rule.hpp"
 #include "sensitive_data_flow_rule.hpp"
+#include "sensitive_value_cross_process_pipe_chain_rule.hpp"
 
 #include <memory>
 
@@ -56,6 +57,9 @@ void register_builtin_detection_rules(
 
     registry.register_rule(
         std::make_unique<SensitiveDataFlowRule>());
+
+    registry.register_rule(
+        std::make_unique<SensitiveValueCrossProcessPipeChainRule>());
 }
 
 } // namespace runtimexray

@@ -153,37 +153,124 @@ std::vector<NarrativeStory> NarrativeBuilder::build(
 
         const Finding& finding = findings[finding_index];
         //
-        // Initial NarrativeBuilder support is intentionally narrow.
+        // Cross-process pipe-chain narrative.
         //
-        // Only a composite sensitive-data-flow Finding is converted into a
-        // multi-step narrative here. Primary Findings such as simple sensitive
-        // data presence are already self-explanatory and do not require this
-        // correlation narrative.
+        // The Finding already contains the exact DataFlow edges that justify
+        // the chain. NarrativeBuilder must explain those edges, not rediscover
+        // the flow from matching fingerprints.
+        //
+        if (finding.kind == "sensitive_value_cross_process_pipe_chain") {
+            const std::string* fingerprint = find_string_attribute(finding, "fingerprint");
+            if (!fingerprint || fingerprint->empty()) {
+                continue;
+            }
+
+            NarrativeStory story;
+            story.finding_index = finding_index;
+            story.title = finding.title;
+            story.fingerprint = *fingerprint;
+
+            //
+            // Associate every execution session that contains evidence for
+            // this composite finding.
+            //
+            for (const auto& session : sessions) {
+                for (const auto& ref : session.finding_refs) {
+                    if (ref.finding_index != finding_index) {
+                        continue;
+                    }
+
+                    NarrativeSessionContext context;
+                    context.id = session.id;
+                    context.program_name = session.program_name;
+                    story.sessions.push_back(std::move(context));
+                    break;
+                }
+            }
+
+            //
+            // Explain only explicit DataFlow edge evidence supplied by the
+            // Finding.
+            //
+            // Fingerprint equality alone is not sufficient to create a
+            // statement here.
+            //
+            for (const auto& edge : finding.evidence_edges) {
+                if (edge.relation != RelationType::DataFlow) {
+                    continue;
+                }
+
+                const auto from_it = observations_by_seq.find(edge.from_seq);
+                const auto to_it = observations_by_seq.find(edge.to_seq);
+
+                const Observation& from = *from_it->second;
+                const Observation& to = *to_it->second;
+
+                if (from.type != ObservationType::Event ||
+                    to.type != ObservationType::Event) {
+                    continue;
+                }
+
+                if (from.fingerprint != *fingerprint ||
+                    to.fingerprint != *fingerprint) {
+                    continue;
+                }
+
+                if (from.resource_type != "pipe" ||
+                    to.resource_type != "pipe" ||
+                    from.resource_id == 0 ||
+                    from.resource_id != to.resource_id) {
+                    continue;
+                }
+
+                NarrativeStatement statement;
+
+                statement.evidence_observation_seqs = {from.seq, to.seq};
+
+                std::ostringstream text;
+                text <<
+                    "The same fingerprinted sensitive value crossed "
+                    "a process boundary through pipe resource #" <<
+                    from.resource_id <<
+                    ": process instance " <<
+                    from.process_instance_id <<
+                    " wrote the value and process instance " <<
+                    to.process_instance_id <<
+                    " read it.";
+
+                statement.text = text.str();
+                story.statements.push_back(std::move(statement));
+            }
+
+            //
+            // A pipe-chain Finding requires at least two explicit DataFlow
+            // boundaries. Do not emit an empty or incomplete narrative if
+            // referenced graph evidence could not be resolved.
+            //
+            if (story.statements.size() >= 2) {
+                stories.push_back(std::move(story));
+            }
+
+            continue;
+        }
+
+        //
+        // Sensitive file/memory/socket flow narrative.
         //
         if (finding.kind != "sensitive_data_flow") {
             continue;
         }
+        const std::string* fingerprint = find_string_attribute(finding, "fingerprint");
 
-        const std::string* fingerprint =
-            find_string_attribute(
-                finding,
-                "fingerprint");
-
-        if (!fingerprint ||
-            fingerprint->empty()) {
+        if (!fingerprint || fingerprint->empty()) {
             continue;
         }
 
-        const std::string* secret_type =
-            find_string_attribute(
-                finding,
-                "secret_type");
-                NarrativeStory story;
+        const std::string* secret_type = find_string_attribute(finding, "secret_type");
 
+        NarrativeStory story;
         story.finding_index = finding_index;
-
         story.title = finding.title;
-
         story.fingerprint = *fingerprint;
 
         //
