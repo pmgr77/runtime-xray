@@ -268,7 +268,24 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
 
             // Special handling for fork/clone
             const char* name = syscall_name(static_cast<long>(ev.syscall_number));
-            if ((strcmp(name, "pipe") == 0 || strcmp(name, "pipe2") == 0) && ev.return_value == 0) {
+
+            //
+            // A pipe read may complete before RuntimeXRay processes the exit of the
+            // write that supplied its bytes.
+            //
+            // read-side fingerprinting already attempts to create DataFlow immediately.
+            // When the corresponding write exit arrives later, retry completed matching
+            // reads so DataFlow construction does not depend on syscall-exit delivery
+            // order.
+            //
+            if ((std::strcmp(name, "write") == 0 || std::strcmp(name, "writev") == 0) &&
+                !observations_[sys_idx].fingerprint.empty()) {
+
+                reconcile_pipe_dataflow_from_write(sys_idx);
+            }
+
+            if ((strcmp(name, "pipe") == 0 || strcmp(name, "pipe2") == 0) &&
+                ev.return_value == 0) {
                 handle_pipe_exit(ev, sys_idx);
             }
 
@@ -284,6 +301,11 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
 
             if (std::strcmp(name, "close") == 0) {
                 handle_close_exit(ev, sys_idx);
+            }
+
+            if (std::strcmp(name, "open") == 0 ||
+                std::strcmp(name, "openat") == 0) {
+                handle_open_exit(ev, sys_idx);
             }
 
             if (strcmp(name, "fork") == 0 ||
@@ -910,6 +932,9 @@ void LineageAnalyzer::stamp_fd_resource(Observation& obs) const {
     obs.resource_id = fd_it->second.resource_id;
     obs.resource_type = fd_it->second.type;
     obs.resource_role = fd_it->second.role;
+    if (obs.source.empty()) {
+        obs.source = fd_it->second.source;
+    }
 }
 
 void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_index) {
@@ -1106,6 +1131,56 @@ void LineageAnalyzer::handle_fcntl_exit(const SyscallEvent& ev, size_t syscall_i
     }
 }
 
+void LineageAnalyzer::handle_open_exit(const SyscallEvent& ev, size_t syscall_index)
+{
+    if (ev.return_value < 0 || syscall_index >= observations_.size()) {
+        return;
+    }
+
+    const Observation& open_obs = observations_[syscall_index];
+
+    const int fd = static_cast<int>(ev.return_value);
+
+    uint64_t flags = 0;
+
+    if (open_obs.syscall_name == "open") {
+        flags = open_obs.arg1;
+    } else if (open_obs.syscall_name == "openat") {
+        flags = open_obs.arg2;
+    } else {
+        return;
+    }
+
+    std::string role;
+
+    switch (flags & O_ACCMODE) {
+        case O_RDONLY:
+            role = "read";
+            break;
+
+        case O_WRONLY:
+            role = "write";
+            break;
+
+        case O_RDWR:
+            role = "readwrite";
+            break;
+
+        default:
+            role = "unknown";
+            break;
+    }
+
+    FdResourceBinding binding;
+    binding.resource_id = next_resource_id_++;
+    binding.type = "file";
+    binding.role = std::move(role);
+    binding.cloexec = (flags & O_CLOEXEC) != 0;
+    binding.source = open_obs.source;
+
+    fd_bindings_by_instance_[open_obs.process_instance_id][fd] = std::move(binding);
+}
+
 void LineageAnalyzer::link_pipe_dataflow(size_t read_index)
 {
     if (read_index >= observations_.size()) {
@@ -1156,20 +1231,26 @@ void LineageAnalyzer::link_pipe_dataflow(size_t read_index)
         /*
         * Observation order is not causal order.
         *
-        * A blocking read may be observed before the write that satisfies it.
-        * The supplying write must, however, have completed no later than
-        * the read itself completed.
+        * A blocking read may begin before the supplying write, and the reader may
+        * return before the writer itself leaves the write() syscall.
+        *
+        * The necessary temporal condition is only that the write had already begun
+        * by the time the read completed. The actual byte transfer may happen at any
+        * point during the write syscall.
         */
-        if (write_obs.end_time > read_obs.end_time) {
+        if (write_obs.start_time > read_obs.end_time) {
             continue;
         }
 
         /*
-        * If multiple matching writes exist, choose the latest one that
-        * completed before this read completed.
+        * If multiple matching writes exist, prefer the most recently started write
+        * that could have supplied this read.
+        *
+        * Exact byte-stream accounting is not available yet, so this remains a
+        * best-supported match among same-resource, same-fingerprint writes.
         */
         if (!best_write.has_value() ||
-            observations_[*best_write].end_time < write_obs.end_time) {
+            observations_[*best_write].start_time < write_obs.start_time) {
             best_write = i;
         }
     }
@@ -1178,12 +1259,80 @@ void LineageAnalyzer::link_pipe_dataflow(size_t read_index)
         return;
     }
 
+    //
+    // Linking can be attempted from both sides:
+    //
+    //   read exit  -> matching completed write
+    //   write exit -> already completed matching read
+    //
+    // Never emit the same proof edge twice.
+    //
+    for (const LineageEdge& edge : edges_) {
+        if (edge.relation == RelationType::DataFlow &&
+            edge.from_index == *best_write &&
+            edge.to_index == read_index) {
+            return;
+        }
+    }
+
     add_edge(
         *best_write,
         read_index,
         RelationType::DataFlow,
         "exact fingerprint observed across pipe resource_id=" +
             std::to_string(read_obs.resource_id));
+}
+
+void LineageAnalyzer::reconcile_pipe_dataflow_from_write(size_t write_index)
+{
+    if (write_index >= observations_.size()) {
+        return;
     }
+
+    const Observation& write_obs = observations_[write_index];
+
+    if (write_obs.type != ObservationType::Event ||
+        (write_obs.syscall_name != "write" &&
+         write_obs.syscall_name != "writev") ||
+        write_obs.return_value <= 0 ||
+        write_obs.resource_id == 0 ||
+        write_obs.resource_type != "pipe" ||
+        write_obs.resource_role != "write" ||
+        write_obs.fingerprint.empty()) {
+        return;
+    }
+
+    //
+    // The write has now completed. A matching read may already have completed
+    // earlier from RuntimeXRay's event-delivery perspective and therefore
+    // failed to find this write during its original linking attempt.
+    //
+    // Retry only reads that could possibly belong to this exact transfer.
+    //
+    for (size_t i = 0; i < observations_.size(); ++i) {
+
+        if (i == write_index) {
+            continue;
+        }
+
+        const Observation& read_obs = observations_[i];
+
+        if (read_obs.type != ObservationType::Event ||
+            read_obs.syscall_name != "read" ||
+            read_obs.return_value <= 0 ||
+            read_obs.resource_id != write_obs.resource_id ||
+            read_obs.resource_type != "pipe" ||
+            read_obs.resource_role != "read" ||
+            read_obs.fingerprint != write_obs.fingerprint) {
+            continue;
+        }
+
+        //
+        // link_pipe_dataflow() remains the single place that selects the best
+        // supplying write and creates the actual DataFlow edge.
+        //
+        link_pipe_dataflow(i);
+    }
+}
 
 } // namespace runtimexray

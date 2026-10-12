@@ -81,6 +81,7 @@ private:
         std::string type;
         std::string role;
         bool cloexec = false;
+        std::string source;
     };
 
     // RuntimeXRay-local resource allocator.
@@ -110,7 +111,11 @@ private:
 
     void handle_fcntl_exit(const SyscallEvent& ev, size_t syscall_index);
 
+    void handle_open_exit(const SyscallEvent& ev, size_t syscall_index);
+
     void link_pipe_dataflow(size_t read_index);
+
+    void reconcile_pipe_dataflow_from_write(size_t write_index);
     
     // Graph storage
     std::vector<Observation> observations_;

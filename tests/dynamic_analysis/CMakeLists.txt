@@ -29,6 +29,9 @@ target_compile_options(sensitive_object_flow PRIVATE -O0)
 add_executable(pipe_flow pipe_flow.c)
 target_compile_options(pipe_flow PRIVATE -O0)
 
+add_executable(sensitive_pipe_chain_env sensitive_pipe_chain_env.c)
+target_compile_options(sensitive_pipe_chain_env PRIVATE -O0)
+
 add_executable(file_access_outcomes file_access_outcomes.c)
 target_compile_options(file_access_outcomes PRIVATE -O0)
 
@@ -50,6 +53,9 @@ target_compile_options(vfork_dup_exec_parent PRIVATE -O0)
 add_executable(cloexec_exec_flow cloexec_exec_flow.c)
 target_compile_options(cloexec_exec_flow PRIVATE -O0)
 
+add_executable(fd_exec_inheritance fd_exec_inheritance.c)
+target_compile_options(fd_exec_inheritance PRIVATE -O0)
+
 # Optionally, set output directory
 set_target_properties(dynamic_target 
     fork_test thread_test
@@ -58,6 +64,7 @@ set_target_properties(dynamic_target
     cross_boundary_test
     sensitive_object_flow
     pipe_flow
+    sensitive_pipe_chain_env
     file_access_outcomes
     thread_lifecycle_test
     fd_alias_flow
@@ -65,4 +72,5 @@ set_target_properties(dynamic_target
     fork_dup_exec_helper
     vfork_dup_exec_parent
     cloexec_exec_flow
+    fd_exec_inheritance
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

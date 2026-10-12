@@ -241,45 +241,55 @@ add_test(NAME check_json_analyze
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
     add_test(NAME check_ebpf_trace_smoke
-             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_smoke.sh $<TARGET_FILE:runtimexray>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_smoke.sh
+            $<TARGET_FILE:runtimexray>)
     set_tests_properties(check_ebpf_trace_smoke PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
     add_test(NAME check_ebpf_json_verbose
-             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_json_verbose.sh $<TARGET_FILE:runtimexray>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_json_verbose.sh
+            $<TARGET_FILE:runtimexray>)
     set_tests_properties(check_ebpf_json_verbose PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 25)
 
     add_test(NAME check_ebpf_timeout
-             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_timeout.sh $<TARGET_FILE:runtimexray>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_timeout.sh
+            $<TARGET_FILE:runtimexray>)
     set_tests_properties(check_ebpf_timeout PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
     add_test(NAME check_ebpf_empty_json
-             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_empty_json.sh $<TARGET_FILE:runtimexray>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_empty_json.sh
+            $<TARGET_FILE:runtimexray>)
     set_tests_properties(check_ebpf_empty_json PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
     # eBPF fork/thread tests
     add_test(NAME check_ebpf_follow_forks
-            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_follow_forks.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:fork_test>)
     set_tests_properties(check_ebpf_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
 
     add_test(NAME check_ebpf_no_follow_forks
-            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_no_follow_forks.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:fork_test>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_no_follow_forks.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:fork_test>)
     set_tests_properties(check_ebpf_no_follow_forks PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
 
     add_test(NAME check_ebpf_threads
-            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_threads.sh $<TARGET_FILE:runtimexray> $<TARGET_FILE:thread_test>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_threads.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:thread_test>)
     set_tests_properties(check_ebpf_threads PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
 
     add_test(NAME check_ebpf_sensitive_object_flow
-        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_sensitive_object_flow.sh
-             $<TARGET_FILE:runtimexray>
-             $<TARGET_FILE:sensitive_object_flow>)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_sensitive_object_flow.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:sensitive_object_flow>)
     set_tests_properties(check_ebpf_sensitive_object_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
     add_test(NAME check_trace_file_access_outcomes_ebpf
-        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_trace_file_access_outcomes.sh
-                $<TARGET_FILE:runtimexray>
-                $<TARGET_FILE:file_access_outcomes>
-                ebpf)
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_trace_file_access_outcomes.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:file_access_outcomes>
+            ebpf)
     set_tests_properties(check_trace_file_access_outcomes_ebpf PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 125)
 
     add_test(NAME check_ebpf_pipe_flow
@@ -287,6 +297,22 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
             $<TARGET_FILE:runtimexray>
             $<TARGET_FILE:pipe_flow>)
     set_tests_properties(check_ebpf_pipe_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
+
+    add_test(NAME check_ebpf_sensitive_pipe_chain_env
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sensitive_pipe_chain_env.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:sensitive_pipe_chain_env>
+            ebpf)
+    set_tests_properties(check_ebpf_sensitive_pipe_chain_env PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
+    add_test(NAME check_ebpf_fd_exec_inheritance
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_exec_inheritance.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:fd_exec_inheritance>
+            ebpf)
+    set_tests_properties(check_ebpf_fd_exec_inheritance PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
     add_test(NAME check_ebpf_fd_alias_flow
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_alias_flow.sh
@@ -329,12 +355,15 @@ endif()
 if(NOT SKIP_PTRACE_TESTS)
     # JSON validation for trace
     add_test(NAME check_json_trace
-             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
-                     trace $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/ls)
+            COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
+            trace $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/ls)
 
     # JSON validation for mem
     add_test(NAME check_json_mem
-             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py $<TARGET_FILE:runtimexray>)
+            COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py
+            $<TARGET_FILE:runtimexray>)
 
     # Self memory scanner integration test
     add_executable(test_memory_scanner_self
@@ -412,6 +441,23 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:runtimexray>
             $<TARGET_FILE:pipe_flow>)
     set_tests_properties(check_ptrace_pipe_flow PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 20)
+
+    add_test(NAME check_ptrace_fd_exec_inheritance
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_exec_inheritance.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:fd_exec_inheritance>
+            ptrace
+    )
+    set_tests_properties(check_ptrace_fd_exec_inheritance PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
+
+    add_test(NAME check_ptrace_sensitive_pipe_chain_env
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sensitive_pipe_chain_env.sh
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:sensitive_pipe_chain_env>
+            ptrace)
+    set_tests_properties(check_ptrace_sensitive_pipe_chain_env PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
     add_test(NAME check_process_instance_lifetime
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_process_instance_lifetime.sh
