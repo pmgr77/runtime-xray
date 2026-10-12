@@ -987,8 +987,8 @@ void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_in
         (pipe_obs.arg1 & O_CLOEXEC) != 0;
 
     auto& fd_map = fd_bindings_by_instance_[pipe_obs.process_instance_id];
-    fd_map[fds[0]] = {resource_id, "pipe", "read", cloexec};
-    fd_map[fds[1]] = {resource_id, "pipe", "write", cloexec};
+    fd_map[fds[0]] = {resource_id, "pipe", "read", cloexec, ""};
+    fd_map[fds[1]] = {resource_id, "pipe", "write", cloexec, ""};
     pipe_obs.resource_id = resource_id;
     pipe_obs.resource_type = "pipe";
     Logger::log(

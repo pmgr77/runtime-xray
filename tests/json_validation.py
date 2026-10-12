@@ -61,10 +61,28 @@ def main():
         print("'summary' must be a dict")
         sys.exit(1)
 
-    # Optional: verify each finding has severity and description
+    # Verify each finding follows the canonical Finding JSON schema.
     for idx, finding in enumerate(data["findings"]):
-        if "severity" not in finding or "description" not in finding:
-            print(f"Finding at index {idx} missing 'severity' or 'description'")
+        required_finding_keys = [
+            "finding_id",
+            "rule_id",
+            "kind",
+            "severity",
+            "title",
+            "summary",
+        ]
+
+        missing = [
+            key
+            for key in required_finding_keys
+            if key not in finding
+        ]
+
+        if missing:
+            print(
+                f"Finding at index {idx} missing required fields: "
+                f"{missing}"
+            )
             sys.exit(1)
 
     assert data["schema_version"] == "2.0"
