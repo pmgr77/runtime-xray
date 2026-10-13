@@ -196,6 +196,15 @@ void scan_memory_for_secrets(
     std::vector<std::byte> buffer(chunk_size);
     size_t found = 0;
     size_t scanned = 0;
+    size_t read_ok = 0;
+    size_t read_failed = 0;
+    size_t bytes_read = 0;
+    size_t password_chunks = 0;
+    size_t fail_efault = 0;
+    size_t fail_eperm = 0;
+    size_t fail_esrch = 0;
+    size_t fail_enosys = 0;
+    size_t fail_other = 0;
 
     for (const auto& region : regions) {
         if (scanned >= max_pages) {
@@ -217,6 +226,16 @@ void scan_memory_for_secrets(
 
             ssize_t n = process_vm_readv(pid, &local, 1, &remote, 1, 0);
             if (n <= 0) {
+                ++read_failed;
+
+                switch (errno) {
+                    case EFAULT: ++fail_efault; break;
+                    case EPERM:  ++fail_eperm;  break;
+                    case ESRCH:  ++fail_esrch;  break;
+                    case ENOSYS: ++fail_enosys; break;
+                    default:     ++fail_other;  break;
+                }
+
                 Logger::log(LogLevel::Debug, "process_vm_readv failed at 0x" + std::to_string(address) +
                 " errno=" + std::to_string(errno) + " (" + std::strerror(errno) + ")");
                 address += 4096; // skip inaccessible page
@@ -227,6 +246,9 @@ void scan_memory_for_secrets(
                 continue;
             }
 
+            ++read_ok;
+            bytes_read += static_cast<size_t>(n);
+
             ++scanned;
             if (scanned % 100 == 0) {
                 Logger::log(LogLevel::Debug, "Scanned " + std::to_string(scanned) + " pages (read ok)");
@@ -234,6 +256,7 @@ void scan_memory_for_secrets(
 
             std::string chunk(reinterpret_cast<char*>(buffer.data()), static_cast<size_t>(n));
             if (chunk.find("password=") != std::string::npos) {
+                ++password_chunks;
                 Logger::log(LogLevel::Debug, "Found 'password=' in chunk at 0x" + std::to_string(address));
             }
 
@@ -249,6 +272,21 @@ void scan_memory_for_secrets(
             address += static_cast<uint64_t>(n);
         }
     }
+
+    Logger::log(
+        LogLevel::Info,
+        "Memory read diagnostics for PID " + std::to_string(pid) +
+        ": attempted=" + std::to_string(scanned) +
+        ", ok=" + std::to_string(read_ok) +
+        ", failed=" + std::to_string(read_failed) +
+        ", bytes=" + std::to_string(bytes_read) +
+        ", password_chunks=" + std::to_string(password_chunks) +
+        ", observations=" + std::to_string(found) +
+        ", EFAULT=" + std::to_string(fail_efault) +
+        ", EPERM=" + std::to_string(fail_eperm) +
+        ", ESRCH=" + std::to_string(fail_esrch) +
+        ", ENOSYS=" + std::to_string(fail_enosys) +
+        ", other=" + std::to_string(fail_other));
 
     if (pages_scanned) {
         *pages_scanned = scanned;
