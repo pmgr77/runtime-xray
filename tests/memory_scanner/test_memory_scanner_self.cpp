@@ -45,10 +45,31 @@ int main(int argc, char* argv[]) {
 
     std::vector<runtimexray::Observation> observations;
 
+    const long page_size_value = sysconf(_SC_PAGESIZE);
+    if (page_size_value <= 0) {
+        std::cerr << "Unable to determine page size\n";
+        return 1;
+    }
+
+    const size_t page_size = static_cast<size_t>(page_size_value);
+    size_t max_pages = 0;
+
+    for (const auto& region : runtimexray::get_readable_regions(getpid())) {
+        const uint64_t bytes = region.end - region.start;
+        max_pages += static_cast<size_t>(
+            (bytes + page_size - 1) / page_size);
+    }
+
+    if (max_pages == 0) {
+        std::cerr << "No readable memory pages found\n";
+        return 1;
+    }
+
     runtimexray::scan_process_for_secrets(
         getpid(),
         observations,
-        100);
+        100,
+        max_pages);
 
     bool found_memory = false;
     bool found_env = false;

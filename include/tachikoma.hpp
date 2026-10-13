@@ -56,7 +56,7 @@ enum class TraceEventType {
  */
 struct SyscallEvent {
     TraceEventType type = TraceEventType::Syscall;
-    unsigned long long syscall_number = 0;  ///< System call number (x86_64)
+    unsigned long long syscall_number = 0;  ///< Native Linux syscall number for the target architecture
     unsigned long long arg0 = 0, arg1 = 0, arg2 = 0, arg3 = 0, arg4 = 0, arg5 = 0; ///< Arguments (simplified)
     long long return_value = 0;         ///< Return value (valid on exit)
     pid_t pid = -1;                     ///< Current backend PID identity; legacy field

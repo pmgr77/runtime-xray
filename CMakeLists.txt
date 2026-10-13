@@ -238,6 +238,28 @@ add_test(NAME check_json_analyze
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
                  analyze $<TARGET_FILE:runtimexray> analyze $<TARGET_FILE:nx_enabled>)
 
+# Mem JSON/integration tests do not depend on ptrace.
+add_test(NAME check_json_mem
+         COMMAND ${Python3_EXECUTABLE}
+         ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py
+         $<TARGET_FILE:runtimexray>)
+
+add_executable(test_memory_scanner_self
+    tests/memory_scanner/test_memory_scanner_self.cpp
+    src/memory_scanner.cpp
+    src/secret_extractor.cpp
+    src/dynamic_analysis.cpp
+    src/logger.cpp
+    src/secret_fingerprinter.cpp
+)
+target_include_directories(test_memory_scanner_self PRIVATE include)
+target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
+target_link_libraries(test_memory_scanner_self PRIVATE OpenSSL::Crypto)
+add_test(NAME check_memory_scanner_self
+         COMMAND $<TARGET_FILE:test_memory_scanner_self> password=cmdline_secret_test)
+set_tests_properties(check_memory_scanner_self PROPERTIES
+    ENVIRONMENT "TEST_SECRET=password=env_secret_test")
+
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
     add_test(NAME check_ebpf_trace_smoke
@@ -247,7 +269,8 @@ if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
 
     add_test(NAME check_ebpf_json_verbose
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ebpf_json_verbose.sh
-            $<TARGET_FILE:runtimexray>)
+            $<TARGET_FILE:runtimexray>
+            $<TARGET_FILE:dynamic_target>)
     set_tests_properties(check_ebpf_json_verbose PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 25)
 
     add_test(NAME check_ebpf_timeout
@@ -359,32 +382,10 @@ if(NOT SKIP_PTRACE_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation.py
             trace $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/ls)
 
-    # JSON validation for mem
-    add_test(NAME check_json_mem
-            COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/json_validation_mem.py
-            $<TARGET_FILE:runtimexray>)
-
-    # Self memory scanner integration test
-    add_executable(test_memory_scanner_self
-        tests/memory_scanner/test_memory_scanner_self.cpp
-        src/memory_scanner.cpp
-        src/secret_extractor.cpp
-        src/dynamic_analysis.cpp
-        src/logger.cpp
-        src/secret_fingerprinter.cpp
-    )
-    target_include_directories(test_memory_scanner_self PRIVATE include)
-    target_compile_options(test_memory_scanner_self PRIVATE -Wall -Wextra)
-    target_link_libraries(test_memory_scanner_self PRIVATE OpenSSL::Crypto)
-    add_test(NAME check_memory_scanner_self
-             COMMAND $<TARGET_FILE:test_memory_scanner_self> password=cmdline_secret_test)
-    set_tests_properties(check_memory_scanner_self PROPERTIES
-        ENVIRONMENT "TEST_SECRET=password=env_secret_test")
-
     add_test(NAME check_xray_trace_smoke
-             COMMAND $<TARGET_FILE:runtimexray> trace /bin/ls)
-    set_tests_properties(check_xray_trace_smoke PROPERTIES PASS_REGULAR_EXPRESSION "Command: trace")
+             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_trace_smoke.sh
+             $<TARGET_FILE:runtimexray>)
+    set_tests_properties(check_xray_trace_smoke PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 10)
 
     add_test(NAME check_dynamic_file_access
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
@@ -395,12 +396,10 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_dynamic_network PROPERTIES PASS_REGULAR_EXPRESSION "Suspicious network connection")
 
     add_test(NAME check_dynamic_write_secret
-             COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_dynamic_write_secret PROPERTIES PASS_REGULAR_EXPRESSION "Sensitive data observed")
-
-    add_test(NAME check_dynamic_output_scan
-             COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_dynamic_output_scan PROPERTIES PASS_REGULAR_EXPRESSION "Sensitive data observed")
+             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_trace_secret_write.sh
+             $<TARGET_FILE:runtimexray>
+             $<TARGET_FILE:dynamic_target>)
+    set_tests_properties(check_dynamic_write_secret PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
 
     add_test(NAME check_trace_timeout
              COMMAND $<TARGET_FILE:runtimexray> trace --timeout 1 /bin/sleep 10)
@@ -420,7 +419,9 @@ if(NOT SKIP_PTRACE_TESTS)
 
     add_test(NAME check_trace_low_hide_default
              COMMAND $<TARGET_FILE:runtimexray> trace $<TARGET_FILE:dynamic_target>)
-    set_tests_properties(check_trace_low_hide_default PROPERTIES FAIL_REGULAR_EXPRESSION "path: /etc/hosts")
+    set_tests_properties(check_trace_low_hide_default PROPERTIES
+        PASS_REGULAR_EXPRESSION "path: /etc/passwd"
+        FAIL_REGULAR_EXPRESSION "path: /etc/hosts")
 
     add_test(NAME check_trace_low_show
              COMMAND $<TARGET_FILE:runtimexray> trace --min-severity Low $<TARGET_FILE:dynamic_target>)

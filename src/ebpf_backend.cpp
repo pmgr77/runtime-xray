@@ -342,11 +342,6 @@ private:
                              strcmp(name, "clone") == 0 ||
                              strcmp(name, "clone3") == 0);
 
-        // Fallback: check syscall numbers directly (ARM64: clone=220, clone3=435)
-        if (!is_fork_like && (ev->syscall_id == 220 || ev->syscall_id == 435)) {
-            is_fork_like = true;
-        }
-
         if (is_fork_like) {
             Logger::log(LogLevel::Debug, "Fork-like syscall detected, adding PID " + std::to_string(ev->ret));
             add_pid_to_filter(static_cast<pid_t>(ev->ret));

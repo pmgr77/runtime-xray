@@ -1,36 +1,57 @@
 #!/bin/sh
-# Test that --show-secrets reveals the raw secret value
+set -eu
 
-RUNTIMEXRAY_BIN="$1"
+RUNTIMEXRAY_BIN="${1:-}"
 if [ -z "$RUNTIMEXRAY_BIN" ]; then
-    echo "Usage: $0 <path-to-runtimexray>"
+    echo "Usage: $0 <path-to-runtimexray>" >&2
     exit 1
 fi
 
 SECRET="password=cli_secret_test"
+TMPDIR="$(mktemp -d)"
+REPORT="$TMPDIR/report.json"
+TEXT="$TMPDIR/report.txt"
 
-# Start a short-lived background process with the secret in its command line.
-# Redirect output to /dev/null so it does not keep the test pipe open.
-/bin/sh -c 'sleep 1' "$SECRET" >/dev/null 2>&1 &
+/bin/sh -c 'sleep 5' "$SECRET" >/dev/null 2>&1 &
 pid=$!
 
-trap 'kill $pid 2>/dev/null' EXIT
+cleanup() {
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    rm -rf "$TMPDIR"
+}
+trap cleanup EXIT INT TERM
 
-sleep 0.5   # give it a moment to appear in /proc
+sleep 0.5
 
-output="$("$RUNTIMEXRAY_BIN" mem --show-secrets "$pid" 2>&1)"
-status=$?
-if [ $status -ne 0 ]; then
-    echo "runtimexray mem exited with status $status"
-    echo "$output"
-    exit 1
-fi
+"$RUNTIMEXRAY_BIN" mem \
+    --show-secrets \
+    --json "$REPORT" \
+    --report "$TEXT" \
+    "$pid"
 
-# Check that the raw secret appears in the output
-if echo "$output" | grep -q "$SECRET"; then
-    exit 0
-else
-    echo "Raw secret not found with --show-secrets:"
-    echo "$output"
-    exit 1
-fi
+python3 - "$REPORT" "$TEXT" "$SECRET" <<'PY'
+import json
+import pathlib
+import sys
+
+report_path, text_path, secret = sys.argv[1:4]
+data = json.loads(pathlib.Path(report_path).read_text(encoding="utf-8"))
+text = pathlib.Path(text_path).read_text(encoding="utf-8")
+
+observations = data.get("lineage", {}).get("observations", [])
+cmdline = [
+    obs for obs in observations
+    if obs.get("type") == "data"
+    and obs.get("data_type") == "cmdline"
+    and str(obs.get("fingerprint", "")).startswith("hmac-sha256:")
+]
+
+if not cmdline:
+    raise SystemExit("FAIL: no cmdline Data observation")
+
+if secret not in text and secret not in pathlib.Path(report_path).read_text(encoding="utf-8"):
+    raise SystemExit("FAIL: raw secret not shown with --show-secrets")
+
+print("PASS: --show-secrets exposes the controlled cmdline secret")
+PY

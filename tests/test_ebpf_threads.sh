@@ -1,44 +1,53 @@
 #!/bin/sh
-# Test eBPF backend thread tracing by checking for distinct TIDs
+set -eu
 
-set -e
-
-RUNTIMEXRAY_BIN="$1"
-THREAD_TEST_BIN="$2"
+RUNTIMEXRAY_BIN="${1:-}"
+THREAD_TEST_BIN="${2:-}"
 
 if [ -z "$RUNTIMEXRAY_BIN" ] || [ -z "$THREAD_TEST_BIN" ]; then
-    echo "Usage: $0 <runtimexray> <thread_test>"
+    echo "Usage: $0 <runtimexray> <thread_test>" >&2
     exit 125
 fi
 
-if [ "$(id -u)" -ne 0 ]; then
-    if ! command -v sudo >/dev/null 2>&1 || ! sudo -n true 2>/dev/null; then
-        echo "Skipping eBPF thread test: root or passwordless sudo required."
-        exit 125
-    fi
+if [ "$(id -u)" -eq 0 ]; then
+    RUN_PREFIX=""
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     RUN_PREFIX="sudo -n"
 else
-    RUN_PREFIX=""
+    echo "Skipping thread test: root or passwordless sudo required." >&2
+    exit 125
 fi
 
-# Run with --log-level debug to capture all syscalls (including those from child thread)
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --follow-forks --log-level debug --timeout 10 "$THREAD_TEST_BIN" 2>&1)
-STATUS=$?
-if [ $STATUS -ne 0 ]; then
-    echo "eBPF trace failed with status $STATUS"
-    echo "$OUTPUT"
-    exit 1
+TMPDIR="$(mktemp -d)"
+REPORT="$TMPDIR/report.json"
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM
+
+$RUN_PREFIX "$RUNTIMEXRAY_BIN" trace     --backend ebpf --follow-forks     --timeout 5     --json "$REPORT"     --report /dev/null     "$THREAD_TEST_BIN"
+
+if [ -n "$RUN_PREFIX" ]; then
+    $RUN_PREFIX chown "$(id -u):$(id -g)" "$REPORT" 2>/dev/null || true
 fi
 
-# Extract TIDs from the output (format: tid=12345)
-TIDS=$(echo "$OUTPUT" | grep -o "tid=[0-9]*" | sed 's/tid=//' | sort -u)
-COUNT=$(echo "$TIDS" | wc -l)
+python3 - "$REPORT" <<'PY'
+import json
+import pathlib
+import sys
 
-if [ $COUNT -ge 2 ]; then
-    echo "Found $COUNT distinct TIDs, eBPF thread tracing works."
-    exit 0
-else
-    echo "Expected at least 2 TIDs, got $COUNT"
-    echo "$OUTPUT"
-    exit 1
-fi
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+observations = data.get("lineage", {}).get("observations", [])
+
+thread_event = any(
+    obs.get("type") == "event"
+    and isinstance(obs.get("tid"), int)
+    and isinstance(obs.get("tgid"), int)
+    and obs["tid"] > 0
+    and obs["tgid"] > 0
+    and obs["tid"] != obs["tgid"]
+    for obs in observations
+)
+
+if not thread_event:
+    raise SystemExit("FAIL: no lineage event from a non-leader thread")
+
+print("PASS: thread activity is represented by distinct TID/TGID")
+PY

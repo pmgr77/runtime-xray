@@ -1,7 +1,7 @@
 #include "narrative.hpp"
 #include "narrative_builder.hpp"
+#include "../test_check.hpp"
 
-#include <cassert>
 #include <iostream>
 
 using namespace runtimexray;
@@ -121,37 +121,37 @@ int main()
     NarrativeBuilder builder;
     const auto stories = builder.build(graph, findings);
 
-    assert(stories.size() == 1);
+    CHECK(stories.size() == 1);
 
     const auto& story = stories[0];
 
-    assert(story.finding_index == 0);
-    assert(story.title == "Sensitive object observed from file to socket");
-    assert(story.fingerprint == "fp-password");
-    assert(story.sessions.size() == 1);
+    CHECK(story.finding_index == 0);
+    CHECK(story.title == "Sensitive object observed from file to socket");
+    CHECK(story.fingerprint == "fp-password");
+    CHECK(story.sessions.size() == 1);
 
-    assert(story.sessions[0].id.process_instance_id == 1);
-    assert(story.sessions[0].id.exec_generation == 0);
-    assert(story.sessions[0].program_name == "./test-app");
+    CHECK(story.sessions[0].id.process_instance_id == 1);
+    CHECK(story.sessions[0].id.exec_generation == 0);
+    CHECK(story.sessions[0].program_name == "./test-app");
 
-    assert(story.statements.size() == 3);
+    CHECK(story.statements.size() == 3);
 
-    assert(story.statements[0].evidence_observation_seqs[0] == 3);
-    assert(story.statements[0].evidence_observation_seqs[1] == 2);
-    assert(story.statements[0].text.find("read") != std::string::npos);
-    assert(story.statements[0].text.find("/tmp/cred.txt") != std::string::npos);
-    assert(story.statements[0].evidence_observation_seqs.size() == 2);
+    CHECK(story.statements[0].evidence_observation_seqs.size() == 2);
+    CHECK(story.statements[0].evidence_observation_seqs[0] == 3);
+    CHECK(story.statements[0].evidence_observation_seqs[1] == 2);
+    CHECK(story.statements[0].text.find("read") != std::string::npos);
+    CHECK(story.statements[0].text.find("/tmp/cred.txt") != std::string::npos);
 
-    assert(story.statements[1].evidence_observation_seqs.size() == 1);
-    assert(story.statements[1].evidence_observation_seqs[0] == 4);
-    assert(story.statements[1].text.find("memory") != std::string::npos);
-    assert(story.statements[1].text.find("12345000") != std::string::npos);
+    CHECK(story.statements[1].evidence_observation_seqs.size() == 1);
+    CHECK(story.statements[1].evidence_observation_seqs[0] == 4);
+    CHECK(story.statements[1].text.find("memory") != std::string::npos);
+    CHECK(story.statements[1].text.find("12345000") != std::string::npos);
 
-    assert(story.statements[2].text.find("sendto") != std::string::npos);
-    assert(story.statements[2].text.find("127.0.0.1:4444") != std::string::npos);
-    assert(story.statements[2].evidence_observation_seqs.size() == 2);
-    assert(story.statements[2].evidence_observation_seqs[0] == 6);
-    assert(story.statements[2].evidence_observation_seqs[1] == 5);
+    CHECK(story.statements[2].text.find("sendto") != std::string::npos);
+    CHECK(story.statements[2].text.find("127.0.0.1:4444") != std::string::npos);
+    CHECK(story.statements[2].evidence_observation_seqs.size() == 2);
+    CHECK(story.statements[2].evidence_observation_seqs[0] == 6);
+    CHECK(story.statements[2].evidence_observation_seqs[1] == 5);
 
     return 0;
 }

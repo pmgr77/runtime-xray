@@ -1,43 +1,48 @@
 #!/bin/sh
-# Regression test for eBPF backend timeout handling.
-# Ensures that --timeout terminates the trace and sets a timeout indicator.
-# Skips (exit code 125) if eBPF is not available or permissions insufficient.
+set -eu
 
-set -e
-
-RUNTIMEXRAY_BIN="$1"
+RUNTIMEXRAY_BIN="${1:-}"
 if [ -z "$RUNTIMEXRAY_BIN" ]; then
-    echo "Usage: $0 <path-to-runtimexray>"
+    echo "Usage: $0 <runtimexray>" >&2
     exit 125
 fi
 
-set -x   # echo every command
-
-# Determine if we need sudo
 if [ "$(id -u)" -eq 0 ]; then
     RUN_PREFIX=""
 elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     RUN_PREFIX="sudo -n"
 else
-    echo "Skipping eBPF timeout JSON test: root or passwordless sudo required."
+    echo "Skipping eBPF timeout test: root or passwordless sudo required." >&2
     exit 125
 fi
 
-# Run a command that sleeps longer than the timeout
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --backend ebpf --timeout 1 /bin/sleep 10 2>&1)
-STATUS=$?
+TMPDIR="$(mktemp -d)"
+REPORT="$TMPDIR/report.json"
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
-if [ $STATUS -ne 0 ]; then
-    echo "eBPF backend failed with status $STATUS"
-    echo "$OUTPUT"
-    exit 1
+$RUN_PREFIX "$RUNTIMEXRAY_BIN" trace \
+    --backend ebpf \
+    --timeout 1 \
+    --json "$REPORT" \
+    --report /dev/null \
+    /bin/sleep 10
+
+if [ -n "$RUN_PREFIX" ]; then
+    $RUN_PREFIX chown "$(id -u):$(id -g)" "$REPORT" 2>/dev/null || true
 fi
 
-# Check for timeout indication in metadata
-if echo "$OUTPUT" | grep -q "Timed out: yes"; then
-    exit 0
-else
-    echo "Timeout message not found"
-    echo "$OUTPUT"
-    exit 1
-fi
+python3 - "$REPORT" <<'PY'
+import json
+import pathlib
+import sys
+
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+if data.get("backend") != "ebpf":
+    raise SystemExit("FAIL: JSON does not identify ebpf backend")
+
+if data.get("timed_out") is not True:
+    raise SystemExit("FAIL: timed_out is not true")
+
+print("PASS: eBPF timeout is represented structurally")
+PY

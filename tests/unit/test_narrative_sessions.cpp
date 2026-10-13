@@ -1,6 +1,6 @@
 #include "narrative.hpp"
+#include "../test_check.hpp"
 
-#include <cassert>
 #include <iostream>
 
 using namespace runtimexray;
@@ -90,29 +90,29 @@ int main()
     graph.observations.push_back(token_memory);
 
     auto sessions = build_narrative_sessions(graph);
-    assert(sessions.size() == 2);
+    CHECK(sessions.size() == 2);
     const auto& s0 = sessions[0];
-    assert(s0.id.process_instance_id == 1);
-    assert(s0.id.exec_generation == 0);
-    assert(s0.program_name == "./original");
-    assert(s0.observation_seqs.size() == 2);
-    assert(s0.observation_seqs[0] == 2);
-    assert(s0.observation_seqs[1] == 3);
-    assert(s0.first_seq == 2);
-    assert(s0.last_seq == 3);
-    assert(s0.tgid == 100);
+    CHECK(s0.id.process_instance_id == 1);
+    CHECK(s0.id.exec_generation == 0);
+    CHECK(s0.program_name == "./original");
+    CHECK(s0.observation_seqs.size() == 2);
+    CHECK(s0.observation_seqs[0] == 2);
+    CHECK(s0.observation_seqs[1] == 3);
+    CHECK(s0.first_seq == 2);
+    CHECK(s0.last_seq == 3);
+    CHECK(s0.tgid == 100);
 
     const auto& s1 = sessions[1];
-    assert(s1.id.process_instance_id == 1);
-    assert(s1.id.exec_generation == 1);
-    assert(s1.program_name == "/bin/echo");
-    assert(s1.observation_seqs.size() == 3);
-    assert(s1.observation_seqs[0] == 4);
-    assert(s1.observation_seqs[1] == 5);
-    assert(s1.observation_seqs[2] == 6);
-    assert(s1.first_seq == 4);
-    assert(s1.last_seq == 6);
-    assert(s1.tgid == 100);
+    CHECK(s1.id.process_instance_id == 1);
+    CHECK(s1.id.exec_generation == 1);
+    CHECK(s1.program_name == "/bin/echo");
+    CHECK(s1.observation_seqs.size() == 3);
+    CHECK(s1.observation_seqs[0] == 4);
+    CHECK(s1.observation_seqs[1] == 5);
+    CHECK(s1.observation_seqs[2] == 6);
+    CHECK(s1.first_seq == 4);
+    CHECK(s1.last_seq == 6);
+    CHECK(s1.tgid == 100);
 
     Finding single_session_finding;
 
@@ -155,61 +155,61 @@ int main()
     const auto& session0 = sessions[0];
     const auto& session1 = sessions[1];
 
-    assert(session0.finding_refs.size() == 2);
-    assert(session0.finding_refs[0].finding_index == 0);
-    assert(session0.finding_refs[0].evidence_observation_seqs.size() == 1);
-    assert(session0.finding_refs[0].evidence_observation_seqs[0] == 2);
+    CHECK(session0.finding_refs.size() == 2);
+    CHECK(session0.finding_refs[0].finding_index == 0);
+    CHECK(session0.finding_refs[0].evidence_observation_seqs.size() == 1);
+    CHECK(session0.finding_refs[0].evidence_observation_seqs[0] == 2);
 
-    assert(session0.finding_refs[1].finding_index == 1);
-    assert(session0.finding_refs[1].evidence_observation_seqs.size() == 2);
-    assert(session0.finding_refs[1].evidence_observation_seqs[0] == 2);
-    assert(session0.finding_refs[1].evidence_observation_seqs[1] == 3);
+    CHECK(session0.finding_refs[1].finding_index == 1);
+    CHECK(session0.finding_refs[1].evidence_observation_seqs.size() == 2);
+    CHECK(session0.finding_refs[1].evidence_observation_seqs[0] == 2);
+    CHECK(session0.finding_refs[1].evidence_observation_seqs[1] == 3);
 
-    assert(session1.finding_refs.size() == 1);
-    assert(session1.finding_refs[0].finding_index == 1);
-    assert(session1.finding_refs[0].evidence_observation_seqs.size() == 1);
-    assert(session1.finding_refs[0].evidence_observation_seqs[0] == 4);
+    CHECK(session1.finding_refs.size() == 1);
+    CHECK(session1.finding_refs[0].finding_index == 1);
+    CHECK(session1.finding_refs[0].evidence_observation_seqs.size() == 1);
+    CHECK(session1.finding_refs[0].evidence_observation_seqs[0] == 4);
 
     const auto histories = build_value_histories(graph);
-    assert(histories.size() == 2);
+    CHECK(histories.size() == 2);
     const auto& password_history = histories[0];
-    assert(password_history.fingerprint == "fp-password");
-    assert(password_history.secret_type == "password");
-    assert(password_history.first_seq == 2);
-    assert(password_history.last_seq == 4);
-    assert(password_history.occurrences.size() == 2);
+    CHECK(password_history.fingerprint == "fp-password");
+    CHECK(password_history.secret_type == "password");
+    CHECK(password_history.first_seq == 2);
+    CHECK(password_history.last_seq == 4);
+    CHECK(password_history.occurrences.size() == 2);
 
     const auto& password_read = password_history.occurrences[0];
-    assert(password_read.observation_seq == 2);
-    assert(password_read.process_instance_id == 1);
-    assert(password_read.exec_generation == 0);
-    assert(password_read.observation_type == ObservationType::Event);
-    assert(password_read.syscall_name == "read");
+    CHECK(password_read.observation_seq == 2);
+    CHECK(password_read.process_instance_id == 1);
+    CHECK(password_read.exec_generation == 0);
+    CHECK(password_read.observation_type == ObservationType::Event);
+    CHECK(password_read.syscall_name == "read");
 
     const auto& password_memory = password_history.occurrences[1];
-    assert(password_memory.observation_seq == 4);
-    assert(password_memory.process_instance_id == 1);
-    assert(password_memory.exec_generation == 1);
-    assert(password_memory.observation_type == ObservationType::Data);
-    assert(password_memory.data_type == "memory");
+    CHECK(password_memory.observation_seq == 4);
+    CHECK(password_memory.process_instance_id == 1);
+    CHECK(password_memory.exec_generation == 1);
+    CHECK(password_memory.observation_type == ObservationType::Data);
+    CHECK(password_memory.data_type == "memory");
 
     const auto& token_history = histories[1];
-    assert(token_history.fingerprint == "fp-token");
-    assert(token_history.secret_type == "token");
-    assert(token_history.first_seq == 6);
-    assert(token_history.last_seq == 6);
-    assert(token_history.occurrences.size() == 1);
+    CHECK(token_history.fingerprint == "fp-token");
+    CHECK(token_history.secret_type == "token");
+    CHECK(token_history.first_seq == 6);
+    CHECK(token_history.last_seq == 6);
+    CHECK(token_history.occurrences.size() == 1);
 
     const auto& token_occurrence = token_history.occurrences[0];
-    assert(token_occurrence.observation_seq == 6);
-    assert(token_occurrence.process_instance_id == 1);
-    assert(token_occurrence.exec_generation == 1);
-    assert(token_occurrence.observation_type == ObservationType::Data);
-    assert(token_occurrence.data_type == "memory");
+    CHECK(token_occurrence.observation_seq == 6);
+    CHECK(token_occurrence.process_instance_id == 1);
+    CHECK(token_occurrence.exec_generation == 1);
+    CHECK(token_occurrence.observation_type == ObservationType::Data);
+    CHECK(token_occurrence.data_type == "memory");
 
     associate_findings_with_sessions(findings, sessions);
-    assert(sessions[0].finding_refs.size() == 2);
-    assert(sessions[1].finding_refs.size() == 1);
+    CHECK(sessions[0].finding_refs.size() == 2);
+    CHECK(sessions[1].finding_refs.size() == 1);
 
     std::cout << "Narrative model tests passed\n";
 

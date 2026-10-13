@@ -23,7 +23,7 @@
 // limitations under the License.
 
 #include "secret_fingerprinter.hpp"
-#include <cassert>
+#include "../test_check.hpp"
 #include <iostream>
 #include <string>
 
@@ -35,31 +35,31 @@ int main() {
         std::string secret1 = "password123";
         std::string fp1 = fp.fingerprint(secret1);
         std::string fp2 = fp.fingerprint(secret1);
-        assert(fp1 == fp2);
+        CHECK(fp1 == fp2);
         std::cout << "Test 1 passed: same secret → same fingerprint\n";
 
         // Test 2: Different secrets → different fingerprints
         std::string secret2 = "password456";
         std::string fp3 = fp.fingerprint(secret2);
-        assert(fp1 != fp3);
+        CHECK(fp1 != fp3);
         std::cout << "Test 2 passed: different secrets → different fingerprints\n";
 
         // Test 3: Fingerprint format
-        assert(fp1.substr(0, 12) == "hmac-sha256:");
-        assert(fp1.length() > 12);
+        CHECK(fp1.substr(0, 12) == "hmac-sha256:");
+        CHECK(fp1.length() > 12);
         std::cout << "Test 3 passed: fingerprint format is correct\n";
 
         // Test 4: Empty secret throws
         try {
             fp.fingerprint("");
-            assert(false && "Empty secret should throw");
+            CHECK(false && "Empty secret should throw");
         } catch (const std::runtime_error& e) {
             std::cout << "Test 4 passed: empty secret throws as expected\n";
         }
 
         // Test 5: Deterministic across calls (again)
         std::string fp4 = fp.fingerprint(secret1);
-        assert(fp1 == fp4);
+        CHECK(fp1 == fp4);
         std::cout << "Test 5 passed: deterministic\n";
 
         std::cout << "All tests passed.\n";

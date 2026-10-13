@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build & Test (${{ matrix.arch }})
@@ -18,7 +21,6 @@ jobs:
           - arch: x86_64
             runner: ubuntu-24.04
             platform: linux/amd64
-
           - arch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
@@ -26,23 +28,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Build and Test
         run: |
           PLATFORM=${{ matrix.platform }}
 
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-              CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_EBPF_BACKEND=OFF -DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
+              CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_EBPF_BACKEND=OFF -DSKIP_EBPF_TESTS=ON"
           else
               CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_EBPF_BACKEND=ON -DSKIP_EBPF_TESTS=ON"
           fi
 
           docker run --rm --cap-add=SYS_PTRACE --platform "$PLATFORM" \
-            -v ${{ github.workspace }}:/workspace -w /workspace \
+            -v "${{ github.workspace }}:/workspace" -w /workspace \
             ubuntu:24.04 \
             bash -c "
               set -e
-
               apt-get update
               apt-get install -y \
                 build-essential \
@@ -64,7 +67,76 @@ jobs:
 
               cmake -B build $CMAKE_FLAGS
               cmake --build build -j\$(nproc)
-
-              cd build
-              ctest --output-on-failure
+              ctest --test-dir build --output-on-failure
             "
+
+  ebpf:
+    name: eBPF Runtime (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            g++ \
+            git \
+            python3 \
+            libssl-dev \
+            jq \
+            libbpf-dev \
+            clang \
+            libelf-dev \
+            zlib1g-dev \
+            xxd
+
+      - name: Ensure tracefs is available
+        run: |
+          if ! mountpoint -q /sys/kernel/tracing; then
+            sudo mkdir -p /sys/kernel/tracing
+            sudo mount -t tracefs tracefs /sys/kernel/tracing
+          fi
+
+      - name: Build eBPF backend
+        run: |
+          cmake -B build-ebpf \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EBPF_BACKEND=ON \
+            -DSKIP_PTRACE_TESTS=ON \
+            -DSKIP_EBPF_TESTS=OFF
+          cmake --build build-ebpf -j"$(nproc)"
+
+      - name: Run eBPF runtime tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REGEX='(^check_ebpf_|^check_trace_file_access_outcomes_ebpf$)'
+
+          ctest --test-dir build-ebpf -N -R "$REGEX" | tee ebpf-tests-list.txt
+          grep -q 'Total Tests: 16' ebpf-tests-list.txt
+
+          ctest --test-dir build-ebpf \
+            --output-on-failure \
+            -R "$REGEX" | tee ebpf-tests.log
+
+          if grep -Eq '\*\*\*Skipped|[[:space:]]Skipped[[:space:]]' ebpf-tests.log; then
+            echo "eBPF runtime test was skipped; CI requires real execution."
+            exit 1
+          fi

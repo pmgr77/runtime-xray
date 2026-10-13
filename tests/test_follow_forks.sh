@@ -1,44 +1,93 @@
 #!/bin/sh
-# Test that --follow-forks traces child processes.
+set -eu
 
-set -e
-
-RUNTIMEXRAY_BIN="$1"
-FORK_TEST_BIN="$2"
+RUNTIMEXRAY_BIN="${1:-}"
+FORK_TEST_BIN="${2:-}"
 
 if [ -z "$RUNTIMEXRAY_BIN" ] || [ -z "$FORK_TEST_BIN" ]; then
-    echo "Usage: $0 <runtimexray> <fork_test>"
+    echo "Usage: $0 <runtimexray> <fork_test>" >&2
     exit 125
 fi
 
-# Determine if we need sudo (for ptrace)
 if [ "$(id -u)" -eq 0 ]; then
     RUN_PREFIX=""
 elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     RUN_PREFIX="sudo -n"
 else
-    echo "Skipping fork test: root or passwordless sudo required."
+    echo "Skipping fork test: root or passwordless sudo required." >&2
     exit 125
 fi
 
-# Run trace with --follow-forks (default) and capture output
-OUTPUT=$($RUN_PREFIX "$RUNTIMEXRAY_BIN" trace --log-level debug --timeout 2 "$FORK_TEST_BIN" 2>&1)
-STATUS=$?
-if [ $STATUS -ne 0 ]; then
-    echo "Trace failed with status $STATUS"
-    echo "$OUTPUT"
-    exit 1
+TMPDIR="$(mktemp -d)"
+REPORT="$TMPDIR/report.json"
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM
+
+$RUN_PREFIX "$RUNTIMEXRAY_BIN" trace \
+    --backend ptrace \
+    --follow-forks \
+    --timeout 5 \
+    --json "$REPORT" \
+    --report /dev/null \
+    "$FORK_TEST_BIN"
+
+if [ -n "$RUN_PREFIX" ]; then
+    $RUN_PREFIX chown "$(id -u):$(id -g)" "$REPORT" 2>/dev/null || true
 fi
 
-# Extract unique PIDs from syscall lines (format: "pid=12345")
-PIDS=$(echo "$OUTPUT" | grep -o "pid=[0-9]*" | sed 's/pid=//' | sort -u)
-COUNT=$(echo "$PIDS" | wc -l)
+python3 - "$REPORT" <<'PYTEST'
+import json
+import pathlib
+import sys
 
-if [ $COUNT -ge 2 ]; then
-    echo "Found $COUNT distinct PIDs, fork tracing works."
-    exit 0
-else
-    echo "Expected at least 2 distinct PIDs, got $COUNT"
-    echo "$OUTPUT"
-    exit 1
-fi
+data = json.loads(
+    pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+)
+
+observations = data.get("lineage", {}).get("observations", [])
+
+fork_events = [
+    obs
+    for obs in observations
+    if obs.get("type") == "event"
+    and obs.get("syscall") in {"fork", "vfork", "clone", "clone3"}
+    and isinstance(obs.get("return_value"), int)
+    and obs["return_value"] > 0
+]
+
+if not fork_events:
+    raise SystemExit("FAIL: no successful fork/clone event found")
+
+child_pid = fork_events[0]["return_value"]
+
+child_syscalls = [
+    obs
+    for obs in observations
+    if obs.get("type") == "event"
+    and obs.get("syscall") != "process"
+    and obs.get("tgid") == child_pid
+]
+
+if "present" == "present":
+    if not child_syscalls:
+        raise SystemExit(
+            f"FAIL: child PID {child_pid} exists, "
+            "but no child syscall events were traced"
+        )
+
+    print(
+        f"PASS: child PID {child_pid} produced "
+        f"{len(child_syscalls)} traced syscall events"
+    )
+else:
+    if child_syscalls:
+        names = [obs.get("syscall") for obs in child_syscalls]
+        raise SystemExit(
+            f"FAIL: child PID {child_pid} was traced despite "
+            f"--no-follow-forks: {names}"
+        )
+
+    print(
+        f"PASS: child PID {child_pid} is known from fork, "
+        "but none of its syscalls were traced"
+    )
+PYTEST

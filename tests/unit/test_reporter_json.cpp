@@ -1,7 +1,7 @@
 #include "reporter.hpp"
 #include "narrative_builder.hpp"
+#include "../test_check.hpp"
 
-#include <cassert>
 #include <set>
 #include <nlohmann/json.hpp>
 
@@ -161,33 +161,34 @@ int main()
 
     const auto j = nlohmann::json::parse(json_text);
 
-    assert(j["schema_version"] == "2.0");
+    CHECK(j["schema_version"] == "2.0");
 
-    assert(j["narratives"].is_array());
+    CHECK(j["narratives"].is_array());
 
-    assert(j["narratives"].size() == 1);
+    CHECK(j["narratives"].size() == 1);
 
     const auto& narrative = j["narratives"][0];
 
-    assert(narrative["title"] == "Sensitive object observed from file to socket");
+    CHECK(narrative["title"] == "Sensitive object observed from file to socket");
 
-    assert(narrative["sessions"][0]["program"] == "./test-app");
+    CHECK(narrative["sessions"].is_array());
+    CHECK(narrative["sessions"].size() == 1);
+    CHECK(narrative["sessions"][0]["program"] == "./test-app");
 
-    assert(narrative["statements"].size() == 3);
+    CHECK(narrative["statements"].size() == 3);
+    CHECK(narrative["statements"][0]["evidence_observation_seqs"].size() == 2);
+    CHECK(narrative["statements"][0]["evidence_observation_seqs"][0] == 3);
+    CHECK(narrative["statements"][0]["evidence_observation_seqs"][1] == 2);
 
-    assert(narrative["statements"][0]["evidence_observation_seqs"][0] == 3);
-
-    assert(narrative["statements"][0]["evidence_observation_seqs"][1] == 2);
-
-    assert(j["lineage"].is_object());
-    assert(j["lineage"]["observations"].is_array());
-    assert(j["lineage"]["observations"].size() == 6);
-    assert(j["lineage"]["edges"].is_array());
+    CHECK(j["lineage"].is_object());
+    CHECK(j["lineage"]["observations"].is_array());
+    CHECK(j["lineage"]["observations"].size() == 6);
+    CHECK(j["lineage"]["edges"].is_array());
 
     // Verify one observation:
-    assert(j["lineage"]["observations"][1]["seq"] == 2);
-    assert(j["lineage"]["observations"][1]["syscall"] == "openat");
-    assert(j["lineage"]["observations"][1]["source"] == "/tmp/cred.txt");
+    CHECK(j["lineage"]["observations"][1]["seq"] == 2);
+    CHECK(j["lineage"]["observations"][1]["syscall"] == "openat");
+    CHECK(j["lineage"]["observations"][1]["source"] == "/tmp/cred.txt");
     
     // Build the stable-seq set:
     std::set<uint64_t> observation_seqs;
@@ -199,7 +200,7 @@ int main()
     for (const auto& finding_json : j["findings"]) {
         for (const auto& seq_json : finding_json["evidence_observation_seqs"]) {
             const uint64_t seq = seq_json.get<uint64_t>();
-            assert(observation_seqs.count(seq) == 1);
+            CHECK(observation_seqs.count(seq) == 1);
         }
     }
     
@@ -208,7 +209,7 @@ int main()
         for (const auto& statement_json : narrative_json["statements"]) {
             for (const auto& seq_json : statement_json["evidence_observation_seqs"]) {
                 const uint64_t seq = seq_json.get<uint64_t>();
-                assert(observation_seqs.count(seq) == 1);
+                CHECK(observation_seqs.count(seq) == 1);
             }
         }
     }

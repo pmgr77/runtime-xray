@@ -3,14 +3,18 @@
 enable_language(C)
 
 # Helper to build test binaries from probe.c
-function(add_security_test_binary NAME COMPILE_FLAGS LINK_FLAGS)
+function(add_security_test_binary NAME COMPILE_FLAGS)
     add_executable(${NAME} probe.c)
     set_target_properties(${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
+
     if(NOT "${COMPILE_FLAGS}" STREQUAL "")
         target_compile_options(${NAME} PRIVATE ${COMPILE_FLAGS})
     endif()
-    if(NOT "${LINK_FLAGS}" STREQUAL "")
-        target_link_options(${NAME} PRIVATE ${LINK_FLAGS})
+
+    # Every argument after COMPILE_FLAGS is a linker option. This matters for
+    # Full RELRO, which needs both -z relro and -z now.
+    if(ARGN)
+        target_link_options(${NAME} PRIVATE ${ARGN})
     endif()
 endfunction()
 
@@ -62,7 +66,7 @@ add_test(NAME check_relro_full COMMAND $<TARGET_FILE:runtimexray> analyze --log-
 set_tests_properties(check_relro_full PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Full")
 
 add_test(NAME check_relro_partial COMMAND $<TARGET_FILE:runtimexray> analyze --log-level debug --min-severity Info $<TARGET_FILE:relro_partial>)
-set_tests_properties(check_relro_partial PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: (Partial|Full)")
+set_tests_properties(check_relro_partial PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Partial")
 
 add_test(NAME check_relro_disabled COMMAND $<TARGET_FILE:runtimexray> analyze $<TARGET_FILE:relro_disabled>)
 set_tests_properties(check_relro_disabled PROPERTIES PASS_REGULAR_EXPRESSION "RELRO: Disabled")
