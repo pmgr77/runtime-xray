@@ -6,18 +6,29 @@
     <title>RuntimeXRay</title>
     <style>
         body {
-            font-family: system-ui, -apple-system, sans-serif;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             margin: 2rem auto;
-            max-width: 800px;
-            padding: 0 1rem;
+            max-width: 900px;
+            padding: 0 1rem 3rem;
             background: #f9fafb;
             color: #1f2937;
             line-height: 1.6;
         }
+
         h1 {
-            font-size: 2.5rem;
+            font-size: 2.6rem;
             margin-bottom: 0.25rem;
         }
+
+        h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        h3 {
+            margin-bottom: 0.25rem;
+        }
+
         .tagline {
             font-size: 1.75rem;
             color: #111827;
@@ -25,6 +36,7 @@
             margin-bottom: 1.5rem;
             line-height: 1.4;
         }
+
         .tagline strong {
             display: block;
             font-style: normal;
@@ -32,178 +44,528 @@
             color: #2563eb;
             margin-top: 0.5rem;
         }
+
+        .intro {
+            font-size: 1.05rem;
+        }
+
         .scenario {
             margin-bottom: 1.5rem;
         }
-        .scenario h3 {
-            margin-bottom: 0.25rem;
-        }
+
         .scenario p {
             margin-top: 0;
             color: #374151;
         }
-        .evidence-chain {
+
+        .panel {
             margin-top: 2rem;
-            padding: 1rem;
-            background: #fff;
-            border-left: 4px solid #111827;
-            border-radius: 0.25rem;
-        }
-        .evidence-chain code {
-            background: #f3f4f6;
-            padding: 0.1rem 0.3rem;
-            border-radius: 0.2rem;
-            font-size: 0.9rem;
-        }
-        .status {
-            margin-top: 2rem;
-            padding: 1rem;
+            padding: 1.25rem;
             background: #fff;
             border-left: 4px solid #2563eb;
             border-radius: 0.25rem;
         }
-        .status code {
+
+        .panel-dark {
+            border-left-color: #111827;
+        }
+
+        .panel-green {
+            border-left-color: #16a34a;
+        }
+
+        code {
             background: #f3f4f6;
             padding: 0.1rem 0.3rem;
             border-radius: 0.2rem;
             font-size: 0.9rem;
         }
+
+        pre {
+            background: #111827;
+            color: #f9fafb;
+            padding: 1rem;
+            overflow-x: auto;
+            border-radius: 0.4rem;
+            line-height: 1.4;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        ul {
+            padding-left: 1.25rem;
+        }
+
+        ul li {
+            margin-bottom: 0.35rem;
+        }
+
+        .badge {
+            margin: 2rem 0 1rem;
+        }
+
         .links {
             margin-top: 2rem;
         }
+
         .links a {
             display: inline-block;
             margin-right: 1rem;
+            margin-bottom: 0.5rem;
             color: #2563eb;
             text-decoration: none;
             font-weight: 500;
         }
+
         .links a:hover {
             text-decoration: underline;
         }
-        .badge {
-            margin: 1rem 0;
-        }
-        ul {
-            padding-left: 1.2rem;
-        }
-        ul li {
-            margin-bottom: 0.3rem;
+
+        .small {
+            color: #4b5563;
+            font-size: 0.95rem;
         }
     </style>
 </head>
+
 <body>
+
     <h1>RuntimeXRay</h1>
+
     <p class="tagline">
-        Don't tell me my application is insecure — <strong>show me why.</strong><br>
+        Don't tell me my application is insecure —
+        <strong>show me why.</strong>
         <span>See what an attacker can learn from your application at runtime.</span>
     </p>
 
-    <p>
-        RuntimeXRay is an <strong>evidence-driven security analysis tool</strong> for compiled applications.
-        It combines static binary analysis with runtime observation to produce security findings backed by observable evidence.
+    <p class="intro">
+        RuntimeXRay is an <strong>evidence-driven security analysis tool for compiled Linux applications</strong>.
+        It combines static ELF inspection, runtime tracing, process-memory analysis,
+        lineage, and graph-based detection to produce security findings backed by observable evidence.
     </p>
+
+    <p>
+        The goal is not simply to produce more warnings.
+        RuntimeXRay tries to answer:
+    </p>
+
+    <blockquote>
+        <strong>What happened, where did it happen, and what evidence proves it?</strong>
+    </blockquote>
 
     <div class="scenario">
         <h3>🤖 “The AI wrote it. But what did it actually build?”</h3>
-        <p>AI can produce working code in seconds, but do you know what the resulting binary actually exposes at runtime?</p>
+        <p>
+            AI can produce working code in seconds. RuntimeXRay examines the compiled result
+            and the behavior that actually occurs during execution.
+        </p>
     </div>
 
     <div class="scenario">
         <h3>📦 “You didn’t write that library. Do you really know what it does?”</h3>
-        <p>Modern apps depend on third-party and legacy components that are difficult to fully audit.</p>
+        <p>
+            RuntimeXRay can observe supported behavior from third-party, legacy, or binary-only components
+            without requiring complete source visibility.
+        </p>
     </div>
 
     <div class="scenario">
         <h3>🧩 “Who still understands this entire application?”</h3>
-        <p>Large applications accumulate years of code, dependencies, and configuration paths. Security decisions increasingly rely on assumptions.</p>
+        <p>
+            Large systems accumulate years of code, dependencies, configuration paths, helper processes,
+            and operational assumptions. RuntimeXRay turns some of those assumptions into observable evidence.
+        </p>
     </div>
 
     <div class="scenario">
         <h3>⚡ “Can security review keep up with the release cycle?”</h3>
-        <p>Software changes faster than security teams can manually inspect every change. Runtime evidence shows what actually happened.</p>
+        <p>
+            Runtime evidence can complement source review by showing which supported behaviors
+            actually occurred in a controlled execution.
+        </p>
     </div>
 
-    <div class="evidence-chain">
-        <strong>What RuntimeXRay can show today</strong><br><br>
+    <div class="panel panel-dark">
+        <strong>Evidence, not intent</strong>
 
-        RuntimeXRay can currently correlate this observed exact-fingerprint flow:<br><br>
+        <p>
+            RuntimeXRay deliberately separates observation from conclusion.
+        </p>
 
-        <code>file → read → independently scanned memory → send → socket</code><br><br>
+        <p>
+            For example, observing a connection to a network endpoint does not automatically mean
+            exfiltration. Accessing a sensitive file does not automatically mean compromise.
+        </p>
 
-        The correlated finding connects the source file, read event, scanner-derived
-        memory address, output event, and socket destination using the same
-        sensitive-object fingerprint.<br><br>
-
-        Secret values remain redacted by default. RuntimeXRay reports observed
-        evidence; it does not claim malicious intent, exfiltration, or that a
-        destination is unexpected without additional evidence.
+        <p>
+            RuntimeXRay aims to make the strongest claim that the available evidence supports —
+            and no stronger.
+        </p>
     </div>
 
-    <div class="status">
-        <strong>✅ Available today:</strong><br><br>
+    <h2>What RuntimeXRay can do today</h2>
 
-        <strong>Unified CLI</strong><br>
-        <code>runtimexray analyze</code> – ELF hardening checks and dangerous API detection<br>
-        <code>runtimexray trace</code> – dynamic syscall tracing (<code>ptrace</code> or <code>ebpf</code>)<br>
-        <code>runtimexray mem</code> – process memory scanning for secrets<br><br>
+    <div class="panel">
+        <strong>Unified CLI</strong>
 
-        <strong>Common options (all subcommands)</strong><br>
-        <code>--report FILE</code> – human‑readable report (default: stdout)<br>
-        <code>--json FILE</code> – JSON report<br>
-        <code>--log-level LEVEL</code> – <code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code><br>
-        <code>--log-file FILE</code> – write logs to file (default: stderr)<br>
-        <code>--min-severity LEVEL</code> – <code>Critical</code>, <code>High</code>, <code>Medium</code>, <code>Low</code>, <code>Info</code><br>
-        <code>--show-secrets</code> – explicitly disclose detected secret values (redacted by default)<br>
-        <em>(Removed: <code>--verbose</code>, <code>--output-format</code>, <code>--quiet</code> — replaced by the above)</em><br><br>
+        <pre><code>runtimexray analyze
+runtimexray trace
+runtimexray mem</code></pre>
 
-        <strong>Dynamic tracing features</strong><br>
-        • Fork/thread following (<code>--follow-forks</code> / <code>--no-follow-forks</code>)<br>
-        • Timeout support (<code>--timeout &lt;sec&gt;</code>)<br>
-        • eBPF backend (<code>--backend ebpf</code>) – low‑overhead, requires root<br>
-        • Sensitive file, network, and buffer detection<br>
-        • Live process-memory evidence with <code>--scan-memory</code><br>
-        • Exact-fingerprint correlation across read, independently scanned process memory, and send/socket observations<br><br>
+        <p>
+            <code>analyze</code> performs static ELF inspection.
+        </p>
 
-        <strong>Memory scanning</strong><br>
-        • <code>/proc/&lt;pid&gt;/cmdline</code> and <code>/proc/&lt;pid&gt;/environ</code><br>
-        • Password‑like strings and private key markers<br>
-        • <code>--max-pages</code> to limit scan<br><br>
+        <p>
+            <code>trace</code> performs runtime tracing using either <code>ptrace</code> or <code>eBPF</code>.
+        </p>
 
-        <strong>Extensibility</strong><br>
-        • <code>AnalyzerRegistry</code> – add custom analyzers without touching core code<br>
-        • Built‑in analyzers: hardening, dangerous APIs, sensitive files, network, memory secrets<br><br>
-
-        <strong>Tests</strong><br>
-        • 47+ CTest tests, runs on x86_64 and ARM64 (GitHub Actions)<br><br>
-
-        <strong>🧪 Experimental</strong><br>
-        • Process/event lineage and the first exact sensitive-object correlation path are implemented; transformed values, lifetime tracking, and broader correlation remain experimental<br>
-        • eBPF process‑attach (planned)<br><br>
-
-        <strong>📋 Planned</strong><br>
-        • Broader value-level lineage across copies, transformations, lifetime, and additional sinks<br>
-        • Network‑boundary detection<br>
-        • AI explanations (evidence‑first)<br>
-        • PE / Mach‑O support<br>
-        • Local and air-gapped packaging and CI workflows<br>
-        • HTML reports<br>
-        • Dynamic plugin loading (<code>.so</code>)
+        <p>
+            <code>mem</code> scans an authorized running process for supported sensitive values.
+        </p>
     </div>
+
+    <h2>Static analysis</h2>
+
+    <ul>
+        <li>ELF 32-bit and 64-bit parsing</li>
+        <li>x86_64 and ARM64 architecture detection</li>
+        <li>NX / executable-stack detection</li>
+        <li>PIE detection</li>
+        <li>RELRO detection: Disabled / Partial / Full</li>
+        <li>Stack-canary detection</li>
+        <li>Dangerous and legacy imported API detection</li>
+        <li>CWE references where justified</li>
+        <li>Text and JSON reporting</li>
+    </ul>
+
+    <h2>Dynamic tracing</h2>
+
+    <ul>
+        <li>ptrace backend</li>
+        <li>eBPF backend using Linux <code>raw_syscalls</code> tracepoints</li>
+        <li>Syscall observation</li>
+        <li>Process and thread tracking</li>
+        <li>fork / vfork / clone handling</li>
+        <li>exec tracking</li>
+        <li>Process-instance identity</li>
+        <li>Exec-generation tracking</li>
+        <li>File-access observations</li>
+        <li>Network endpoint observations</li>
+        <li>Selected syscall-buffer inspection</li>
+        <li>FD/resource tracking</li>
+        <li>Pipe identity and explicit DataFlow relationships</li>
+        <li>Optional memory scanning with <code>--scan-memory</code></li>
+    </ul>
+
+    <h2>Memory scanning</h2>
+
+    <ul>
+        <li><code>/proc/&lt;pid&gt;/cmdline</code></li>
+        <li><code>/proc/&lt;pid&gt;/environ</code></li>
+        <li>Readable process-memory mappings</li>
+        <li>Password-like values</li>
+        <li>API-key / token / secret-like values</li>
+        <li>Private-key markers</li>
+        <li>Page scan limiting with <code>--max-pages</code></li>
+    </ul>
+
+    <div class="panel panel-green">
+        <strong>Sensitive values are redacted by default.</strong>
+
+        <p>
+            RuntimeXRay uses a per-run HMAC-SHA256 fingerprint so the same exact sensitive value
+            can be correlated within one analysis without normally printing the raw secret.
+        </p>
+    </div>
+
+    <h2>Evidence correlation</h2>
+
+    <div class="panel panel-dark">
+        <strong>File → memory → socket</strong>
+
+        <p>
+            RuntimeXRay can currently correlate the same exact sensitive value across:
+        </p>
+
+        <pre><code>source file
+    ↓
+read / receive
+    ↓
+exact sensitive-value fingerprint
+    ↓
+independent process-memory observation
+    ↓
+write / send
+    ↓
+socket destination</code></pre>
+
+        <p>
+            The memory evidence must come from an independent memory scan.
+            RuntimeXRay does not invent the memory leg merely because the same value appeared in a syscall buffer.
+        </p>
+
+        <p>
+            Current confidence:
+            <code>exact-fingerprint-match</code>
+        </p>
+    </div>
+
+    <div class="panel panel-dark">
+        <strong>Cross-process pipe-chain correlation</strong>
+
+        <p>
+            RuntimeXRay can also follow the same sensitive value across multiple explicit pipe DataFlow boundaries:
+        </p>
+
+        <pre><code>Process A
+    │
+    ▼
+  pipe 1
+    │
+    ▼
+Process B
+    │
+    ▼
+  pipe 2
+    │
+    ▼
+Process C</code></pre>
+
+        <p>
+            This rule requires explicit pipe DataFlow edges, matching exact fingerprints,
+            distinct process instances, and temporally compatible transfers.
+        </p>
+
+        <p>
+            Current confidence:
+            <code>explicit-pipe-dataflow-chain</code>
+        </p>
+    </div>
+
+    <h2>Current architecture</h2>
+
+    <pre><code>Static ELF collection
+        │
+Runtime tracing ─────────┐
+        │                │
+Memory scanning ─────────┤
+                         ▼
+                   LineageGraph
+              Observations + Edges
+                         │
+                         ▼
+              DetectionRuleRegistry
+                         │
+                         ▼
+                DetectionEngine
+              Primary → Composite
+                         │
+                         ▼
+                      Findings
+                         │
+                         ▼
+                NarrativeBuilder
+                         │
+                         ▼
+                 Text / JSON report</code></pre>
+
+    <p>
+        Collectors record facts.
+        Detection rules derive security conclusions.
+        Narrative generation explains those conclusions.
+        Reporting serializes the result.
+    </p>
+
+    <h2>Built-in detection rules</h2>
+
+    <p><strong>Primary rules:</strong></p>
+
+    <ul>
+        <li><code>builtin.hardening</code></li>
+        <li><code>builtin.dangerous_api</code></li>
+        <li><code>builtin.sensitive_file_access</code></li>
+        <li><code>builtin.network</code></li>
+        <li><code>builtin.sensitive_data_presence</code></li>
+    </ul>
+
+    <p><strong>Composite rules:</strong></p>
+
+    <ul>
+        <li><code>builtin.sensitive_data_flow</code></li>
+        <li><code>builtin.sensitive_value_cross_process_pipe_chain</code></li>
+    </ul>
+
+    <h2>Extensibility</h2>
+
+    <p>
+        The current extension point is <code>IDetectionRule</code>.
+        Rules are registered through <code>DetectionRuleRegistry</code>.
+    </p>
+
+    <p>
+        Custom rules currently require source integration and rebuilding RuntimeXRay.
+    </p>
+
+    <p>
+        Dynamic external <code>.so</code> loading is planned, but is not implemented today.
+    </p>
+
+    <h2>Common options</h2>
+
+    <pre><code>--report FILE
+--json FILE
+--log-level LEVEL
+--log-file FILE
+--min-severity LEVEL
+--show-secrets</code></pre>
+
+    <p>
+        Severity levels:
+    </p>
+
+    <pre><code>Critical
+High
+Medium
+Low
+Info</code></pre>
+
+    <p>
+        Default minimum severity:
+        <code>Medium</code>
+    </p>
+
+    <h2>Tests and architecture support</h2>
+
+    <div class="panel">
+        <strong>Core suite</strong>
+
+        <p>
+            The current core test suite contains <strong>56 tests</strong>
+            when ptrace tests are enabled and eBPF runtime tests are excluded.
+        </p>
+
+        <p>
+            GitHub Actions runs the core suite natively on:
+        </p>
+
+        <ul>
+            <li>x86_64</li>
+            <li>ARM64</li>
+        </ul>
+
+        <strong>Dedicated eBPF runtime suite</strong>
+
+        <p>
+            Dedicated jobs execute <strong>16 eBPF runtime/integration tests</strong>
+            on each architecture:
+        </p>
+
+        <ul>
+            <li>x86_64</li>
+            <li>ARM64</li>
+        </ul>
+
+        <p>
+            Skipped eBPF runtime tests are treated as CI failures.
+        </p>
+    </div>
+
+    <h2>Current scope</h2>
+
+    <ul>
+        <li>Linux ELF only</li>
+        <li>x86_64 and ARM64</li>
+        <li>Authorized analysis in controlled environments</li>
+        <li>Runtime behavior is limited to executed paths</li>
+        <li>RuntimeXRay is not a sandbox</li>
+        <li>RuntimeXRay does not prove exploitability</li>
+        <li>RuntimeXRay does not prove malicious intent</li>
+        <li>RuntimeXRay does not yet provide general-purpose taint tracking</li>
+        <li>Exact secret lifetime measurement is not implemented yet</li>
+        <li>Arbitrary function-level tracing is not implemented yet</li>
+    </ul>
+
+    <h2>Experimental</h2>
+
+    <ul>
+        <li>Sensitive-object correlation beyond simple isolated findings</li>
+        <li>Cross-process sensitive-value propagation through explicit pipe chains</li>
+        <li>Memory scanning under larger workloads</li>
+        <li>Broader narrative generation</li>
+        <li>eBPF behavior across different kernel configurations</li>
+    </ul>
+
+    <h2>Planned</h2>
+
+    <ul>
+        <li>Broader sensitive-value lineage</li>
+        <li>Memory-copy correlation</li>
+        <li>Sensitive-value lifetime checkpoints</li>
+        <li>Additional sinks and sources</li>
+        <li>Additional IPC/resource models</li>
+        <li>Network-boundary policy</li>
+        <li>Static/runtime evidence correlation</li>
+        <li>Release-to-release behavioral comparison</li>
+        <li>HTML reports</li>
+        <li>External dynamic detection-rule loading</li>
+        <li>Optional evidence-grounded AI explanations</li>
+        <li>Running-process attach</li>
+        <li>PE support</li>
+        <li>Mach-O support</li>
+        <li>Improved local and air-gapped packaging</li>
+    </ul>
+
+    <h2>Evidence-first AI</h2>
+
+    <p>
+        RuntimeXRay may eventually use AI to explain existing evidence.
+        AI is not intended to become the evidence source.
+    </p>
+
+    <pre><code>Observed evidence
+       ↓
+Detection rules
+       ↓
+Structured Findings
+       ↓
+Narrative
+       ↓
+Optional AI explanation</code></pre>
+
+    <p>
+        Raw secrets must not be sent to an external AI service by default.
+    </p>
 
     <div class="badge">
         <a href="https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml">
-            <img src="https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml/badge.svg" alt="Build and Test">
+            <img
+                src="https://github.com/pmgr77/runtime-xray/actions/workflows/build.yml/badge.svg"
+                alt="Build and Test">
         </a>
     </div>
 
     <div class="links">
         <a href="https://github.com/pmgr77/runtime-xray">GitHub Repository</a>
         <a href="https://github.com/pmgr77/runtime-xray/blob/main/README.md">README</a>
+        <a href="https://github.com/pmgr77/runtime-xray/blob/main/ARCHITECTURE.md">Architecture</a>
+        <a href="https://github.com/pmgr77/runtime-xray/blob/main/THREAT_MODEL.md">Threat Model</a>
         <a href="https://github.com/pmgr77/runtime-xray/blob/main/docs/security_checks.md">Security Checks</a>
-        <a href="https://github.com/pmgr77/runtime-xray/blob/main/docs/extending_detectors.md">Extending Analyzers</a>
+        <a href="https://github.com/pmgr77/runtime-xray/blob/main/docs/extending_detectors.md">Extending Detection Rules</a>
+        <a href="https://github.com/pmgr77/runtime-xray/blob/main/docs/integration_examples.md">Integration Examples</a>
         <a href="https://github.com/pmgr77/runtime-xray/blob/main/docs/use_cases.md">Use Cases</a>
         <a href="https://github.com/pmgr77/runtime-xray/blob/main/ROADMAP.md">Roadmap</a>
+        <a href="https://github.com/pmgr77/runtime-xray/blob/main/FAQ.md">FAQ</a>
     </div>
+
+    <p class="small">
+        RuntimeXRay is under active development. Documentation describes the current project direction;
+        implementation and automated tests remain the source of truth for exact behavior.
+    </p>
+
 </body>
 </html>
