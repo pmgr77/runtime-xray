@@ -23,7 +23,6 @@
 *.dll
 *.so.*
 
-
 # Fortran module files
 *.mod
 *.smod
@@ -58,12 +57,17 @@ compile_commands.json
 *.bak
 *.swp
 
+# Python cache / bytecode
+__pycache__/
+*.pyc
+*.pyo
+
 # vcpkg
 vcpkg_installed/
 
-# debug information files
+# Debug information files
 *.dwo
 
-# test output & cache
+# Test output & cache
 Testing/
 .cache/
