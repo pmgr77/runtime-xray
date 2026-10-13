@@ -1,81 +1,669 @@
-# Integration Examples
+# RuntimeXRay Integration Examples
 
-RuntimeXRay supports machine‑readable JSON output for easy integration into CI/CD pipelines, monitoring systems, and custom tooling.
+RuntimeXRay provides structured JSON output for integration with:
 
-## JSON Report
+- CI/CD pipelines;
+- security gates;
+- automated report processing;
+- regression comparison;
+- custom tooling;
+- evidence visualization.
 
-Use `--json FILE` (with any subcommand) to write the JSON report to a file. Human‑readable text still goes to stdout (unless you also use `--report`).
+The current JSON schema version is:
 
-```bash
-# JSON report plus the default text report on stdout
-runtimexray trace --json report.json /bin/ls
-
-# Text report + JSON report
-runtimexray trace --report report.txt --json report.json /bin/ls
+```text
+2.0
 ```
 
-If you want JSON to be printed to stdout, suppress the human-readable report explicitly. Runtime logs remain on stderr.
+RuntimeXRay separates:
 
-```bash
-runtimexray trace --report /dev/null --json /dev/stdout /bin/ls > report.json 2> debug.log
+```text
+Human-readable report
+JSON report
+Runtime logs
 ```
 
-## Python Parsing Example
+so machine-readable output can be consumed without mixing diagnostic messages into the JSON stream.
+
+---
+
+# Basic JSON output
+
+Use:
+
+```bash
+runtimexray analyze \
+  --json report.json \
+  /bin/ls
+```
+
+This writes JSON to:
+
+```text
+report.json
+```
+
+The normal text report is still written to stdout.
+
+---
+
+# Write both text and JSON reports
+
+```bash
+runtimexray analyze \
+  --report report.txt \
+  --json report.json \
+  /bin/ls
+```
+
+This produces:
+
+```text
+report.txt
+report.json
+```
+
+Runtime logs remain separate on stderr unless `--log-file` is used.
+
+---
+
+# JSON-only stdout
+
+For shell pipelines, suppress the normal text report and direct JSON to stdout:
+
+```bash
+runtimexray analyze \
+  --report /dev/null \
+  --json /dev/stdout \
+  /bin/ls
+```
+
+Redirect it to a file:
+
+```bash
+runtimexray analyze \
+  --report /dev/null \
+  --json /dev/stdout \
+  /bin/ls \
+  > report.json
+```
+
+Keep logs separate:
+
+```bash
+runtimexray analyze \
+  --report /dev/null \
+  --json /dev/stdout \
+  --log-file runtime.log \
+  /bin/ls \
+  > report.json
+```
+
+---
+
+# Top-level JSON structure
+
+A RuntimeXRay JSON report currently contains fields such as:
+
+```json
+{
+  "schema_version": "2.0",
+  "tool": "RuntimeXRay",
+  "tool_version": "...",
+  "command": "analyze",
+  "target": "/bin/ls",
+  "started_at": "2026-10-13T12:00:00Z",
+  "duration_ms": 12,
+  "findings": [],
+  "narratives": [],
+  "summary": {},
+  "lineage": {}
+}
+```
+
+The exact content depends on the command and collected evidence.
+
+---
+
+# Common top-level fields
+
+## `schema_version`
+
+Current value:
+
+```text
+2.0
+```
+
+Consumers should check this field before assuming a particular schema.
+
+---
+
+## `tool`
+
+Tool identity.
+
+---
+
+## `tool_version`
+
+RuntimeXRay version reported by the build.
+
+---
+
+## `command`
+
+One of:
+
+```text
+analyze
+trace
+mem
+```
+
+---
+
+## `target`
+
+The analyzed binary, command, or PID representation used by the command.
+
+---
+
+## `started_at`
+
+UTC timestamp in ISO-8601 form.
+
+Example:
+
+```text
+2026-10-13T12:00:00Z
+```
+
+---
+
+## `duration_ms`
+
+Analysis duration in milliseconds.
+
+---
+
+## `findings`
+
+Array of structured security Findings.
+
+---
+
+## `narratives`
+
+Evidence-backed human-readable story structures generated from Findings and lineage evidence.
+
+---
+
+## `summary`
+
+Aggregated finding counts.
+
+---
+
+## `lineage`
+
+The collected `LineageGraph`, when present.
+
+It contains:
+
+```text
+observations
+edges
+summary
+```
+
+---
+
+# Finding structure
+
+A Finding currently contains fields such as:
+
+```json
+{
+  "finding_id": 1,
+  "rule_id": "builtin.sensitive_file_access",
+  "kind": "sensitive_resource_access",
+  "severity": "Critical",
+  "title": "Sensitive file opened",
+  "summary": "Process successfully opened a known sensitive filesystem path.",
+  "attributes": {
+    "path": "/etc/shadow",
+    "outcome": "opened",
+    "errno": 0
+  },
+  "evidence_observation_seqs": [
+    17
+  ],
+  "evidence_edges": [],
+  "supporting_finding_ids": [],
+  "cwe_ids": []
+}
+```
+
+Consumers should use the structured fields rather than parsing human-readable report text.
+
+---
+
+# Important Finding fields
+
+## `finding_id`
+
+Stable identity of the Finding inside this analysis.
+
+Composite Findings may reference earlier Findings through this value.
+
+---
+
+## `rule_id`
+
+Identifies the detection rule implementation.
+
+Example:
+
+```text
+builtin.sensitive_file_access
+```
+
+---
+
+## `kind`
+
+Semantic type of the Finding.
+
+Example:
+
+```text
+sensitive_resource_access
+```
+
+For automation, `kind` is usually more useful than matching the user-facing title.
+
+---
+
+## `severity`
+
+One of:
+
+```text
+Critical
+High
+Medium
+Low
+Info
+```
+
+---
+
+## `title`
+
+Short human-readable name.
+
+---
+
+## `summary`
+
+Concise explanation of what RuntimeXRay concluded.
+
+---
+
+## `attributes`
+
+Rule-specific structured data.
+
+Examples can include:
+
+```text
+path
+outcome
+errno
+fingerprint
+secret_type
+source_file
+socket_destination
+confidence
+resource_ids
+process_instance_ids
+```
+
+Do not assume every Finding contains the same attributes.
+
+---
+
+## `evidence_observation_seqs`
+
+Observation sequence IDs supporting the Finding.
+
+These values reference:
+
+```text
+lineage.observations[].seq
+```
+
+They are stable per-analysis identities.
+
+They are not graph vector indices.
+
+---
+
+## `evidence_edges`
+
+Explicit graph relationships supporting a Finding.
+
+Example:
+
+```json
+{
+  "from_seq": 21,
+  "to_seq": 29,
+  "relation": "dataflow"
+}
+```
+
+---
+
+## `supporting_finding_ids`
+
+Composite Findings can reference Primary Findings.
+
+Example:
+
+```json
+"supporting_finding_ids": [
+  3,
+  4,
+  5
+]
+```
+
+---
+
+## `cwe_ids`
+
+Optional CWE references.
+
+Do not assume that every Finding has a CWE.
+
+---
+
+# Summary structure
+
+RuntimeXRay generates counts by severity and semantic kind.
+
+Example:
+
+```json
+{
+  "summary": {
+    "total": 4,
+    "by_severity": {
+      "Critical": 1,
+      "High": 2,
+      "Medium": 1
+    },
+    "by_kind": {
+      "sensitive_resource_access": 1,
+      "sensitive_data_presence": 2,
+      "sensitive_data_flow": 1
+    }
+  }
+}
+```
+
+Missing severity or kind categories should normally be interpreted as zero rather than assumed to exist.
+
+---
+
+# Lineage observations
+
+The lineage graph contains observations of three types:
+
+```text
+event
+data
+static
+```
+
+Every observation has:
+
+```text
+seq
+type
+pid
+tid
+tgid
+process_instance_id
+exec_generation
+```
+
+with additional fields depending on its type.
+
+---
+
+# Event observation example
+
+```json
+{
+  "seq": 12,
+  "type": "event",
+  "pid": 4201,
+  "tid": 4201,
+  "tgid": 4201,
+  "process_instance_id": 1,
+  "exec_generation": 0,
+  "syscall": "openat",
+  "return_value": 4,
+  "is_entry": false,
+  "args": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "source": "/tmp/credentials.txt"
+}
+```
+
+Event observations may additionally contain:
+
+```text
+program
+fingerprint
+secret_type
+resource_id
+resource_type
+resource_role
+```
+
+depending on the event.
+
+---
+
+# Data observation example
+
+```json
+{
+  "seq": 25,
+  "type": "data",
+  "pid": 4201,
+  "tid": 4201,
+  "tgid": 4201,
+  "process_instance_id": 1,
+  "exec_generation": 0,
+  "data_type": "memory",
+  "fingerprint": "hmac-sha256:...",
+  "secret_type": "password",
+  "address": 140000000000000,
+  "size": 24,
+  "source": "memory",
+  "data_snippet": null
+}
+```
+
+By default:
+
+```text
+data_snippet = null
+```
+
+when the underlying snippet may contain the raw secret.
+
+Raw data is shown only when `--show-secrets` is explicitly enabled.
+
+---
+
+# Static observation example
+
+```json
+{
+  "seq": 3,
+  "type": "static",
+  "pid": -1,
+  "tid": -1,
+  "tgid": -1,
+  "process_instance_id": 0,
+  "exec_generation": 0,
+  "field": "RELRO",
+  "value": "Full",
+  "category": "hardening"
+}
+```
+
+Static observations may also contain:
+
+```text
+description
+recommendation
+cwe
+```
+
+where available.
+
+---
+
+# Lineage edges
+
+Graph relationships appear under:
+
+```text
+lineage.edges
+```
+
+Example:
+
+```json
+{
+  "from_seq": 21,
+  "to_seq": 29,
+  "relation": "dataflow",
+  "time_delta_us": 134
+}
+```
+
+Supported relation names currently include:
+
+```text
+chronological
+causality
+dataflow
+calls
+observed_in
+static_associated
+```
+
+Optional:
+
+```text
+details
+```
+
+may provide additional context.
+
+---
+
+# Important identity rule
+
+External integrations should use:
+
+```text
+seq
+```
+
+rather than array position.
+
+For example, do **not** assume:
 
 ```python
-import json
-import subprocess
-
-# Run trace with JSON output to stdout (stderr goes to debug.log)
-result = subprocess.run(
-    ["runtimexray", "trace", "--report", "/dev/null", "--json", "/dev/stdout", "/bin/ls"],
-    capture_output=True,  # captures both stdout and stderr
-    text=True
-)
-
-    # stdout contains only JSON because the text report is suppressed
-report = json.loads(result.stdout)
-
-for finding in report["findings"]:
-    if finding["severity"] in ["Critical", "High"]:
-        print(f"High severity: {finding['description']}")
-        print(f"Evidence: {finding['evidence']}")
+observations[5]
 ```
 
-## Logging and Debugging
+means observation ID 5.
 
-Runtime logs are written to stderr (or a file with `--log-file`). Use `--log-level debug` for verbose diagnostic output.
+Instead:
 
-```bash
-runtimexray trace --json report.json --log-level debug --log-file debug.log /bin/ls
+```python
+observation["seq"]
 ```
 
-You can then inspect `debug.log` to troubleshoot.
+is the stable identity used by Findings and edges.
 
-## CI/CD Integration
+---
 
-In a CI pipeline, you can:
+# Narrative structure
 
-- Generate a JSON report and parse it to fail the build if critical findings appear.
-- Keep the human‑readable report as an artifact.
+Narratives are separate from canonical Findings.
 
-```yaml
-# GitHub Actions snippet
-- name: Scan binary
-  run: |
-    runtimexray analyze --json report.json --log-level error ./myapp
-    jq -e '.findings | any(.severity == "Critical")' report.json
+A narrative may look like:
+
+```json
+{
+  "finding_index": 2,
+  "title": "Sensitive value observed across a cross-process pipe chain",
+  "fingerprint": "hmac-sha256:...",
+  "sessions": [
+    {
+      "process_instance_id": 1,
+      "exec_generation": 0,
+      "program": "/path/to/program"
+    }
+  ],
+  "statements": [
+    {
+      "text": "Sensitive value crossed a pipe boundary.",
+      "evidence_observation_seqs": [
+        21,
+        29
+      ]
+    }
+  ]
+}
 ```
 
-## Custom Analyzers
+Narratives are intended for explanation.
 
-You can extend RuntimeXRay with custom analyzers (see [Extending Analyzers](extending_detectors.md)). All findings from custom analyzers are included in the same JSON report.
+Automation should generally prefer structured Findings and lineage evidence for policy decisions.
 
-## Summary
+---
 
-- Human‑readable report: `--report FILE` (default: stdout).
-- JSON report: `--json FILE` (use `/dev/stdout` to print to stdout).
-- Runtime logs: `--log-file FILE` (default: stderr).
-- Verbose syscall traces: `--log-level debug`.
-- Secret values are redacted by default. Do not enable `--show-secrets` in normal CI; use it only for deliberate local debugging.
-- **Removed:** `--verbose`, `--output-format`, `--quiet` – their functionality is now covered by the above.
+# Trace-specific metadata
+
+A `trace` report currently includes additional fields such as:
+
+```text
+backend
+timeout_seconds
+timed_out
+child_output
+```
+
+Example:
+
+```json
+{
+  "
