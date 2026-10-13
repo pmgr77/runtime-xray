@@ -35,7 +35,7 @@ When CLA automation is enabled for a pull request, follow the bot instructions p
 
 Example:
 
-```bash id="v827vg"
+```bash
 git checkout -b my-feature
 ```
 
@@ -54,7 +54,7 @@ git checkout -b my-feature
 
 RuntimeXRay separates:
 
-```text id="lx6tzk"
+```text
 Collection
     ↓
 LineageGraph
@@ -78,7 +78,7 @@ Collectors should record what RuntimeXRay observed.
 
 Examples:
 
-```text id="3nfhvq"
+```text
 syscall
 file path
 socket endpoint
@@ -97,7 +97,7 @@ Security conclusions belong in `IDetectionRule` implementations.
 
 Examples:
 
-```text id="07vi3u"
+```text
 binary_hardening
 sensitive_resource_access
 sensitive_data_presence
@@ -124,14 +124,14 @@ For example:
 
 Good:
 
-```text id="y8yddc"
+```text
 The same exact sensitive value was observed
 in a file read, process memory, and socket-bound output.
 ```
 
 Too strong without additional proof:
 
-```text id="j8z1ve"
+```text
 The application exfiltrated a credential.
 ```
 
@@ -139,13 +139,13 @@ Likewise:
 
 Good:
 
-```text id="1vo6rk"
+```text
 Process attempted to connect to port 22.
 ```
 
 Too strong:
 
-```text id="73wof8"
+```text
 Process contacted a malicious SSH server.
 ```
 
@@ -186,7 +186,7 @@ Use clearly synthetic test values.
 
 Examples:
 
-```text id="p5y4lu"
+```text
 password=RXRAY_TEST_SECRET_123
 token=RXRAY_SYNTHETIC_TOKEN_456
 ```
@@ -201,7 +201,7 @@ New code should preserve that behavior.
 
 Prefer working with:
 
-```text id="kpgb38"
+```text
 fingerprint
 secret_type
 location
@@ -215,7 +215,7 @@ Do not log raw secret values.
 
 Avoid code such as:
 
-```cpp id="usf81e"
+```cpp
 Logger::log(
     LogLevel::Debug,
     "Secret: " + raw_secret);
@@ -243,7 +243,7 @@ RuntimeXRay uses CMake.
 
 ## Basic build without eBPF
 
-```bash id="voknfe"
+```bash
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_EBPF_BACKEND=OFF
@@ -255,7 +255,7 @@ cmake --build build -j"$(nproc)"
 
 ## Build with eBPF support
 
-```bash id="87cjcb"
+```bash
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_EBPF_BACKEND=ON
@@ -265,7 +265,7 @@ cmake --build build -j"$(nproc)"
 
 The eBPF build requires additional dependencies such as:
 
-```text id="kb7xxn"
+```text
 clang
 libbpf-dev
 libelf-dev
@@ -281,7 +281,7 @@ Run tests from the build directory through CTest.
 
 Example:
 
-```bash id="v79p6m"
+```bash
 ctest \
   --test-dir build \
   --output-on-failure
@@ -289,7 +289,7 @@ ctest \
 
 For the normal core suite:
 
-```bash id="8odr45"
+```bash
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_EBPF_BACKEND=ON \
@@ -310,7 +310,7 @@ The current core suite contains 56 tests when ptrace tests are enabled and eBPF 
 
 RuntimeXRay supports:
 
-```text id="0qfmee"
+```text
 x86_64
 ARM64
 ```
@@ -350,7 +350,7 @@ The dedicated eBPF runtime suite runs separately from the core suite.
 
 Current CI executes 16 eBPF runtime/integration tests on:
 
-```text id="y1yo0f"
+```text
 x86_64
 ARM64
 ```
@@ -369,7 +369,7 @@ eBPF payload capture is intentionally bounded.
 
 Current examples include:
 
-```text id="1qf31c"
+```text
 MAX_PATH      = 256
 MAX_PAYLOAD   = 256
 MAX_SOCKADDR  = 128
@@ -385,13 +385,13 @@ Do not write detection logic that assumes complete arbitrary-buffer capture.
 
 The current extension interface is:
 
-```text id="7u048a"
+```text
 IDetectionRule
 ```
 
 Rules are registered through:
 
-```text id="3zbwya"
+```text
 DetectionRuleRegistry
 ```
 
@@ -407,7 +407,7 @@ Use a Primary rule when the conclusion can be derived directly from graph eviden
 
 Example:
 
-```text id="j37qdu"
+```text
 Static observation
         ↓
 binary_hardening Finding
@@ -417,7 +417,7 @@ Use a Composite rule when the conclusion depends on already-classified Primary F
 
 Example:
 
-```text id="0sh0yy"
+```text
 Primary Findings
       +
 LineageGraph
@@ -433,7 +433,7 @@ Rules in the same stage do not consume one another's output.
 
 A rule should populate appropriate structured fields such as:
 
-```text id="0c1imx"
+```text
 kind
 severity
 title
@@ -447,7 +447,7 @@ cwe_ids
 
 Do not assign:
 
-```text id="qjmyx1"
+```text
 finding_id
 ```
 
@@ -461,7 +461,7 @@ inside a rule.
 
 Use:
 
-```text id="0h3ys1"
+```text
 Observation::seq
 ```
 
@@ -475,7 +475,7 @@ Do not expose graph vector indices as stable identifiers.
 
 Do not create a DataFlow conclusion merely because:
 
-```text id="cvhz8u"
+```text
 fingerprint A == fingerprint B
 ```
 
@@ -514,13 +514,13 @@ That case should **not** produce a flow Finding.
 
 Weak test:
 
-```bash id="ejjbp3"
+```bash
 grep -q "Sensitive" output.txt
 ```
 
 Better test:
 
-```text id="e39bl3"
+```text
 find exact Finding kind
         ↓
 validate attributes
@@ -544,7 +544,7 @@ RuntimeXRay tests must remain meaningful in Release builds.
 
 Do not rely on standard C/C++ `assert()` for test correctness because:
 
-```text id="2lcuq3"
+```text
 NDEBUG
 ```
 
@@ -573,7 +573,7 @@ When behavior changes, update the relevant documentation.
 
 Important files include:
 
-```text id="ad4kdh"
+```text
 README.md
 ARCHITECTURE.md
 THREAT_MODEL.md
@@ -594,7 +594,7 @@ Do not document planned behavior as if it were implemented.
 
 RuntimeXRay currently emits:
 
-```text id="qa4i7r"
+```text
 schema_version = 2.0
 ```
 
@@ -608,13 +608,13 @@ Avoid silently renaming or removing fields without considering schema compatibil
 
 At minimum:
 
-```bash id="s8qn8u"
+```bash
 git diff --check
 ```
 
 Review:
 
-```bash id="cir03p"
+```bash
 git diff
 ```
 
@@ -703,7 +703,7 @@ See:
 
 Report privately to:
 
-```text id="j0tbwr"
+```text
 security@runtimexray.com
 ```
 
@@ -733,13 +733,13 @@ A useful RuntimeXRay contribution should help answer a security question with st
 
 When choosing between:
 
-```text id="enl8zb"
+```text
 more warnings
 ```
 
 and:
 
-```text id="oxydqt"
+```text
 better-supported conclusions
 ```
 

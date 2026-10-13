@@ -40,7 +40,7 @@ Source-level build settings are not sufficient evidence because:
 
 Run:
 
-```bash id="vkmfc4"
+```bash
 runtimexray analyze \
   --min-severity Info \
   ./myapp
@@ -48,7 +48,7 @@ runtimexray analyze \
 
 RuntimeXRay can report:
 
-```text id="49hszc"
+```text
 NX
 PIE
 RELRO
@@ -57,7 +57,7 @@ Stack Canary
 
 Example:
 
-```text id="42qswy"
+```text
 NX: Enabled
 PIE: Enabled
 RELRO: Full
@@ -87,7 +87,7 @@ A new release accidentally loses a security property.
 
 For example:
 
-```text id="1m7prc"
+```text
 Release N:
 RELRO: Full
 
@@ -103,7 +103,7 @@ The source change that caused it may not obviously look security related.
 
 Generate structured JSON for each release:
 
-```bash id="otdg1m"
+```bash
 runtimexray analyze \
   --min-severity Info \
   --json release.json \
@@ -112,7 +112,7 @@ runtimexray analyze \
 
 A CI system can compare semantic Findings such as:
 
-```text id="rwikrv"
+```text
 kind = binary_hardening
 attributes.feature
 attributes.status
@@ -140,13 +140,13 @@ The team wants to know whether the final artifact references security-sensitive 
 
 Run:
 
-```bash id="mbbfes"
+```bash
 runtimexray analyze ./myapp
 ```
 
 Current detection includes categories such as:
 
-```text id="t7cq6r"
+```text
 unsafe string APIs
 shell execution
 weak crypto
@@ -158,7 +158,7 @@ legacy conversion APIs
 
 Examples:
 
-```text id="gr1du8"
+```text
 strcpy
 system
 MD5_*
@@ -205,13 +205,13 @@ The security team wants to know whether such access actually occurs during execu
 
 Run:
 
-```bash id="r4ohld"
+```bash
 runtimexray trace ./myapp
 ```
 
 RuntimeXRay can detect attempts involving classified paths such as:
 
-```text id="enhlzj"
+```text
 /etc/shadow
 /etc/sudoers
 ~/.ssh/
@@ -222,7 +222,7 @@ files containing "password"
 
 It also distinguishes outcomes such as:
 
-```text id="2ju0kx"
+```text
 opened
 denied
 failed
@@ -232,7 +232,7 @@ failed
 
 ## Example evidence
 
-```text id="oia4mn"
+```text
 Sensitive file access denied
 
 path=/etc/shadow
@@ -268,7 +268,7 @@ They want to understand what the process does at runtime.
 
 Use:
 
-```bash id="bhxpmz"
+```bash
 runtimexray trace \
   --json trace.json \
   ./third-party-app
@@ -305,7 +305,7 @@ RuntimeXRay does not need complete source code to observe supported runtime beha
 
 A process unexpectedly opens connections to services such as:
 
-```text id="y9h2su"
+```text
 SSH
 RDP
 SMB
@@ -318,7 +318,7 @@ database services
 
 RuntimeXRay currently classifies selected destination ports including:
 
-```text id="i9ctup"
+```text
 22
 3389
 445
@@ -328,7 +328,7 @@ RuntimeXRay currently classifies selected destination ports including:
 
 A Finding may look like:
 
-```text id="4myadf"
+```text
 Suspicious network connection
 
 endpoint=10.0.0.12:22
@@ -370,13 +370,13 @@ The team wants to know whether secret-like values remain observable in process m
 
 Run:
 
-```bash id="h9078k"
+```bash
 runtimexray mem <pid>
 ```
 
 RuntimeXRay scans:
 
-```text id="3a0e6a"
+```text
 /proc/<pid>/cmdline
 /proc/<pid>/environ
 readable memory mappings
@@ -384,7 +384,7 @@ readable memory mappings
 
 Current secret detection includes patterns such as:
 
-```text id="pbpd7u"
+```text
 password
 api_key
 token
@@ -397,7 +397,7 @@ private key markers
 
 ## Example Finding
 
-```text id="82bqmq"
+```text
 Sensitive data observed
 
 secret_type=password
@@ -421,7 +421,7 @@ This can reveal that a sensitive value remains observable in memory even when th
 
 A program is launched like:
 
-```bash id="mppuef"
+```bash
 ./client \
   --password=SuperSecret123
 ```
@@ -434,13 +434,13 @@ Command-line arguments may be visible through `/proc`.
 
 Run:
 
-```bash id="4b4k2c"
+```bash
 runtimexray mem <pid>
 ```
 
 RuntimeXRay scans:
 
-```text id="qzxdiu"
+```text
 /proc/<pid>/cmdline
 ```
 
@@ -467,7 +467,7 @@ Possible remediation may involve:
 
 An application receives credentials through:
 
-```text id="474d9e"
+```text
 DATABASE_PASSWORD
 API_KEY
 TOKEN
@@ -481,7 +481,7 @@ Environment variables are often convenient but may remain visible to process ins
 
 RuntimeXRay scans:
 
-```text id="4nj1gz"
+```text
 /proc/<pid>/environ
 ```
 
@@ -511,7 +511,7 @@ But those two observations alone do not prove that the secret was sent.
 
 Enable memory correlation:
 
-```bash id="jar210"
+```bash
 runtimexray trace \
   --scan-memory \
   ./myapp
@@ -519,7 +519,7 @@ runtimexray trace \
 
 RuntimeXRay can correlate:
 
-```text id="bcudcc"
+```text
 source file
     ↓
 read / receive
@@ -537,7 +537,7 @@ socket destination
 
 ## Example Finding
 
-```text id="wbg3cu"
+```text
 Sensitive object observed from file to socket
 
 source_file=/tmp/credential.txt
@@ -587,7 +587,7 @@ RuntimeXRay models pipe resources and explicit `DataFlow` edges.
 
 Example:
 
-```text id="b4p335"
+```text
 Process A
     │
     │ write(pipe 1)
@@ -609,13 +609,13 @@ The same exact sensitive-value fingerprint can be correlated across explicit pip
 
 Current higher-level Finding:
 
-```text id="y59zkb"
+```text
 Sensitive value observed across a cross-process pipe chain
 ```
 
 with attributes such as:
 
-```text id="79zoy2"
+```text
 fingerprint
 boundary_count
 session_count
@@ -661,7 +661,7 @@ An `exec` may preserve or close selected resources.
 
 RuntimeXRay models:
 
-```text id="22jb8u"
+```text
 fork
 vfork
 clone
@@ -704,7 +704,7 @@ But the developer wants evidence about the resulting artifact.
 
 ### Step 1 — static analysis
 
-```bash id="9arhji"
+```bash
 runtimexray analyze \
   --min-severity Info \
   ./generated-app
@@ -719,7 +719,7 @@ Review:
 
 ### Step 2 — runtime analysis
 
-```bash id="rx18ow"
+```bash
 runtimexray trace \
   --json trace.json \
   ./generated-app
@@ -736,13 +736,13 @@ Review:
 
 ### Step 3 — memory
 
-```bash id="rvt6a9"
+```bash
 runtimexray mem <pid>
 ```
 
 or:
 
-```bash id="r0y4ar"
+```bash
 runtimexray trace \
   --scan-memory \
   ./generated-app
@@ -768,7 +768,7 @@ A team wants a binary-security check inside CI.
 
 Generate JSON:
 
-```bash id="bml47z"
+```bash
 runtimexray analyze \
   --report /dev/null \
   --json report.json \
@@ -779,7 +779,7 @@ Then enforce policy.
 
 Example: no Critical Findings.
 
-```bash id="ifed6s"
+```bash
 jq -e '
   [
     .findings[]
@@ -805,7 +805,7 @@ A new release begins doing something security relevant that the previous release
 
 Examples:
 
-```text id="lqipgl"
+```text
 new sensitive file access
 new network destination
 new sensitive-data flow
@@ -823,7 +823,7 @@ A custom CI integration can compare selected semantic fields.
 
 For example:
 
-```text id="um5ujy"
+```text
 Finding kind
 severity
 selected attributes
@@ -843,7 +843,7 @@ A dedicated release-comparison feature is planned.
 
 An architecture document says:
 
-```text id="rapfyt"
+```text
 "This service never touches the credential file."
 
 "The helper process only receives sanitized data."
@@ -861,7 +861,7 @@ Run the relevant workload and inspect evidence.
 
 Example questions:
 
-```text id="wgdgvs"
+```text
 Was the file opened?
 Was the value observed across the pipe?
 Was a connection attempted?
@@ -896,7 +896,7 @@ The investigator wants to quickly identify:
 
 Use:
 
-```bash id="s67yh5"
+```bash
 runtimexray trace \
   --json incident.json \
   --log-level debug \
@@ -906,7 +906,7 @@ runtimexray trace \
 
 Optionally add:
 
-```text id="5dirge"
+```text
 --scan-memory
 ```
 
@@ -972,7 +972,7 @@ A researcher wants to test how a compiled application handles secrets without mo
 
 Use controlled synthetic credentials such as:
 
-```text id="avpzuv"
+```text
 password=RXRAY_TEST_VALUE_123
 ```
 
@@ -1005,7 +1005,7 @@ By default, secret values are redacted.
 
 Reports contain correlation metadata such as:
 
-```text id="4o2nlh"
+```text
 fingerprint
 secret_type
 length
@@ -1021,7 +1021,7 @@ instead of the raw secret.
 
 Only when the user deliberately enables:
 
-```text id="51f33z"
+```text
 --show-secrets
 ```
 
@@ -1039,7 +1039,7 @@ This allows evidence correlation without making the security report itself a cre
 
 RuntimeXRay's current extension point is:
 
-```text id="trqq8b"
+```text
 IDetectionRule
 ```
 
@@ -1051,7 +1051,7 @@ A company can integrate a custom rule that inspects the `LineageGraph`.
 
 Acme applications must never access:
 
-```text id="4f7mo2"
+```text
 /opt/acme/master-credentials/
 ```
 
@@ -1059,7 +1059,7 @@ Acme applications must never access:
 
 ## Example Primary rule
 
-```cpp id="61tcnl"
+```cpp
 #include "idetection_rule.hpp"
 
 class AcmeCredentialPathRule
@@ -1163,7 +1163,7 @@ RuntimeXRay can become organization-aware without hard-coding every policy into 
 
 An internal application is allowed to connect only to:
 
-```text id="fxvdm2"
+```text
 10.20.0.0/16
 ```
 
@@ -1175,7 +1175,7 @@ but the built-in `NetworkRule` only knows fixed security-sensitive ports.
 
 A custom rule can inspect `connect` observations and compare:
 
-```text id="524y8j"
+```text
 observation.source
 ```
 
@@ -1185,7 +1185,7 @@ against organization-specific policy.
 
 ## Example semantic result
 
-```text id="iiup89"
+```text
 kind=network_policy_violation
 
 destination=203.0.113.5:443
@@ -1214,13 +1214,13 @@ A security team wants to detect a higher-level pattern:
 
 A Composite rule can inspect Primary Findings such as:
 
-```text id="2ac3fu"
+```text
 kind=sensitive_resource_access
 ```
 
 and produce:
 
-```text id="6gzmc7"
+```text
 kind=credential_reconnaissance
 ```
 
@@ -1234,13 +1234,13 @@ This avoids duplicating basic sensitive-file classification logic.
 
 Primary rules answer:
 
-```text id="fap64g"
+```text
 Was this resource sensitive?
 ```
 
 Composite rules can answer:
 
-```text id="etz4me"
+```text
 Does the collection of Findings represent a higher-level pattern?
 ```
 
@@ -1254,7 +1254,7 @@ An organization uses credential formats that generic secret detection does not r
 
 Example:
 
-```text id="q2rawr"
+```text
 ACME-PROD-CRED-...
 ```
 
@@ -1268,7 +1268,7 @@ A custom detection rule can only consume evidence that collectors have already p
 
 Therefore supporting a new secret format may require:
 
-```text id="gka91f"
+```text
 collector / secret-extractor extension
 +
 detection rule
@@ -1296,7 +1296,7 @@ A security architecture assumes that a sensitive value moves only between specif
 
 Use process identity:
 
-```text id="w4u8k4"
+```text
 process_instance_id
 exec_generation
 ```
@@ -1305,7 +1305,7 @@ alongside resource and DataFlow evidence.
 
 A custom rule can enforce an expected path such as:
 
-```text id="5e33b2"
+```text
 frontend
    ↓
 sanitizer
@@ -1341,7 +1341,7 @@ A sensitive descriptor should not survive an `exec`.
 
 RuntimeXRay models:
 
-```text id="twv614"
+```text
 FD inheritance
 FD_CLOEXEC
 exec_generation
@@ -1366,7 +1366,7 @@ Applications sometimes accidentally print credentials.
 
 Example:
 
-```text id="azmy3c"
+```text
 password=ProductionSecret
 ```
 
@@ -1376,7 +1376,7 @@ password=ProductionSecret
 
 Supported output syscalls such as:
 
-```text id="a0ygpk"
+```text
 write
 writev
 ```
@@ -1418,7 +1418,7 @@ Compare whether the previous evidence remains.
 
 For example:
 
-```text id="3yb88b"
+```text
 Before:
 cross-process pipe-chain Finding exists
 
@@ -1448,7 +1448,7 @@ A team wants to understand whether both backends observe the same security scena
 
 Run:
 
-```bash id="47hmjx"
+```bash
 runtimexray trace \
   --backend ptrace \
   --json ptrace.json \
@@ -1457,7 +1457,7 @@ runtimexray trace \
 
 and:
 
-```bash id="8k76jw"
+```bash
 sudo runtimexray trace \
   --backend ebpf \
   --json ebpf.json \
@@ -1485,13 +1485,13 @@ Backend events may differ in implementation detail.
 
 A useful comparison asks:
 
-```text id="fgtfvq"
+```text
 Did both backends detect the same supported security condition?
 ```
 
 not:
 
-```text id="64oeb1"
+```text
 Did both produce exactly the same internal event stream?
 ```
 
@@ -1566,13 +1566,13 @@ The binary itself becomes the security-review subject.
 
 Application documentation says:
 
-```text id="iil596"
+```text
 "No credentials are stored in memory."
 ```
 
 RuntimeXRay observes:
 
-```text id="q3ptmv"
+```text
 Sensitive data observed
 location=memory
 ```
@@ -1608,7 +1608,7 @@ The developer disputes the result because the statement is too abstract.
 
 Present evidence:
 
-```text id="b7s1ev"
+```text
 source_file
 read event
 memory observation
@@ -1639,7 +1639,7 @@ Another internal security system needs structured runtime evidence.
 
 Generate:
 
-```bash id="9ryjhd"
+```bash
 runtimexray trace \
   --report /dev/null \
   --json /dev/stdout \
@@ -1648,7 +1648,7 @@ runtimexray trace \
 
 Consume:
 
-```text id="1fwq48"
+```text
 findings
 lineage.observations
 lineage.edges
@@ -1674,7 +1674,7 @@ RuntimeXRay's rule architecture allows local security knowledge to be encoded as
 
 Possible examples:
 
-```text id="mbi0w3"
+```text
 forbidden file paths
 forbidden destination ranges
 required hardening
@@ -1694,7 +1694,7 @@ Dynamic `.so` loading is planned but not currently implemented.
 
 A strong RuntimeXRay use case has:
 
-```text id="65myo8"
+```text
 security question
         ↓
 observable evidence
@@ -1706,7 +1706,7 @@ structured Finding
 
 Example:
 
-```text id="ru3oyj"
+```text
 Question:
 Did the same credential cross two process boundaries?
 
@@ -1729,7 +1729,7 @@ sensitive_value_cross_process_pipe_chain
 
 Weak:
 
-```text id="kxjj7h"
+```text
 Find the word "password"
 somewhere
 +
@@ -1751,7 +1751,7 @@ Not all correlation evidence is equally strong.
 
 A useful conceptual hierarchy is:
 
-```text id="y9xi5m"
+```text
 same execution
       ↓
 same process
@@ -1791,7 +1791,7 @@ These belong to future work or to other specialized tools.
 
 A future capability may answer:
 
-```text id="amb8lx"
+```text
 When was this sensitive value first observed?
 
 At which checkpoints was it still present?
@@ -1807,7 +1807,7 @@ The first implementation should use evidence checkpoints rather than claiming ex
 
 A future policy layer may support rules such as:
 
-```text id="ecyk2s"
+```text
 This application may contact only:
 *.company.internal
 ```
@@ -1822,7 +1822,7 @@ Today, RuntimeXRay does not know application-specific expected destinations.
 
 A dedicated comparison mode could answer:
 
-```text id="6q3fh8"
+```text
 What security-relevant behavior changed between release A and B?
 ```
 
@@ -1843,7 +1843,7 @@ This is a high-value future CI/CD direction.
 
 Future uprobes or targeted instrumentation could add evidence such as:
 
-```text id="u4hpl7"
+```text
 secret observed
      ↓
 cryptographic API
@@ -1859,7 +1859,7 @@ Such capabilities should integrate into the same `LineageGraph` rather than crea
 
 Potential future IPC models include:
 
-```text id="5hub16"
+```text
 Unix domain sockets
 socketpair
 shared memory
@@ -1876,7 +1876,7 @@ Each should use explicit resource identity where possible.
 
 RuntimeXRay is complementary to:
 
-```text id="d9d1bs"
+```text
 SAST
 dependency scanners
 checksec
@@ -1890,7 +1890,7 @@ sandbox systems
 
 Examples:
 
-```text id="3dyz2p"
+```text
 SAST:
 What may happen?
 
@@ -1912,7 +1912,7 @@ AI explanation is a planned presentation capability.
 
 A safe future workflow is:
 
-```text id="zhzmgx"
+```text
 Lineage evidence
        ↓
 Detection rules
@@ -1941,7 +1941,7 @@ Raw secret values should not be sent to external AI providers by default.
 
 If future AI integration exists, the default input should be:
 
-```text id="dwn34t"
+```text
 redacted evidence
 fingerprints
 metadata
@@ -1960,7 +1960,7 @@ If the necessary evidence does not exist in the `LineageGraph`, a new collector 
 
 The correct order is:
 
-```text id="pqtjsm"
+```text
 Need new fact?
     ↓
 improve collection
@@ -1980,7 +1980,7 @@ If RuntimeXRay does not currently classify such values as secret observations, t
 
 Instead:
 
-```text id="mzhq0q"
+```text
 Memory collector
       ↓
 card-number extraction/classification
@@ -2000,13 +2000,13 @@ This preserves separation between collection and security conclusion.
 
 If an organization wants to detect a known string or indicator in collected data, it must first decide whether that indicator is:
 
-```text id="4c2so3"
+```text
 raw evidence classification
 ```
 
 or:
 
-```text id="1hp4eq"
+```text
 security conclusion
 ```
 
@@ -2020,7 +2020,7 @@ If existing observations are already sufficient, a rule can derive the Finding.
 
 A rule should not normally perform:
 
-```text id="cayowp"
+```text
 HTTP lookup
 LLM request
 threat-intelligence API call
@@ -2047,7 +2047,7 @@ Structured JSON makes RuntimeXRay evidence reusable.
 
 One analysis can feed:
 
-```text id="pz15rb"
+```text
 CI policy
 security review
 visualization
@@ -2066,7 +2066,7 @@ The most valuable RuntimeXRay use cases are those where several weak observation
 
 For example:
 
-```text id="cc1gr4"
+```text
 Weak:
 secret found in memory
 
@@ -2081,7 +2081,7 @@ and at a socket-bound output
 
 or:
 
-```text id="us4ig6"
+```text
 Weak:
 same secret appears in 3 processes
 

@@ -4,7 +4,7 @@ This document describes the security checks currently implemented by RuntimeXRay
 
 RuntimeXRay uses a common graph-based detection architecture for both static and runtime evidence:
 
-```text id="6sg4ji"
+```text
 Collected observations
         ↓
    LineageGraph
@@ -22,7 +22,7 @@ Detection rules derive security conclusions from those facts.
 
 The current built-in rules are:
 
-```text id="cpag4f"
+```text
 Primary:
   builtin.hardening
   builtin.dangerous_api
@@ -62,7 +62,7 @@ Composite:
 
 RuntimeXRay uses these finding severities:
 
-```text id="049zk3"
+```text
 Critical
 High
 Medium
@@ -72,13 +72,13 @@ Info
 
 The default minimum severity is:
 
-```text id="n73t3c"
+```text
 Medium
 ```
 
 This means that by default:
 
-```text id="217j71"
+```text
 Critical → shown
 High     → shown
 Medium   → shown
@@ -88,13 +88,13 @@ Info     → hidden
 
 To show all findings:
 
-```bash id="jqlkuq"
+```bash
 runtimexray analyze --min-severity Info /bin/ls
 ```
 
 To show only High and Critical:
 
-```bash id="cswg0p"
+```bash
 runtimexray analyze --min-severity High /bin/ls
 ```
 
@@ -108,14 +108,14 @@ Static ELF hardening properties are collected as `Static` observations.
 
 `HardeningRule` converts them into Findings with:
 
-```text id="wclvep"
+```text
 kind = binary_hardening
 rule_id = builtin.hardening
 ```
 
 Current severity policy is:
 
-```text id="kbwgsa"
+```text
 Disabled → High
 Partial  → Low
 Enabled / Full → Info
@@ -145,13 +145,13 @@ RuntimeXRay examines the ELF `PT_GNU_STACK` program header.
 
 If the stack segment is not marked executable, RuntimeXRay reports:
 
-```text id="sgyg68"
+```text
 NX: Enabled
 ```
 
 If executable stack permission is present:
 
-```text id="109mlc"
+```text
 NX: Disabled
 ```
 
@@ -159,7 +159,7 @@ NX: Disabled
 
 ## Severity
 
-```text id="l74ad4"
+```text
 NX: Enabled  → Info
 NX: Disabled → High
 ```
@@ -184,19 +184,19 @@ RuntimeXRay examines the ELF type.
 
 A position-independent executable is represented by:
 
-```text id="lj4qwq"
+```text
 ET_DYN
 ```
 
 RuntimeXRay reports:
 
-```text id="wawrv5"
+```text
 PIE: Enabled
 ```
 
 or:
 
-```text id="ym8gcl"
+```text
 PIE: Disabled
 ```
 
@@ -204,7 +204,7 @@ PIE: Disabled
 
 ## Severity
 
-```text id="s9a5fq"
+```text
 PIE: Enabled  → Info
 PIE: Disabled → High
 ```
@@ -219,7 +219,7 @@ RELRO protects relocation-related structures such as the Global Offset Table fro
 
 RuntimeXRay distinguishes:
 
-```text id="1t7k6n"
+```text
 Disabled
 Partial
 Full
@@ -231,7 +231,7 @@ Full
 
 Partial RELRO is identified by the presence of:
 
-```text id="ok5jmp"
+```text
 PT_GNU_RELRO
 ```
 
@@ -239,7 +239,7 @@ without immediate binding for all relocations.
 
 Example:
 
-```text id="9raov4"
+```text
 RELRO: Partial
 ```
 
@@ -251,7 +251,7 @@ Full RELRO additionally requires immediate relocation binding.
 
 RuntimeXRay checks relevant dynamic flags such as:
 
-```text id="ueebhr"
+```text
 DT_BIND_NOW
 ```
 
@@ -259,7 +259,7 @@ or equivalent `DF_BIND_NOW` behavior.
 
 Example:
 
-```text id="r0osz6"
+```text
 RELRO: Full
 ```
 
@@ -267,7 +267,7 @@ RELRO: Full
 
 ## Severity
 
-```text id="vvdd9d"
+```text
 RELRO: Disabled → High
 RELRO: Partial  → Low
 RELRO: Full     → Info
@@ -291,7 +291,7 @@ If overwritten, the process normally terminates rather than continuing with a co
 
 RuntimeXRay looks for the symbol:
 
-```text id="gfjwmz"
+```text
 __stack_chk_fail
 ```
 
@@ -311,7 +311,7 @@ It only proves that stack-protector support is referenced by the binary.
 
 ## Severity
 
-```text id="2cnd98"
+```text
 Canary: Enabled  → Info
 Canary: Disabled → High
 ```
@@ -322,13 +322,13 @@ Canary: Disabled → High
 
 The current implementation is:
 
-```text id="s1fnsv"
+```text
 DangerousApiRule
 ```
 
 with stable rule ID:
 
-```text id="fc0522"
+```text
 builtin.dangerous_api
 ```
 
@@ -338,13 +338,13 @@ It strips ELF symbol-version suffixes before classification.
 
 For example:
 
-```text id="6qik4n"
+```text
 strcpy@GLIBC_2.2.5
 ```
 
 is evaluated as:
 
-```text id="0su82e"
+```text
 strcpy
 ```
 
@@ -371,7 +371,7 @@ It does not prove:
 
 Current examples:
 
-```text id="yswq9p"
+```text
 strcpy
 strcat
 sprintf
@@ -387,7 +387,7 @@ Typical recommendation:
 
 Associated weakness category:
 
-```text id="2pdisz"
+```text
 CWE-119
 ```
 
@@ -395,7 +395,7 @@ CWE-119
 
 ## Bounded string APIs with caveats — Medium
 
-```text id="75w197"
+```text
 strncpy
 strncat
 ```
@@ -404,7 +404,7 @@ These APIs can still be misused, especially around null termination and size cal
 
 Associated weakness:
 
-```text id="2fbf33"
+```text
 CWE-120
 ```
 
@@ -412,7 +412,7 @@ CWE-120
 
 ## Shell execution — High
 
-```text id="krw81z"
+```text
 system
 popen
 ```
@@ -427,7 +427,7 @@ Use exec-style APIs with explicit argument arrays when shell interpretation is n
 
 Associated weakness:
 
-```text id="98c60e"
+```text
 CWE-78
 ```
 
@@ -435,7 +435,7 @@ CWE-78
 
 ## Temporary-file APIs — Medium
 
-```text id="lahtk5"
+```text
 mktemp
 tmpnam
 tempnam
@@ -447,7 +447,7 @@ Predictable or unsafe temporary-file naming.
 
 Recommended direction:
 
-```text id="f1l577"
+```text
 mkstemp
 ```
 
@@ -455,7 +455,7 @@ or another race-resistant temporary-file mechanism.
 
 Associated weakness:
 
-```text id="92jbui"
+```text
 CWE-377
 ```
 
@@ -463,7 +463,7 @@ CWE-377
 
 ## Weak random-number APIs — Medium
 
-```text id="lh21ow"
+```text
 rand
 random
 srand
@@ -473,7 +473,7 @@ These are not appropriate for cryptographic secrets.
 
 Recommended alternatives include:
 
-```text id="i7y3hw"
+```text
 getrandom()
 /dev/urandom
 cryptographically secure library RNGs
@@ -481,7 +481,7 @@ cryptographically secure library RNGs
 
 Associated weakness:
 
-```text id="95j7cs"
+```text
 CWE-338
 ```
 
@@ -491,14 +491,14 @@ CWE-338
 
 RuntimeXRay currently recognizes families beginning with:
 
-```text id="ep7n7i"
+```text
 MD5_
 SHA1_
 ```
 
 Associated weakness:
 
-```text id="qxb9rp"
+```text
 CWE-327
 ```
 
@@ -508,14 +508,14 @@ CWE-327
 
 Current families include:
 
-```text id="868j20"
+```text
 DES_
 RC4...
 ```
 
 Associated weakness:
 
-```text id="fybk9l"
+```text
 CWE-327
 ```
 
@@ -525,7 +525,7 @@ CWE-327
 
 Current examples include:
 
-```text id="oz8bxp"
+```text
 SSLv3_client_method
 SSLv3_server_method
 TLSv1_client_method
@@ -540,7 +540,7 @@ Use currently supported TLS versions such as TLS 1.2 or TLS 1.3.
 
 Associated weakness:
 
-```text id="raumpn"
+```text
 CWE-326
 ```
 
@@ -550,7 +550,7 @@ CWE-326
 
 Current examples:
 
-```text id="gi5mvw"
+```text
 memcpy
 memmove
 memset
@@ -562,7 +562,7 @@ RuntimeXRay flags them at Low severity because unsafe size calculations may make
 
 Associated weakness:
 
-```text id="ssxljx"
+```text
 CWE-805
 ```
 
@@ -570,7 +570,7 @@ CWE-805
 
 ## Stack allocation — Medium
 
-```text id="k01hsq"
+```text
 alloca
 ```
 
@@ -580,7 +580,7 @@ Unbounded or attacker-controlled stack allocation may exhaust stack space.
 
 Associated weakness:
 
-```text id="ke8me0"
+```text
 CWE-770
 ```
 
@@ -588,7 +588,7 @@ CWE-770
 
 ## Command-line parsing — Info
 
-```text id="mne5q5"
+```text
 getopt
 getopt_long
 ```
@@ -599,7 +599,7 @@ They are included as informational review signals around input handling.
 
 Associated weakness category:
 
-```text id="7nn8yr"
+```text
 CWE-20
 ```
 
@@ -607,7 +607,7 @@ CWE-20
 
 ## Numeric conversion — Low
 
-```text id="ewjwb4"
+```text
 atoi
 atol
 atoll
@@ -617,7 +617,7 @@ These APIs provide weak error reporting.
 
 Recommended direction:
 
-```text id="zll1ci"
+```text
 strtol
 strtoul
 ```
@@ -626,7 +626,7 @@ with explicit validation.
 
 Associated weakness:
 
-```text id="iozp9e"
+```text
 CWE-190
 ```
 
@@ -634,7 +634,7 @@ CWE-190
 
 ## Tokenization — Low
 
-```text id="rjy01n"
+```text
 strtok
 ```
 
@@ -642,7 +642,7 @@ strtok
 
 Recommended direction:
 
-```text id="o1g5mv"
+```text
 strtok_r
 ```
 
@@ -650,7 +650,7 @@ or safer parser abstractions.
 
 Associated weakness:
 
-```text id="54tp8z"
+```text
 CWE-366
 ```
 
@@ -660,21 +660,21 @@ CWE-366
 
 Current examples:
 
-```text id="gsa6ra"
+```text
 gethostbyname
 gethostbyaddr
 ```
 
 Recommended replacements:
 
-```text id="wd86x0"
+```text
 getaddrinfo
 getnameinfo
 ```
 
 Associated weakness:
 
-```text id="1jix9x"
+```text
 CWE-362
 ```
 
@@ -682,7 +682,7 @@ CWE-362
 
 ## Legacy address formatting — Low
 
-```text id="u60a14"
+```text
 inet_ntoa
 ```
 
@@ -690,13 +690,13 @@ The function uses shared static storage.
 
 Recommended replacement:
 
-```text id="zgvuz4"
+```text
 inet_ntop
 ```
 
 Associated weakness:
 
-```text id="w3pkgy"
+```text
 CWE-362
 ```
 
@@ -706,7 +706,7 @@ CWE-362
 
 The current API classification is implemented in:
 
-```text id="h6i6n2"
+```text
 src/dangerous_api_rule.cpp
 ```
 
@@ -718,25 +718,25 @@ This file, not this document, is the authoritative implementation if the two eve
 
 The current rule is:
 
-```text id="jj8cdt"
+```text
 SensitiveFileAccessRule
 ```
 
 with rule ID:
 
-```text id="28te9q"
+```text
 builtin.sensitive_file_access
 ```
 
 and semantic kind:
 
-```text id="o0q71r"
+```text
 sensitive_resource_access
 ```
 
 The rule examines supported:
 
-```text id="lmo1bu"
+```text
 open
 openat
 ```
@@ -751,7 +751,7 @@ events with resolved paths.
 
 Current path patterns include:
 
-```text id="42hgtj"
+```text
 /etc/sudoers
 /etc/shadow
 /root/
@@ -771,7 +771,7 @@ id_ed25519
 
 Paths containing strings such as:
 
-```text id="z73rda"
+```text
 secret
 token
 password
@@ -783,7 +783,7 @@ api_key
 
 ## Medium
 
-```text id="523fla"
+```text
 /etc/passwd
 /etc/group
 ```
@@ -792,7 +792,7 @@ api_key
 
 ## Low
 
-```text id="2670x6"
+```text
 /etc/hosts
 /etc/resolv.conf
 ```
@@ -801,7 +801,7 @@ api_key
 
 ## Info
 
-```text id="pwbcgo"
+```text
 /etc/hostname
 /etc/machine-id
 ```
@@ -814,13 +814,13 @@ RuntimeXRay distinguishes the syscall result.
 
 A successful open produces:
 
-```text id="6rbhzx"
+```text
 Sensitive file opened
 ```
 
 with:
 
-```text id="1pkisy"
+```text
 outcome = opened
 errno   = 0
 ```
@@ -831,14 +831,14 @@ errno   = 0
 
 For errors such as:
 
-```text id="nvjen0"
+```text
 EACCES
 EPERM
 ```
 
 the Finding becomes:
 
-```text id="yxbvv9"
+```text
 Sensitive file access denied
 ```
 
@@ -848,13 +848,13 @@ Sensitive file access denied
 
 For:
 
-```text id="xlq4o2"
+```text
 ENOENT
 ```
 
 RuntimeXRay reports:
 
-```text id="sn06si"
+```text
 Sensitive file access attempted
 ```
 
@@ -866,7 +866,7 @@ with failed outcome.
 
 Other unsuccessful opens produce:
 
-```text id="kltkb4"
+```text
 Sensitive file access failed
 ```
 
@@ -878,7 +878,7 @@ A failed access attempt is still observable security evidence.
 
 For example:
 
-```text id="lxnmaz"
+```text
 open("/etc/shadow") → -EACCES
 ```
 
@@ -892,19 +892,19 @@ But it does prove that the process attempted the operation.
 
 The current rule is:
 
-```text id="x6fg68"
+```text
 NetworkRule
 ```
 
 with rule ID:
 
-```text id="nxgbzk"
+```text
 builtin.network
 ```
 
 and Finding kind:
 
-```text id="xyfny2"
+```text
 suspicious_network_connection
 ```
 
@@ -914,7 +914,7 @@ suspicious_network_connection
 
 The rule currently examines:
 
-```text id="lxckvo"
+```text
 connect
 ```
 
@@ -924,7 +924,7 @@ It flags selected security-sensitive service ports.
 
 Current ports are:
 
-```text id="xx3z2a"
+```text
 22    SSH
 3389  RDP
 445   SMB
@@ -934,7 +934,7 @@ Current ports are:
 
 Current severity:
 
-```text id="j99ch9"
+```text
 Medium
 ```
 
@@ -964,19 +964,19 @@ It should not be interpreted automatically as malicious traffic.
 
 The current rule is:
 
-```text id="w16aev"
+```text
 SensitiveDataPresenceRule
 ```
 
 with rule ID:
 
-```text id="b4ffom"
+```text
 builtin.sensitive_data_presence
 ```
 
 and kind:
 
-```text id="f5raam"
+```text
 sensitive_data_presence
 ```
 
@@ -986,7 +986,7 @@ sensitive_data_presence
 
 Secret extraction produces `Data` observations containing:
 
-```text id="426zdl"
+```text
 data_type
 source
 secret_type
@@ -997,7 +997,7 @@ address, where relevant
 
 A `SensitiveDataPresenceRule` Finding is created when a `Data` observation has both:
 
-```text id="l43b1f"
+```text
 secret_type
 fingerprint
 ```
@@ -1008,7 +1008,7 @@ fingerprint
 
 Sensitive-data presence is currently:
 
-```text id="cuwmgy"
+```text
 High
 ```
 
@@ -1018,7 +1018,7 @@ High
 
 Typical attributes include:
 
-```text id="cb218g"
+```text
 secret_type
 location
 fingerprint
@@ -1034,7 +1034,7 @@ The address is included only when available.
 
 Current text-based detection recognizes keyword/value forms including keywords such as:
 
-```text id="1ir6h1"
+```text
 password
 passwd
 pwd
@@ -1054,7 +1054,7 @@ auth
 
 Typical forms include:
 
-```text id="t4utog"
+```text
 password=value
 api_key:value
 token="value"
@@ -1070,7 +1070,7 @@ The extractor bounds normal value extraction to 128 characters.
 
 RuntimeXRay currently recognizes PEM-style markers including:
 
-```text id="csoqox"
+```text
 -----BEGIN RSA PRIVATE KEY-----
 -----BEGIN OPENSSH PRIVATE KEY-----
 -----BEGIN EC PRIVATE KEY-----
@@ -1087,7 +1087,7 @@ If the end marker is unavailable, the detector uses a bounded observed region.
 
 Sensitive data may be observed from sources such as:
 
-```text id="yz217y"
+```text
 memory
 cmdline
 environment
@@ -1102,25 +1102,25 @@ The exact `data_type` records where the evidence was observed.
 
 The current composite rule is:
 
-```text id="sux3sm"
+```text
 SensitiveDataFlowRule
 ```
 
 with rule ID:
 
-```text id="m6ht4q"
+```text
 builtin.sensitive_data_flow
 ```
 
 and kind:
 
-```text id="r5aw0n"
+```text
 sensitive_data_flow
 ```
 
 Current severity:
 
-```text id="g0wqjn"
+```text
 High
 ```
 
@@ -1130,7 +1130,7 @@ High
 
 The current rule looks for:
 
-```text id="8p6wek"
+```text
 file
   ↓
 read / recvfrom
@@ -1192,7 +1192,7 @@ The rule does not create a fake memory relationship merely because the same secr
 
 Therefore the current end-to-end correlation normally requires:
 
-```bash id="70kxif"
+```bash
 runtimexray trace --scan-memory /path/to/application
 ```
 
@@ -1202,13 +1202,13 @@ runtimexray trace --scan-memory /path/to/application
 
 A correlated Finding has title:
 
-```text id="gu5c0l"
+```text
 Sensitive object observed from file to socket
 ```
 
 and attributes such as:
 
-```text id="35ys5g"
+```text
 fingerprint
 secret_type
 source_file
@@ -1220,7 +1220,7 @@ send_syscall
 
 Current confidence string:
 
-```text id="dvrjj0"
+```text
 exact-fingerprint-match
 ```
 
@@ -1248,25 +1248,25 @@ Even then, the result should be interpreted as an observed sensitive-value path,
 
 The current rule is:
 
-```text id="1v8yxn"
+```text
 SensitiveValueCrossProcessPipeChainRule
 ```
 
 with rule ID:
 
-```text id="vb20ab"
+```text
 builtin.sensitive_value_cross_process_pipe_chain
 ```
 
 and kind:
 
-```text id="2erntj"
+```text
 sensitive_value_cross_process_pipe_chain
 ```
 
 Current severity:
 
-```text id="cxevc4"
+```text
 High
 ```
 
@@ -1278,7 +1278,7 @@ This rule detects the same sensitive value across two or more explicit cross-pro
 
 Example:
 
-```text id="mj2w4w"
+```text
 Process A
    │
    │ write(pipe 1)
@@ -1324,7 +1324,7 @@ Two pipe boundaries may be connected only when:
 
 Execution session identity uses:
 
-```text id="p1amsh"
+```text
 process_instance_id
 exec_generation
 ```
@@ -1335,7 +1335,7 @@ exec_generation
 
 A Finding requires at least:
 
-```text id="zpmuw0"
+```text
 2 cross-process pipe boundaries
 ```
 
@@ -1347,7 +1347,7 @@ A single process-to-process pipe transfer remains graph evidence but does not pr
 
 The chain Finding records:
 
-```text id="zl8kwb"
+```text
 evidence_observation_seqs
 evidence_edges
 supporting_finding_ids
@@ -1365,7 +1365,7 @@ This is important:
 
 The rule records information including:
 
-```text id="e5n60k"
+```text
 fingerprint
 boundary_count
 session_count
@@ -1378,7 +1378,7 @@ secret_types
 
 Current confidence value:
 
-```text id="qr49u0"
+```text
 explicit-pipe-dataflow-chain
 ```
 
@@ -1388,7 +1388,7 @@ explicit-pipe-dataflow-chain
 
 Matching `sensitive_data_presence` Findings may be referenced through:
 
-```text id="v8kb3m"
+```text
 supporting_finding_ids
 ```
 
@@ -1405,13 +1405,13 @@ A disconnected observation of the same value is not attached merely because its 
 
 The standalone command is:
 
-```bash id="c1ghdc"
+```bash
 runtimexray mem <pid>
 ```
 
 Current sources include:
 
-```text id="coh465"
+```text
 /proc/<pid>/cmdline
 /proc/<pid>/environ
 readable memory mappings
@@ -1423,13 +1423,13 @@ readable memory mappings
 
 Use:
 
-```bash id="ikwd8b"
+```bash
 runtimexray mem --max-pages 500 <pid>
 ```
 
 Current default:
 
-```text id="9h3juc"
+```text
 1000 pages
 ```
 
@@ -1439,13 +1439,13 @@ Current default:
 
 Use:
 
-```bash id="ds0w5y"
+```bash
 runtimexray mem --max-pages 0 <pid>
 ```
 
 This still examines:
 
-```text id="ed5bfe"
+```text
 cmdline
 environment
 ```
@@ -1477,7 +1477,7 @@ RuntimeXRay computes a per-run HMAC-SHA256 fingerprint from the exact extracted 
 
 Conceptually:
 
-```text id="t1v1y0"
+```text
 exact secret
      ↓
 per-run HMAC-SHA256
@@ -1509,13 +1509,13 @@ Raw secret content is hidden by default.
 
 To deliberately disclose secret values:
 
-```bash id="hlix2u"
+```bash
 runtimexray mem --show-secrets <pid>
 ```
 
 or:
 
-```bash id="8gwnt5"
+```bash
 runtimexray trace --show-secrets /path/to/application
 ```
 
@@ -1529,7 +1529,7 @@ Do not use it in normal CI.
 
 RuntimeXRay separates three concepts:
 
-```text id="o796yl"
+```text
 Findings
 Runtime logs
 Detailed syscall diagnostics
@@ -1541,13 +1541,13 @@ Detailed syscall diagnostics
 
 Default:
 
-```text id="ch9cf7"
+```text
 stdout
 ```
 
 or:
 
-```bash id="jlpg0o"
+```bash
 --report report.txt
 ```
 
@@ -1557,7 +1557,7 @@ or:
 
 Use:
 
-```bash id="56lhni"
+```bash
 --json report.json
 ```
 
@@ -1571,7 +1571,7 @@ Runtime logs go to stderr by default.
 
 Use:
 
-```bash id="bih35l"
+```bash
 --log-level debug
 ```
 
@@ -1579,7 +1579,7 @@ for detailed diagnostics.
 
 Write logs separately with:
 
-```bash id="txs3b3"
+```bash
 --log-file debug.log
 ```
 
@@ -1610,7 +1610,7 @@ eBPF captures supported information in the kernel tracing path.
 
 Current kernel-side limits include:
 
-```text id="k0rfdw"
+```text
 MAX_PATH      = 256
 MAX_PAYLOAD   = 256
 MAX_SOCKADDR  = 128
@@ -1642,7 +1642,7 @@ Examples:
 
 ## Binary hardening
 
-```text id="ya2lku"
+```text
 PIE: Disabled
 ```
 
@@ -1658,7 +1658,7 @@ Does not mean:
 
 ## Dangerous API
 
-```text id="n6iyab"
+```text
 Dangerous API: system
 ```
 
@@ -1674,7 +1674,7 @@ Does not mean:
 
 ## Sensitive file
 
-```text id="t3w8xi"
+```text
 Sensitive file access denied
 ```
 
@@ -1690,7 +1690,7 @@ Does not mean:
 
 ## Network
 
-```text id="w5uwbh"
+```text
 Suspicious network connection
 ```
 
@@ -1706,7 +1706,7 @@ Does not mean:
 
 ## Sensitive-data presence
 
-```text id="s9vx0j"
+```text
 Sensitive data observed
 ```
 
@@ -1722,7 +1722,7 @@ Does not mean:
 
 ## Sensitive-data flow
 
-```text id="dqkxov"
+```text
 Sensitive object observed from file to socket
 ```
 
@@ -1738,7 +1738,7 @@ Does not mean:
 
 ## Pipe chain
 
-```text id="ufdgrq"
+```text
 Sensitive value observed across a cross-process pipe chain
 ```
 
@@ -1790,7 +1790,7 @@ The implementation and automated tests remain the ultimate source of truth for c
 
 Important implementation files include:
 
-```text id="aow5uw"
+```text
 src/hardening_rule.cpp
 src/dangerous_api_rule.cpp
 src/sensitive_file_access_rule.cpp
