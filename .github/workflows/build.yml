@@ -9,24 +9,28 @@ on:
 jobs:
   build:
     name: Build & Test (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for ARM64
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Build and Test
         run: |
-          PLATFORM=${{ matrix.arch == 'arm64' && 'linux/arm64' || 'linux/amd64' }}
+          PLATFORM=${{ matrix.platform }}
+
           if [ "${{ matrix.arch }}" = "arm64" ]; then
               CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_EBPF_BACKEND=OFF -DSKIP_PTRACE_TESTS=ON -DSKIP_EBPF_TESTS=ON"
           else
@@ -38,13 +42,29 @@ jobs:
             ubuntu:24.04 \
             bash -c "
               set -e
+
               apt-get update
-              apt-get install -y build-essential cmake g++ git python3 libssl-dev jq
+              apt-get install -y \
+                build-essential \
+                cmake \
+                g++ \
+                git \
+                python3 \
+                libssl-dev \
+                jq
+
               if [ \"${{ matrix.arch }}\" = \"x86_64\" ]; then
-                apt-get install -y libbpf-dev clang libelf-dev zlib1g-dev xxd
+                apt-get install -y \
+                  libbpf-dev \
+                  clang \
+                  libelf-dev \
+                  zlib1g-dev \
+                  xxd
               fi
+
               cmake -B build $CMAKE_FLAGS
               cmake --build build -j\$(nproc)
+
               cd build
               ctest --output-on-failure
             "
