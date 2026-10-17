@@ -24,6 +24,7 @@
 
 #include "memory_scanner.hpp"
 #include "secret_extractor.hpp"
+#include "memory_region_policy.hpp"
 #include "logger.hpp"
 
 #include <chrono>
@@ -123,39 +124,17 @@ std::vector<std::string> split_nul_strings(const std::string& data) {
 std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
     std::vector<MemoryRegion> regions;
     std::ifstream maps("/proc/" + std::to_string(pid) + "/maps");
-    if (!maps) return regions;
+    if (!maps) {
+        return regions;
+    }
 
     std::string line;
+
     while (std::getline(maps, line)) {
-        // Log every line from maps (for debugging)
-        Logger::log(LogLevel::Debug, "Maps line: " + line);
+        MemoryRegion region{};
 
-        // Try to parse the line manually to handle any format
-        std::istringstream iss(line);
-        uint64_t start, end;
-        char dash;
-        char perms[5] = {0};
-        uint64_t offset;
-        std::string rest;
-
-        if (!(iss >> std::hex >> start >> dash >> end >> perms >> offset)) {
-            Logger::log(LogLevel::Debug, "Failed to parse maps line: " + line);
-            continue;
-        }
-
-        // Read the rest (device, inode, pathname)
-        std::getline(iss, rest);
-        size_t pos = rest.find_first_not_of(" \t");
-        if (pos != std::string::npos) {
-            rest.erase(0, pos);
-        }
-
-        // Log every region (including non-readable)
-        Logger::log(LogLevel::Debug, "Maps entry: 0x" + std::to_string(start) + " - 0x" + std::to_string(end) + " (" + perms + ")");        
-
-        // Only include regions that are readable.
-        if (perms[0] == 'r') {
-            regions.push_back({start, end, perms, rest});
+        if (parse_readable_memory_region(line, region)) {
+            regions.push_back(std::move(region));
         }
     }
     return regions;
@@ -183,6 +162,10 @@ void scan_memory_for_secrets(
         }
         return; // No readable regions or failed to read maps
     }
+
+    // Prioritize memory likely to contain runtime credentials.
+    // The existing page and observation limits remain unchanged.
+    prioritize_memory_regions(regions);
 
     // Compute total pages
     size_t total_pages = 0;

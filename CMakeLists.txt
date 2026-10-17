@@ -37,6 +37,7 @@ set(RUNTIMEXRAY_SOURCES
     src/syscall_names.cpp
     src/dynamic_analysis.cpp
     src/memory_scanner.cpp
+    src/memory_region_policy.cpp
     src/finding_filter.cpp
     src/reporter.cpp
     src/finding_reporter.cpp
@@ -258,6 +259,7 @@ add_test(NAME check_json_mem
 add_executable(test_memory_scanner_self
     tests/memory_scanner/test_memory_scanner_self.cpp
     src/memory_scanner.cpp
+    src/memory_region_policy.cpp
     src/secret_extractor.cpp
     src/netrc_extractor.cpp
     src/dynamic_analysis.cpp
@@ -271,6 +273,18 @@ add_test(NAME check_memory_scanner_self
          COMMAND $<TARGET_FILE:test_memory_scanner_self> password=cmdline_secret_test)
 set_tests_properties(check_memory_scanner_self PROPERTIES
     ENVIRONMENT "TEST_SECRET=password=env_secret_test")
+
+# Memory region parsing and prioritization tests
+add_executable(test_memory_region_priority
+    tests/unit/test_memory_region_priority.cpp
+    src/memory_region_policy.cpp
+)
+
+target_include_directories(test_memory_region_priority PRIVATE include)
+target_compile_options(test_memory_region_priority PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
+add_test(NAME check_memory_region_priority
+        COMMAND $<TARGET_FILE:test_memory_region_priority>
+)
 
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
