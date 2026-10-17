@@ -310,11 +310,45 @@ void scan_cmdline_for_secrets(
         if (!emit(args[i]))
             return;
 
-        for (const auto& [flag, keyword] : credential_flags) {
-            if (args[i] == flag && i + 1 < args.size()) {
-                std::string synthesized = keyword + "=" + args[i + 1];
-                if (!emit(synthesized))
+        // Recognize user:password arguments without fingerprinting
+        // the username as part of the credential.
+        auto emit_user_password = [&](const std::string& value) -> bool {
+            const size_t colon = value.find(':');
+
+            if (colon == std::string::npos ||
+                (colon + 1) > value.size()) {
+                return true;
+            }
+
+            return emit("password=" + value.substr(colon + 1));
+        };
+
+        if ((args[i] == "-u" ||
+            args[i] == "--user" ||
+            args[i] == "--proxy-user") &&
+            (i + 1) < args.size()) {
+
+            if (!emit_user_password(args[i+1])) {
+                return;
+            }
+        }
+
+        for (const char* prefix : {"--user=", "--proxy-user="}) {
+            const std::string p(prefix);
+
+            if (args[i].compare(0, p.size(), p) == 0) {
+                if (!emit_user_password(args[i].substr(p.size()))) {
                     return;
+                }
+            }
+        }
+
+        for (const auto& [flag, keyword] : credential_flags) {
+            if (args[i] == flag && (i + 1) < args.size()) {
+                std::string synthesized = keyword + "=" + args[i + 1];
+                if (!emit(synthesized)) {
+                    return;
+                }
                 break;
             }
         }

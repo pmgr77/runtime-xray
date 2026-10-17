@@ -44,6 +44,7 @@ namespace runtimexray {
             case RelationType::Calls:               return "calls";
             case RelationType::ObservedIn:          return "observed_in";
             case RelationType::StaticAssociated:    return "static_associated";
+            case RelationType::ObservedAt:          return "observed_at";
             default: return "unknown";
         }
     }
@@ -169,6 +170,18 @@ namespace runtimexray {
         }
     }
 
+    static const char* transformation_type_to_string(TransformationType transformation) {
+        switch (transformation) {
+            case TransformationType::None:
+                return "none";
+
+            case TransformationType::Base64Decoded:
+                return "base64_decoded";
+        }
+
+        return "unknown";
+    }
+
     static nlohmann::json serialize_observation(const Observation& obs, const ReportingOptions& opts) {
         nlohmann::json j;
 
@@ -220,6 +233,26 @@ namespace runtimexray {
             if (!obs.fingerprint.empty()) { j["fingerprint"] = obs.fingerprint; }
 
             if (!obs.secret_type.empty()) { j["secret_type"] = obs.secret_type; }
+
+            if (obs.source_event_seq != 0) {
+                j["source_event_seq"] = obs.source_event_seq;
+            }
+
+            if (obs.resource_id != 0) {
+                j["resource_id"] = obs.resource_id;
+            }
+
+            if (!obs.resource_type.empty()) {
+                j["resource_type"] = obs.resource_type;
+            }
+
+            if (!obs.resource_role.empty()) {
+                j["resource_role"] = obs.resource_role;
+            }
+
+            if (obs.transformation != TransformationType::None) {
+                j["transformation"] = transformation_type_to_string(obs.transformation);
+            }
 
             if (obs.address != 0) { j["address"] = obs.address; }
 
@@ -509,6 +542,11 @@ namespace runtimexray {
                     if (!obs.secret_type.empty()) {
                         out << " secret_type="
                             << obs.secret_type;
+                    }
+
+                    if (obs.transformation != TransformationType::None) {
+                        out << " transformation="
+                            << transformation_type_to_string(obs.transformation);
                     }
 
                     if (!obs.fingerprint.empty()) {

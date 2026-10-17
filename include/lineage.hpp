@@ -40,6 +40,11 @@ enum class ObservationType {
     Static  // static analysis finding (hardening, dangerous API)
 };
 
+enum class TransformationType {
+    None,
+    Base64Decoded
+};
+
 struct Observation {
     ObservationType type = ObservationType::Event;
     // Stable ordering key within one RuntimeXRay analysis.
@@ -77,9 +82,13 @@ struct Observation {
     std::string data_snippet;           // first 64 bytes (or less)
     std::string fingerprint;            // HMAC‑SHA256 of exact secret (for correlation)
     std::string secret_type;            // "password", "private_key", "api_key", ...
+    TransformationType transformation = TransformationType::None;
     uintptr_t address = 0;
     size_t size = 0;
     std::string source;                 // e.g., "file:/etc/passwd", "env:API_KEY"
+    // Exact syscall event whose captured buffer produced this Data observation.
+    // 0 means the observation has no directly attributable syscall event.
+    uint64_t source_event_seq = 0;
 
     // Runtime resource identity.
     //
@@ -103,12 +112,13 @@ struct Observation {
 };
 
 enum class RelationType {
-    Chronological,   // A happened before B
-    Causality,       // A caused B (fork → child process)
-    DataFlow,        // A's data was used by B (read → buffer)
-    Calls,           // Process A called syscall B
-    ObservedIn,      // Data was observed in this process/session
-    StaticAssociated // Static finding associated with a node
+    Chronological,      // A happened before B
+    Causality,          // A caused B (fork → child process)
+    DataFlow,           // A's data was used by B (read → buffer)
+    Calls,              // Process A called syscall B
+    ObservedIn,         // Data was observed in this process/session
+    StaticAssociated,   // Static finding associated with a node
+    ObservedAt          // Syscall buffer directly yielded a Data observation
 };
 
 struct LineageEdge {

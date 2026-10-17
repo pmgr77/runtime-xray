@@ -51,6 +51,7 @@ set(RUNTIMEXRAY_SOURCES
     src/sensitive_file_access_rule.cpp
     src/register_builtin_detection_rules.cpp
     src/secret_extractor.cpp
+    src/netrc_extractor.cpp
     src/sensitive_data_presence_rule.cpp
     src/hardening_rule.cpp
     src/dangerous_api_rule.cpp
@@ -175,6 +176,15 @@ target_link_libraries(test_secret_fingerprinter PRIVATE OpenSSL::Crypto)
 target_include_directories(test_secret_fingerprinter PRIVATE include)
 add_test(NAME check_secret_fingerprinter COMMAND $<TARGET_FILE:test_secret_fingerprinter>)
 
+# .netrc extractor unit tests
+add_executable(test_netrc_extractor
+    tests/unit/test_netrc_extractor.cpp
+    src/netrc_extractor.cpp
+)
+target_include_directories(test_netrc_extractor PRIVATE include)
+target_compile_options(test_netrc_extractor PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME check_netrc_extractor COMMAND $<TARGET_FILE:test_netrc_extractor>)
+
 add_executable(test_narrative_sessions
     tests/unit/test_narrative_sessions.cpp
     src/narrative.cpp
@@ -213,6 +223,7 @@ set_tests_properties(check_mem_lineage PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 2
 add_executable(test_memory_scanner
     tests/memory_scanner/test_memory_scanner.cpp
     src/secret_extractor.cpp
+    src/netrc_extractor.cpp
     src/secret_fingerprinter.cpp
     src/logger.cpp
 )
@@ -248,6 +259,7 @@ add_executable(test_memory_scanner_self
     tests/memory_scanner/test_memory_scanner_self.cpp
     src/memory_scanner.cpp
     src/secret_extractor.cpp
+    src/netrc_extractor.cpp
     src/dynamic_analysis.cpp
     src/logger.cpp
     src/secret_fingerprinter.cpp

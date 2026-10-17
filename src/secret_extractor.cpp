@@ -26,6 +26,7 @@
 
 #include "logger.hpp"
 #include "secret_fingerprinter.hpp"
+#include "netrc_extractor.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -45,6 +46,7 @@ struct SecretMatch {
     std::string value;
     std::string snippet;
     size_t offset = 0;
+    TransformationType transformation = TransformationType::None;
 };
 
 std::string clean_extracted_secret(const std::string& raw)
@@ -221,6 +223,170 @@ extract_password_matches(const std::string& data)
     return results;
 }
 
+int base64_value(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+bool decode_base64(const std::string& input, std::string& output)
+{
+    output.clear();
+
+    if (input.empty() ||
+        input.size() > 4096 ||
+        input.size() % 4 != 0) {
+        return false;
+    }
+
+    for (size_t i = 0; i < input.size(); i += 4) {
+        int v[4] = {};
+
+        for (size_t j = 0; j < 4; ++j) {
+            if (input[i + j] == '=') {
+                if ((i + 4) != input.size() || j < 2) {
+                    return false;
+                }
+
+                v[j] = -2;
+            } else {
+                v[j] = base64_value(input[i + j]);
+
+                if (v[j] < 0) {
+                    return false;
+                }
+            }
+        }
+
+        if (v[2] == -2 && v[3] != -2) {
+            return false;
+        }
+
+        const unsigned a = static_cast<unsigned>(v[0]);
+        const unsigned b = static_cast<unsigned>(v[1]);
+        const unsigned c = v[2] < 0 ? 0U : static_cast<unsigned>(v[2]);
+        const unsigned d = v[3] < 0 ? 0U : static_cast<unsigned>(v[3]);
+
+        if ((v[2] == -2 && (b & 15U) != 0) ||
+            (v[3] == -2 && v[2] != -2 && (c & 3U) != 0)) {
+            return false;
+        }
+
+        output.push_back(static_cast<char>((a << 2) | (b >> 4)));
+
+        if (v[2] != -2) {
+            output.push_back(static_cast<char>(((b & 15U) << 4) | (c >> 2)));
+        }
+
+        if (v[3] != -2) {
+            output.push_back(static_cast<char>(((c & 3U) << 6) | d));
+        }
+    }
+
+    return true;
+}
+
+std::vector<SecretMatch>
+extract_http_basic_matches(const std::string& data)
+{
+    std::vector<SecretMatch> results;
+
+    size_t start = 0;
+
+    while (start < data.size()) {
+        const size_t newline = data.find('\n', start);
+        const size_t end =
+            newline == std::string::npos ? data.size() : newline;
+
+        std::string line = data.substr(start, end - start);
+
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        std::string lowered = line;
+
+        std::transform(
+            lowered.begin(),
+            lowered.end(),
+            lowered.begin(),
+            [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+
+        size_t prefix_length = 0;
+        std::string secret_type;
+
+        if (lowered.compare(0, 14, "authorization:") == 0) {
+            prefix_length = 14;
+            secret_type = "http_basic_password";
+        } else if (lowered.compare(0, 20, "proxy-authorization:") == 0) {
+            prefix_length = 20;
+            secret_type = "http_proxy_basic_password";
+        }
+
+        if (prefix_length != 0) {
+            size_t pos = prefix_length;
+
+            while (pos < line.size() &&
+                   (line[pos] == ' ' || line[pos] == '\t')) {
+                ++pos;
+            }
+
+            if (lowered.compare(pos, 5, "basic") == 0) {
+                pos += 5;
+
+                if (pos < line.size() &&
+                    (line[pos] == ' ' || line[pos] == '\t')) {
+
+                    while (pos < line.size() &&
+                           (line[pos] == ' ' || line[pos] == '\t')) {
+                        ++pos;
+                    }
+
+                    const size_t token_start = pos;
+                    const size_t token_end = line.find_first_of(" \t", pos);
+
+                    const std::string encoded = line.substr(
+                        pos,
+                        token_end == std::string::npos
+                            ? std::string::npos
+                            : token_end - pos);
+
+                    std::string decoded;
+
+                    if (decode_base64(encoded, decoded)) {
+                        const size_t colon = decoded.find(':');
+
+                        if (colon != std::string::npos &&
+                            decoded.size() - colon - 1 >= 6) {
+
+                            results.push_back({
+                                secret_type,
+                                decoded.substr(colon + 1),
+                                "[HTTP Basic credential]",
+                                start + token_start,
+                                TransformationType::Base64Decoded // transformed!
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if (newline == std::string::npos) {
+            break;
+        }
+
+        start = newline + 1;
+    }
+
+    return results;
+}
+
 std::vector<SecretMatch>
 extract_private_key_matches(const std::string& data)
 {
@@ -300,6 +466,28 @@ std::vector<Observation> extract_secret_observations(
 
     std::vector<SecretMatch> matches = extract_password_matches(data);
 
+    // Recognize structured credentials in file-read buffers.
+    // Fingerprinting and Observation creation remain centralized here.
+    if (location == "read") {
+        const auto netrc_passwords = extract_netrc_passwords(data);
+
+        for (const auto& password : netrc_passwords) {
+            matches.push_back({
+                "password",
+                password.value,
+                "[netrc password]",
+                password.offset
+            });
+        }
+    }
+
+    auto basic_matches = extract_http_basic_matches(data);
+
+    matches.insert(
+        matches.end(),
+        std::make_move_iterator(basic_matches.begin()),
+        std::make_move_iterator(basic_matches.end()));
+
     auto private_keys = extract_private_key_matches(data);
 
     matches.insert(
@@ -336,8 +524,8 @@ std::vector<Observation> extract_secret_observations(
         observation.data_type = location;
         observation.source = location;
 
-        observation.secret_type =
-            match.type;
+        observation.secret_type = match.type;
+        observation.transformation = match.transformation;
 
         observation.fingerprint =
             std::move(fingerprint);
@@ -352,7 +540,8 @@ std::vector<Observation> extract_secret_observations(
         observation.size =
             match.value.size();
 
-        if (base_address != 0) {
+        if (base_address != 0 &&
+            match.transformation == TransformationType::None) {
             observation.address =
                 base_address + match.offset;
         }

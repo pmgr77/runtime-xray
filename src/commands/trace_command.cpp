@@ -169,11 +169,9 @@ namespace {
                     const auto& candidate =
                         graph.observations[i];
 
-                    if (candidate.type ==
-                            runtimexray::ObservationType::Event &&
+                    if (candidate.type == runtimexray::ObservationType::Event &&
                         candidate.syscall_name == "process" &&
-                        candidate.process_instance_id ==
-                            data_obs.process_instance_id) {
+                        candidate.process_instance_id == data_obs.process_instance_id) {
 
                         process_index = i;
                         break;
@@ -230,6 +228,34 @@ namespace {
                 data_obs.tgid = data_obs.pid;
             }
 
+            size_t source_event_index = SIZE_MAX;
+
+            if (data_obs.source_event_seq != 0) {
+                for (size_t i = 0; i < graph.observations.size(); ++i) {
+                    const auto& candidate = graph.observations[i];
+
+                    if (candidate.seq == data_obs.source_event_seq &&
+                        candidate.type == runtimexray::ObservationType::Event &&
+                        candidate.process_instance_id == data_obs.process_instance_id &&
+                        candidate.exec_generation == data_obs.exec_generation) {
+
+                        source_event_index = i;
+
+                        data_obs.resource_id = candidate.resource_id;
+                        data_obs.resource_type = candidate.resource_type;
+                        data_obs.resource_role = candidate.resource_role;
+
+                        // Preserve the exact file or endpoint associated with
+                        // the source syscall, when known.
+                        if (!candidate.source.empty()) {
+                            data_obs.source = candidate.source;
+                        }
+
+                        break;
+                    }
+                }
+            }
+
             const size_t data_index = runtimexray::append_observation(graph, std::move(data_obs));
 
             runtimexray::LineageEdge edge;
@@ -258,6 +284,18 @@ namespace {
             edge.details = "Sensitive data observed in process";
 
             graph.edges.push_back(std::move(edge));
+
+            if (source_event_index != SIZE_MAX) {
+                runtimexray::LineageEdge evidence_edge;
+
+                evidence_edge.from_index = source_event_index;
+                evidence_edge.to_index = data_index;
+                evidence_edge.relation = runtimexray::RelationType::ObservedAt;
+
+                evidence_edge.details = "Secret extracted from the syscall's captured buffer";
+
+                graph.edges.push_back(std::move(evidence_edge));
+            }
         }
     }
 
@@ -664,6 +702,7 @@ namespace runtimexray {
             // because a secret read by a child is resident in the child's memory, not
             // the parent's.
             std::unordered_set<pid_t> memory_scanned_pids;
+            std::unordered_set<pid_t> startup_scanned_pids;
 
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // Feed the analyzer first. It creates the entry observation and later
@@ -677,6 +716,31 @@ namespace runtimexray {
                 if (ev.type != TraceEventType::Syscall) {
                     return;
                 }
+
+                // Capture argv/environment on the first observed syscall entry,
+                // before the application gets an opportunity to erase its argv.
+                if (scan_memory_ &&
+                    ev.is_entry &&
+                    startup_scanned_pids.insert(ev.pid).second)
+                {
+                    const size_t before = secret_observations.size();
+
+                    scan_cmdline_for_secrets(ev.pid, secret_observations, 50);
+
+                    const size_t added = secret_observations.size() - before;
+
+                    if (added < 50) {
+                        scan_environ_for_secrets(ev.pid, secret_observations, 50 - added);
+                    }
+
+                    Logger::log(
+                        LogLevel::Info,
+                        "Early credential scan PID " + std::to_string(ev.pid) +
+                        ": " +
+                        std::to_string(secret_observations.size() - before) +
+                        " observations");
+                }
+
                 // This callback runs during the trace
                 const long num = static_cast<long>(ev.syscall_number);
 
@@ -697,6 +761,7 @@ namespace runtimexray {
                     // If sensitive data is recognized in the syscall payload, stamp the
                     // syscall Observation with the exact-value fingerprint for later
                     // graph-based correlation.
+                    const size_t outbound_before = secret_observations.size();
                     std::string payload_fingerprint;
 
                     if (std::strcmp(syscall_name, "write") == 0) {
@@ -722,11 +787,43 @@ namespace runtimexray {
                             secret_observations);
                     }
 
+                    if (const auto event_seq = lineage_analyzer.pending_event_seq(ev.pid, ev.tid)) {
+                        for (size_t i = outbound_before; i < secret_observations.size(); ++i) {
+                            secret_observations[i].source_event_seq = *event_seq;
+                        }
+                    }
+
                     if (!payload_fingerprint.empty()) {
                         lineage_analyzer.set_pending_event_fingerprint(
                             ev.pid,
                             ev.tid,
                             payload_fingerprint);
+                    }
+
+                    // Scan while the process is stopped at a syscall entry.
+                    // A sendto triggers scanning even if no secret was recognized,
+                    // avoiding complete dependence on prior detection.
+                    if (scan_memory_ &&
+                        (std::strcmp(syscall_name, "sendto") == 0 ||
+                        !payload_fingerprint.empty()) &&
+                        memory_scanned_pids.insert(ev.pid).second)
+                    {
+                        const size_t before = secret_observations.size();
+                        size_t pages_scanned = 0;
+
+                        scan_process_for_secrets(
+                            ev.pid,
+                            secret_observations,
+                            50,
+                            1000,
+                            &pages_scanned);
+
+                        Logger::log(
+                            LogLevel::Info,
+                            "Live memory scan PID " + std::to_string(ev.pid) +
+                            ": pages=" + std::to_string(pages_scanned) +
+                            ", observations=" +
+                            std::to_string(secret_observations.size() - before));
                     }
 
                     std::string resolved;
@@ -848,9 +945,13 @@ namespace runtimexray {
                                 ev.tid,
                                 extracted.front().fingerprint);
 
+                            const auto event_seq = lineage_analyzer.last_exit_event_seq(ev.pid, ev.tid);
+
                             for (auto& observation : extracted) {
-                                secret_observations.push_back(
-                                    std::move(observation));
+                                if (event_seq) {
+                                    observation.source_event_seq = *event_seq;
+                                }
+                                secret_observations.push_back(std::move(observation));
                             }
                         }
 
