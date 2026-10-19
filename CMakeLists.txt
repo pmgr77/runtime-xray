@@ -38,6 +38,7 @@ set(RUNTIMEXRAY_SOURCES
     src/dynamic_analysis.cpp
     src/memory_scanner.cpp
     src/memory_region_policy.cpp
+    src/memory_scan_coordinator.cpp
     src/finding_filter.cpp
     src/reporter.cpp
     src/finding_reporter.cpp
@@ -286,6 +287,55 @@ add_test(NAME check_memory_region_priority
         COMMAND $<TARGET_FILE:test_memory_region_priority>
 )
 
+# ---------------------------------------------------------------------------
+# Memory scan coordinator unit tests
+#
+# Validate event-driven scan authorization, process-image isolation,
+# scan-count limits, page reservations, and budget refunds.
+#
+# These tests exercise coordinator policy and accounting only.
+# They do not require ptrace, process memory access, or root privileges.
+# ---------------------------------------------------------------------------
+add_executable(test_memory_scan_coordinator
+    tests/unit/test_memory_scan_coordinator.cpp
+    src/memory_scan_coordinator.cpp
+)
+target_include_directories(test_memory_scan_coordinator PRIVATE include)
+target_compile_options(test_memory_scan_coordinator PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wsign-conversion
+)
+add_test(NAME check_memory_scan_coordinator COMMAND $<TARGET_FILE:test_memory_scan_coordinator>)
+
+# ---------------------------------------------------------------------------
+# Process-image identity and lifecycle unit tests
+#
+# Verify that LineageAnalyzer exposes stable process-image identities
+# across syscall observations, exec transitions, thread activity,
+# process termination, and simulated Linux PID reuse.
+#
+# Tests use synthetic trace events and require neither ptrace privileges
+# nor real child processes.
+# ---------------------------------------------------------------------------
+add_executable(test_process_image_identity
+    tests/unit/test_process_image_identity.cpp
+    src/lineage_analyzer.cpp
+    src/syscall_names.cpp
+    src/logger.cpp
+)
+target_include_directories(test_process_image_identity PRIVATE include)
+target_compile_options(test_process_image_identity PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wsign-conversion
+)
+add_test(NAME check_process_image_identity COMMAND $<TARGET_FILE:test_process_image_identity>)
+
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
     add_test(NAME check_ebpf_trace_smoke
@@ -491,6 +541,29 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:runtimexray>
             $<TARGET_FILE:thread_lifecycle_test>)
     set_tests_properties(check_process_instance_lifetime PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 15)
+
+    # -----------------------------------------------------------------------
+    # C1: Event-driven memory scanning integration regression
+    #
+    # Runs curl against a local Basic-auth-protected Docker registry.
+    # Verifies two independently authorized memory scans and matching
+    # read/sendto/memory evidence in the lineage graph.
+    #
+    # The script generates disposable credentials and validates actual
+    # observed_at and observed_in edge endpoints.
+    #
+    # Return code 125 indicates a missing external fixture, insufficient
+    # privileges, or an unavailable test dependency.
+    #
+    # The test may be slower than ordinary ptrace tests because it
+    # performs two bounded scans of live process memory.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_c1_memory_scan_coordinator
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_c1_memory_scan_coordinator.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_c1_memory_scan_coordinator PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
     add_test(NAME check_ptrace_fd_alias_flow
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_alias_flow.sh

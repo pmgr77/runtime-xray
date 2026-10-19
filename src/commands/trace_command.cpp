@@ -27,6 +27,7 @@
 #include "itrace_backend.hpp" // declares create_ebpf_backend()
 #include "tachikoma.hpp"
 #include "memory_scanner.hpp"
+#include "memory_scan_coordinator.hpp"
 #include "finding.hpp"
 #include "finding_filter.hpp"
 #include "logger.hpp"
@@ -54,8 +55,8 @@
 #include <optional>
 #include <unistd.h>
 #include <cstddef>
-#include <unordered_set>
-
+#include <set>
+#include <stdexcept>
 
 namespace {
 
@@ -600,6 +601,300 @@ namespace {
     }
 } // anonymous namespace
 
+/**
+ * @brief Manages memory inspection during one trace session.
+ *
+ * This class adapts semantic runtime observations to the
+ * MemoryScanCoordinator and the existing memory scanner.
+ *
+ * Responsibilities:
+ *
+ * - Resolve the current process-image identity.
+ * - Capture initial process context once per executable image.
+ * - Request bounded memory scans for semantic runtime signals.
+ * - Execute authorized scans.
+ * - Report actual page usage to the coordinator.
+ *
+ * It does not:
+ *
+ * - Classify individual syscalls.
+ * - Decide whether a payload contains sensitive information.
+ * - Create causal relationships in the lineage graph.
+ * - Implement memory-region selection or secret extraction.
+ *
+ * @note This helper belongs to the trace command rather than
+ *       the public memory-scanning API.
+ *
+ * @note Calls must be serialized. The underlying coordinator
+ *       is not thread-safe.
+ */
+class TraceMemoryScanSession {
+public:
+    /**
+     * @brief Construct a memory-scanning session.
+     *
+     * @param enabled Whether memory inspection is enabled.
+     * @param analyzer Source of active process-image identities.
+     * @param observations Destination for detected secrets.
+     */
+    TraceMemoryScanSession(
+        bool enabled,
+        const runtimexray::LineageAnalyzer& analyzer,
+        std::vector<runtimexray::Observation>& observations)
+        : enabled_(enabled),
+          analyzer_(analyzer),
+          observations_(observations)
+    {
+    }
+
+    /**
+     * @brief Capture argv and environment on first image observation.
+     *
+     * The command line and environment are inspected once for
+     * each observed process executable image.
+     *
+     * This operation does not consume memory-page budget:
+     * it uses the existing /proc cmdline and environ readers.
+     *
+     * A successful exec creates a new generation, allowing
+     * the new executable image to be inspected independently.
+     *
+     * @param ev Event that may identify a newly observed image.
+     */
+    void capture_initial_context(const runtimexray::SyscallEvent& ev)
+    {
+        if (!enabled_ ||
+            ev.type != runtimexray::TraceEventType::Syscall ||
+            !ev.is_entry) {
+            return;
+        }
+
+        const auto target = resolve_target(ev);
+
+        if (!target.has_value()) {
+            return;
+        }
+
+        // Each executable image is inspected only once.
+        //
+        // The key includes both process lifetime and
+        // executable generation, unlike a raw PID.
+        if (!startup_scanned_images_.insert(target->image).second) {
+            return;
+        }
+
+        constexpr size_t kMaxInitialObservations = 50;
+
+        const size_t before = observations_.size();
+
+        runtimexray::scan_cmdline_for_secrets(
+            target->tgid,
+            observations_,
+            kMaxInitialObservations);
+
+        const size_t produced = observations_.size() - before;
+
+        if (produced < kMaxInitialObservations) {
+            runtimexray::scan_environ_for_secrets(
+                target->tgid,
+                observations_,
+                kMaxInitialObservations - produced);
+        }
+
+        runtimexray::Logger::log(
+            runtimexray::LogLevel::Info,
+            "Initial process context inspection: TGID=" +
+                std::to_string(target->tgid) +
+            " instance=" +
+                std::to_string(target->image.process_instance_id) +
+            " generation=" +
+                std::to_string(target->image.exec_generation) +
+            " observations=" +
+                std::to_string(observations_.size() - before));
+    }
+
+    /**
+     * @brief Request and perform a semantically triggered memory scan.
+     *
+     * The caller provides an already-classified semantic reason.
+     * This method does not examine syscall names or payloads.
+     *
+     * The coordinator decides whether a new scan is authorized
+     * and determines its page and observation limits.
+     *
+     * Each authorized scan is accounted for independently,
+     * allowing different semantic reasons to request memory
+     * inspection at different moments in one process image.
+     *
+     * @param ev Event identifying the target process.
+     * @param reason Semantic reason for scanning.
+     * @param event_seq Optional originating lineage event sequence.
+     */
+    void request_scan(
+        const runtimexray::SyscallEvent& ev,
+        runtimexray::MemoryScanReason reason,
+        std::optional<uint64_t> event_seq)
+    {
+        if (!enabled_) {
+            return;
+        }
+
+        const auto target = resolve_target(ev);
+
+        if (!target.has_value()) {
+            return;
+        }
+
+        const runtimexray::MemoryScanRequest request{
+            target->image,
+            reason,
+            event_seq.value_or(0)
+        };
+
+        const auto permit = coordinator_.request_scan(request);
+
+        if (!permit.has_value()) {
+            return;
+        }
+
+        const size_t before = observations_.size();
+
+        size_t pages_scanned = 0;
+
+        // Inspect process memory only.
+        //
+        // Initial argv/environment inspection is performed
+        // separately by capture_initial_context().
+        //
+        // The memory scanner is responsible for honoring
+        // the resource limits supplied by the permit.
+        runtimexray::scan_memory_for_secrets(
+            target->tgid,
+            observations_,
+            permit->max_observations,
+            permit->max_pages,
+            &pages_scanned);
+
+        // Complete accounting even when no readable memory
+        // pages were found. An authorized attempt consumes
+        // one scan opportunity.
+        //
+        // A completion failure indicates an internal contract
+        // violation and must not be silently ignored.
+        if (!coordinator_.complete_scan(*permit, pages_scanned)) {
+            throw std::logic_error("Memory scan coordinator rejected completion");
+        }
+
+        runtimexray::Logger::log(
+            runtimexray::LogLevel::Info,
+            "Runtime memory scan: TGID=" +
+                std::to_string(target->tgid) +
+            " instance=" +
+                std::to_string(target->image.process_instance_id) +
+            " generation=" +
+                std::to_string(target->image.exec_generation) +
+            " reason=" +
+                std::string(reason_name(reason)) +
+            " pages=" +
+                std::to_string(pages_scanned) +
+            " observations=" +
+                std::to_string(observations_.size() - before));
+    }
+
+private:
+    /**
+     * @brief Resolved runtime process target.
+     *
+     * The TGID identifies the Linux address space to inspect.
+     * The process-image key identifies the budget owner.
+     */
+    struct ScanTarget {
+        pid_t tgid = -1;
+        runtimexray::ProcessImageKey image;
+    };
+
+    /**
+     * @brief Resolve an event to an active process executable image.
+     *
+     * Uses LineageAnalyzer as the single source of truth
+     * for process lifetimes and exec generations.
+     *
+     * @param ev Runtime event identifying the target.
+     * @return Resolved target, or std::nullopt if unavailable.
+     */
+    std::optional<ScanTarget> resolve_target(const runtimexray::SyscallEvent& ev) const
+    {
+        // Runtime memory requests currently originate from
+        // syscall observations. Semantic lifecycle signals
+        // can be supported here in a later integration step.
+        if (ev.type != runtimexray::TraceEventType::Syscall) {
+            return std::nullopt;
+        }
+
+        // A backend may report a worker TID in ev.pid.
+        // Memory is shared by threads of the same TGID.
+        const pid_t tgid = (ev.tgid > 0) ? ev.tgid : ev.pid;
+
+        if (tgid <= 0) {
+            return std::nullopt;
+        }
+
+        const auto image = analyzer_.active_process_image(tgid);
+
+        if (!image.has_value()) {
+            return std::nullopt;
+        }
+
+        return ScanTarget{tgid, *image};
+    }
+
+    /**
+     * @brief Convert a semantic scan reason to a diagnostic name.
+     *
+     * Used for logging only. It does not influence policy
+     * decisions or scan priority.
+     *
+     * @param reason Semantic scan reason.
+     * @return Human-readable constant string.
+     */
+    static const char* reason_name(runtimexray::MemoryScanReason reason) noexcept
+    {
+        using runtimexray::MemoryScanReason;
+
+        switch (reason) {
+            case MemoryScanReason::InitialInspection:
+                return "InitialInspection";
+
+            case MemoryScanReason::SensitiveDataDiscovery:
+                return "SensitiveDataDiscovery";
+
+            case MemoryScanReason::MemoryStateChange:
+                return "MemoryStateChange";
+
+            case MemoryScanReason::DataBoundaryCrossing:
+                return "DataBoundaryCrossing";
+
+            case MemoryScanReason::ExplicitRequest:
+                return "ExplicitRequest";
+        }
+
+        return "Unknown";
+    }
+
+    bool enabled_ = false;
+
+    const runtimexray::LineageAnalyzer& analyzer_;
+
+    std::vector<runtimexray::Observation>& observations_;
+
+    // Independent semantic scan accounting and page budgets.
+    runtimexray::MemoryScanCoordinator coordinator_;
+
+    // Initial context inspection is tracked by process image,
+    // not by PID, so exec transitions and PID reuse are handled.
+    std::set<runtimexray::ProcessImageKey> startup_scanned_images_;
+};
+
 namespace runtimexray {
 
     bool TraceCommand::parse_specific_args(const std::vector<std::string> &args) {
@@ -662,7 +957,6 @@ namespace runtimexray {
 
         std::optional<nlohmann::json> extra;
         std::string child_output;
-        std::vector<pid_t> child_pids;
 
         runtimexray::LineageAnalyzer lineage_analyzer;
         lineage_analyzer.set_initial_program(program_);
@@ -695,50 +989,29 @@ namespace runtimexray {
             config.follow_forks = follow_forks_;
             config.debug = Logger::is_enabled(LogLevel::Debug);
 
-            // Per-process set of PIDs that have already had a during-trace memory
-            // scan. Scanning is triggered by the first read that yields a fingerprint
-            // in a given process; further reads in the same process skip the scan.
-            // Different processes (fork/clone children) are scanned independently,
-            // because a secret read by a child is resident in the child's memory, not
-            // the parent's.
-            std::unordered_set<pid_t> memory_scanned_pids;
-            std::unordered_set<pid_t> startup_scanned_pids;
+            // Own runtime memory scan policy and accounting for this trace.
+            // The session uses LineageAnalyzer for process-image identity.
+            TraceMemoryScanSession memory_scans(
+                scan_memory_,
+                lineage_analyzer,
+                secret_observations);
 
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // Feed the analyzer first. It creates the entry observation and later
                 // updates the same observation on exit. All set_* calls below depend
                 // on this having already run for the current event.
                 lineage_analyzer.on_syscall_event(ev);
+
+                // Capture initial process context before the application
+                // has an opportunity to overwrite argv or environment.
+                memory_scans.capture_initial_context(ev);
+
                 //
                 // Semantic trace events are consumed by the lineage analyzer.
                 // They must not fall through into syscall-specific processing.
                 //
                 if (ev.type != TraceEventType::Syscall) {
                     return;
-                }
-
-                // Capture argv/environment on the first observed syscall entry,
-                // before the application gets an opportunity to erase its argv.
-                if (scan_memory_ &&
-                    ev.is_entry &&
-                    startup_scanned_pids.insert(ev.pid).second)
-                {
-                    const size_t before = secret_observations.size();
-
-                    scan_cmdline_for_secrets(ev.pid, secret_observations, 50);
-
-                    const size_t added = secret_observations.size() - before;
-
-                    if (added < 50) {
-                        scan_environ_for_secrets(ev.pid, secret_observations, 50 - added);
-                    }
-
-                    Logger::log(
-                        LogLevel::Info,
-                        "Early credential scan PID " + std::to_string(ev.pid) +
-                        ": " +
-                        std::to_string(secret_observations.size() - before) +
-                        " observations");
                 }
 
                 // This callback runs during the trace
@@ -800,30 +1073,16 @@ namespace runtimexray {
                             payload_fingerprint);
                     }
 
-                    // Scan while the process is stopped at a syscall entry.
-                    // A sendto triggers scanning even if no secret was recognized,
-                    // avoiding complete dependence on prior detection.
-                    if (scan_memory_ &&
-                        (std::strcmp(syscall_name, "sendto") == 0 ||
-                        !payload_fingerprint.empty()) &&
-                        memory_scanned_pids.insert(ev.pid).second)
-                    {
-                        const size_t before = secret_observations.size();
-                        size_t pages_scanned = 0;
+                    // Convert the observed outbound boundary into a semantic
+                    // memory inspection request. Scan policy belongs to the
+                    // coordinator, not to this syscall handler.
+                    if (std::strcmp(syscall_name, "sendto") == 0 ||
+                        !payload_fingerprint.empty()) {
 
-                        scan_process_for_secrets(
-                            ev.pid,
-                            secret_observations,
-                            50,
-                            1000,
-                            &pages_scanned);
-
-                        Logger::log(
-                            LogLevel::Info,
-                            "Live memory scan PID " + std::to_string(ev.pid) +
-                            ": pages=" + std::to_string(pages_scanned) +
-                            ", observations=" +
-                            std::to_string(secret_observations.size() - before));
+                        memory_scans.request_scan(
+                            ev,
+                            MemoryScanReason::DataBoundaryCrossing,
+                            lineage_analyzer.pending_event_seq(ev.pid, ev.tid));
                     }
 
                     std::string resolved;
@@ -889,7 +1148,6 @@ namespace runtimexray {
                 if ((strcmp(name, "fork") == 0 || strcmp(name, "vfork") == 0 ||
                     strcmp(name, "clone") == 0) && ev.return_value > 0) {
                     pid_t child = static_cast<pid_t>(ev.return_value);
-                    child_pids.push_back(child);
                     Logger::log(LogLevel::Debug, "Detected child PID " + std::to_string(child));
                 }
                 if (Logger::is_enabled(LogLevel::Debug)) {
@@ -955,29 +1213,14 @@ namespace runtimexray {
                             }
                         }
 
-                        // One-shot memory scan per process, while that process is still alive.
-                        // Scan the process where the read occurred (ev.pid), not the root
-                        // traced process: if the interesting read happened in a forked child,
-                        // the secret is resident in the child's memory, not the parent's.
-                        // `insert(...).second` is true only the first time we see this pid, so
-                        // the scan runs once per process.
-                        if (scan_memory_ &&
-                            sensitive_payload &&
-                            memory_scanned_pids.insert(ev.pid).second)
-                        {
-                            size_t pages_scanned = 0;
-
-                            scan_process_for_secrets(
-                                ev.pid,
-                                secret_observations,
-                                50,
-                                1000,
-                                &pages_scanned);
-
-                            Logger::log(LogLevel::Debug,
-                                "During-trace memory scan for PID " + std::to_string(ev.pid) +
-                                ": " + std::to_string(secret_observations.size()) + " observations, " +
-                                std::to_string(pages_scanned) + " pages");
+                        // Sensitive data was observed in an inbound buffer.
+                        // Its discovery may justify inspecting the current
+                        // process memory independently of earlier scans.
+                        if (sensitive_payload) {
+                            memory_scans.request_scan(
+                                ev,
+                                MemoryScanReason::SensitiveDataDiscovery,
+                                lineage_analyzer.last_exit_event_seq(ev.pid, ev.tid));
                         }
 
                         Logger::log_sensitive(
@@ -1007,44 +1250,6 @@ namespace runtimexray {
 
             // ---- Produce completed lineage graph ----
             auto graph = lineage_analyzer.produce_graph();
-
-            //
-            // Perform final memory scans for processes that were not already scanned
-            // during tracing.
-            //
-            // memory_scanned_pids prevents scanning the same process twice.
-            //
-            if (scan_memory_) {
-                const pid_t parent_pid = backend->get_pid();
-
-                if (parent_pid > 0 &&
-                    memory_scanned_pids.insert(parent_pid).second) {
-
-                    size_t pages_scanned = 0;
-
-                    scan_process_for_secrets(
-                        parent_pid,
-                        secret_observations,
-                        50,
-                        1000,
-                        &pages_scanned);
-                }
-
-                for (pid_t child : child_pids) {
-                    if (!memory_scanned_pids.insert(child).second) {
-                        continue;
-                    }
-
-                    size_t pages_scanned = 0;
-
-                    scan_process_for_secrets(
-                        child,
-                        secret_observations,
-                        50,
-                        1000,
-                        &pages_scanned);
-                }
-            }
 
             // ---- Child output handling ----
             child_output = backend->child_output_path();

@@ -84,6 +84,48 @@ LineageAnalyzer::find_active_process_node(pid_t tgid) const {
     return node_it->second;
 }
 
+/**
+ * @brief Resolve the executable-image identity of an active process.
+ *
+ * Uses the active TGID-to-instance mapping maintained by
+ * LineageAnalyzer and the corresponding exec generation.
+ *
+ * Does not create, modify, or reactivate process state.
+ *
+ * @param tgid Linux thread-group ID of the process.
+ * @return Current process-image identity, or std::nullopt
+ *         if the process is unknown or no longer active.
+ */
+std::optional<ProcessImageKey>
+LineageAnalyzer::active_process_image(pid_t tgid) const
+{
+    // Resolve the currently active process instance.
+    const auto process_it = active_process_by_tgid_.find(tgid);
+
+    if (process_it == active_process_by_tgid_.end()) {
+        return std::nullopt;
+    }
+
+    const uint64_t instance_id = process_it->second;
+
+    if (instance_id == 0) {
+        return std::nullopt;
+    }
+
+    // Retrieve the current executable-image generation.
+    // find() does not insert missing entries.
+    const auto generation_it = exec_generation_by_instance_.find(instance_id);
+
+    if (generation_it == exec_generation_by_instance_.end()) {
+        return std::nullopt;
+    }
+
+    return ProcessImageKey{
+        instance_id,
+        generation_it->second
+    };
+}
+
 size_t LineageAnalyzer::ensure_process(pid_t pid, pid_t tid, pid_t tgid,
                                               const std::string& program) {
 

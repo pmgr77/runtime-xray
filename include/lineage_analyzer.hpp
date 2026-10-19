@@ -1,6 +1,13 @@
+
 /**
  * @file    lineage_analyzer.hpp
  * @brief   Builds a lineage graph from syscall events.
+ *
+ * Tracks process lifetimes, executable-image generations,
+ * syscall observations, and resource relationships.
+ *
+ * Exposes read-only access to active process-image identities
+ * for components that maintain process-scoped runtime state.
  *
  * @author  Peter Magram
  * @date    2026-08-31
@@ -26,12 +33,14 @@
 #define LINEAGE_ANALYZER_HPP
 
 #include "lineage.hpp"
+#include "process_image_key.hpp"
 #include "tachikoma.hpp"
 #include "itrace_backend.hpp"
+
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <optional>
 
 namespace runtimexray {
 
@@ -48,6 +57,36 @@ public:
 
     /** After tracing, produce the lineage graph. */
     LineageGraph produce_graph() const;
+
+    /**
+     * @brief Get the identity of an active process executable image.
+     *
+     * Resolves a Linux thread-group ID to its currently active
+     * RuntimeXRay process instance and executable-image generation.
+     *
+     * The process instance is allocated by LineageAnalyzer when
+     * the process is first observed. Its exec generation advances
+     * after each successfully observed exec transition.
+     *
+     * This method is read-only:
+     *
+     * - It does not create a process observation.
+     * - It does not allocate a process-instance ID.
+     * - It does not modify executable-image generations.
+     * - It does not reactivate terminated processes.
+     *
+     * A process that is unknown or no longer active has no
+     * available process-image identity.
+     *
+     * @param tgid Linux thread-group ID of the target process.
+     * @return Current process-image identity, or std::nullopt
+     *         if the process is not known to be active.
+     *
+     * @note Call after on_syscall_event() has processed the
+     *       relevant runtime event so the returned identity
+     *       reflects the latest observed process state.
+     */
+    std::optional<ProcessImageKey> active_process_image(pid_t tgid) const;
 
     // Attach a resolved string (path or "ip:port") to the in-flight syscall
     // observation for (pid, tid). Called on syscall entry, after
@@ -116,7 +155,7 @@ private:
     void link_pipe_dataflow(size_t read_index);
 
     void reconcile_pipe_dataflow_from_write(size_t write_index);
-    
+
     // Graph storage
     std::vector<Observation> observations_;
     std::vector<LineageEdge> edges_;
@@ -181,6 +220,7 @@ private:
     void add_edge(size_t from, size_t to, RelationType rel, const std::string& details = "");
 
     void handle_task_create(const SyscallEvent& ev);
+
     // Specific handlers
     void handle_fork_exit(const SyscallEvent& ev, std::string syscall_name, uint64_t clone_flags);
 
