@@ -638,12 +638,13 @@ public:
      * @param observations Destination for detected secrets.
      */
     TraceMemoryScanSession(
-        bool enabled,
-        const runtimexray::LineageAnalyzer& analyzer,
-        std::vector<runtimexray::Observation>& observations)
-        : enabled_(enabled),
-          analyzer_(analyzer),
-          observations_(observations)
+    bool enabled,
+    const runtimexray::LineageAnalyzer& analyzer,
+    std::vector<runtimexray::Observation>& observations)
+    : enabled_(enabled),
+      analyzer_(analyzer),
+      observations_(observations),
+      coordinator_(make_trace_scan_policy())
     {
     }
 
@@ -711,6 +712,25 @@ public:
                 std::to_string(target->image.exec_generation) +
             " observations=" +
                 std::to_string(observations_.size() - before));
+
+        // Stage C: inspect process memory when a new executable image
+        // is first observed.
+        //
+        // This includes:
+        // - the initial traced process;
+        // - new process instances created through fork/clone;
+        // - new executable generations following successful exec.
+        //
+        // startup_scanned_images_ guarantees this path is entered only
+        // once per process image, even for multithreaded applications.
+        //
+        // No originating syscall event is attached: this inspection
+        // is a process-image checkpoint, not proof that the current
+        // syscall caused any discovered secret to appear.
+        request_scan(
+            ev,
+            runtimexray::MemoryScanReason::InitialInspection,
+            std::nullopt);
     }
 
     /**
@@ -802,6 +822,32 @@ public:
     }
 
 private:
+    /**
+     * @brief Configure memory scan budgets for traced process images.
+     *
+     * Stage C introduces InitialInspection in addition to the existing
+     * SensitiveDataDiscovery and DataBoundaryCrossing scans.
+     *
+     * Each reason may request up to 1000 pages. The trace session must
+     * therefore have enough aggregate page budget for three independent
+     * scans of the same executable image.
+     *
+     * This policy is specific to trace sessions. It does not change
+     * the generic MemoryScanCoordinator default policy.
+     *
+     * @return Memory scan policy for a trace session.
+     */
+    static runtimexray::MemoryScanPolicy make_trace_scan_policy()
+    {
+        runtimexray::MemoryScanPolicy policy;
+
+        policy.max_pages_per_process_image =
+            policy.max_scans_per_process_image *
+            policy.max_pages_per_scan;
+
+        return policy;
+    }
+
     /**
      * @brief Resolved runtime process target.
      *

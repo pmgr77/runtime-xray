@@ -53,17 +53,38 @@ J="$TMP/out.json"
 }
 
 #
-# Pick the scanner-derived password fingerprint.
+# Select the credential fingerprint associated with the actual
+# pipe transfer, rather than the first memory finding.
+#
+# InitialInspection may discover unrelated secrets in argv,
+# environment, or memory before the pipe payload is processed.
 #
 FP=$(jq -r '
-    .findings[]
-    | select(
-        .kind == "sensitive_data_presence"
-        and .attributes.location == "memory"
-        and (.attributes.fingerprint // "") != ""
-    )
-    | .attributes.fingerprint
-' "$J" | head -n 1)
+    .lineage.observations as $obs
+    | first(
+        $obs[]
+        | select(
+            .type == "event"
+            and .syscall == "write"
+            and .resource_type == "pipe"
+            and (.fingerprint // "") != ""
+        )
+        | .fingerprint as $fp
+        | select(
+            any($obs[];
+                .type == "event"
+                and .syscall == "read"
+                and .fingerprint == $fp
+            )
+            and any($obs[];
+                .type == "data"
+                and .data_type == "memory"
+                and .fingerprint == $fp
+            )
+        )
+        | $fp
+    ) // empty
+' "$J")
 
 [ -n "$FP" ] || {
     echo "FAIL: no scanner-derived secret fingerprint"

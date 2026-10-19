@@ -565,6 +565,25 @@ if(NOT SKIP_PTRACE_TESTS)
     )
     set_tests_properties(check_c1_memory_scan_coordinator PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
+    # -----------------------------------------------------------------------
+    # Stage C: Fork/COW inherited-secret InitialInspection regression
+    #
+    # Verifies that a child retaining a private inherited secret
+    # is inspected independently of the parent process image.
+    #
+    # The child does not read or send the secret. Detection must
+    # therefore come from InitialInspection rather than I/O events.
+    #
+    # The script builds a disposable C fixture and verifies the
+    # child process identity, memory evidence, and observed_in edge.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_fork_cow_initial_inspection
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fork_cow_initial_inspection.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_fork_cow_initial_inspection PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 120)
+
     add_test(NAME check_ptrace_fd_alias_flow
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_alias_flow.sh
             $<TARGET_FILE:runtimexray>
