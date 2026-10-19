@@ -1859,3 +1859,692 @@ It exposed where our assumptions were wrong.
 ```
 
 That is the most important result of this validation.
+
+---
+
+# Appendix A — Full Docker Phases 0–4 Re-run Playbook (historical test procedure)
+
+> **Document provenance:** This appendix preserves the original step-by-step Docker test protocol used during the September–October 2026 validation cycle. It complements the findings and engineering lessons above; it does not supersede them. The commands and *Expect* statements below reflect that historical version of RuntimeXRay, not guaranteed behavior of newer releases or schema 2.0.
+>
+> **Safety and repeatability:** Run only in a disposable local VM. This procedure creates/deletes named Docker fixtures (`rx-registry`, `rx-net`), writes authentication material under `~/rxray-docker-lab`, and includes legacy world-writable `chmod 0777` lab directories. Do not reuse these patterns in production. The credential shown below is a synthetic historical test value; never substitute a real password or publish raw traces and helper stores without inspection.
+>
+> **Current version:** The maintained regression for the newer coordinator is `tests/test_c1_memory_scan_coordinator.sh` (see Appendix B). Some historical Python snippets/JSON assumptions below require updating for the current report schema. In particular, the original helper fixture was an experimental shell mock, not a production credential-helper implementation.
+
+**Original test-procedure title:** Docker Phases 0–4 — Full Re-run Playbook
+
+Run in order. Each experiment is self-contained. Do not skip ahead.
+
+
+## Phase 0 — Baseline inventory
+
+```bash
+mkdir -p ~/rxray-docker-lab/phase0
+OUT=~/rxray-docker-lab/phase0/inventory.txt
+
+{
+  echo "=== DATE ==="; date -u; echo
+  echo "=== OS / KERNEL / ARCH ==="; uname -a; cat /etc/os-release
+  echo "arch: $(uname -m)"; echo
+  echo "=== DOCKER VERSIONS ==="; docker --version; docker version; docker info
+  docker compose version
+  echo
+  echo "=== DOCKER COMPONENTS ==="
+  which docker; ls -l "$(which docker)"; sha256sum "$(which docker)"
+  dockerd --version; containerd --version; runc --version
+  echo
+  echo "=== DOCKER STATE ==="
+  docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}'
+  docker ps -a --format '{{.Names}} {{.Status}}'
+  docker network ls --format '{{.Name}}'
+  echo
+  echo "=== DOCKER CONFIG ==="
+  echo "DOCKER_CONFIG=${DOCKER_CONFIG:-<unset>}"; ls -la ~/.docker 2>&1
+  ls -la ~/.docker/config.json 2>&1 || echo "no ~/.docker/config.json"
+  echo
+  echo "=== CREDENTIAL HELPERS ==="; compgen -c | grep '^docker-credential-' | sort -u
+  echo
+  echo "=== BUILDX ==="; docker buildx version; docker buildx ls
+  echo
+  echo "=== DOCKER SOCKET ==="; ls -l /var/run/docker.sock
+  echo
+  echo "=== RUNTIMEXRAY ==="
+  cd ~/workspace/runtime-xray
+  echo "HEAD: $(git rev-parse HEAD)"
+  git log --oneline -3
+  git status --short
+  ls -l build/runtimexray
+} > "$OUT" 2>&1
+
+cat "$OUT"
+```
+
+**Historical expected result:** Ubuntu 24.04, Docker 29.8.0, containerd 2.3.5, runc 1.5.1, redis:7 as the only image.
+
+
+## Phase 1 — Trace docker version / docker info
+
+### Experiment 1.1 — docker version
+
+```bash
+mkdir -p ~/rxray-docker-lab/phase1
+cd ~/workspace/runtime-xray
+
+# strace ground truth
+strace -f -tt -e trace=openat,connect,execve,socket \
+  -o ~/rxray-docker-lab/phase1/version-strace.log \
+  /usr/bin/docker version > ~/rxray-docker-lab/phase1/version-plain.txt 2>&1
+
+# RuntimeXRay trace
+sudo env HOME=/home/ubuntu \
+  ./build/runtimexray trace --follow-forks \
+  --json /home/ubuntu/rxray-docker-lab/phase1/version-trace.json \
+  /usr/bin/docker version > /dev/null 2>&1
+
+echo "=== plain output ==="
+cat ~/rxray-docker-lab/phase1/version-plain.txt
+echo "=== trace summary ==="
+grep -o '"summary": "[^"]*"' ~/rxray-docker-lab/phase1/version-trace.json
+echo "=== connect targets (strace) ==="
+grep 'connect(' ~/rxray-docker-lab/phase1/version-strace.log
+```
+
+**Historical expected result:** No findings. One AF_UNIX connect to /var/run/docker.sock. No TCP.
+
+
+### Experiment 1.2 — docker info (clean HOME vs sudo-induced HOME)
+
+```bash
+cd ~/workspace/runtime-xray
+
+# Correct HOME, throwaway DOCKER_CONFIG
+CFG=$HOME/rxray-docker-lab/phase1/docker-config
+rm -rf "$CFG" && mkdir -p "$CFG"
+
+sudo env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  ./build/runtimexray trace --follow-forks \
+  --json /home/ubuntu/rxray-docker-lab/phase1/info-clean.json \
+  /usr/bin/docker info > /dev/null 2>&1
+
+# Wrong HOME (/root via sudo)
+sudo env -u DOCKER_CONFIG HOME=/root \
+  ./build/runtimexray trace --follow-forks \
+  --json /home/ubuntu/rxray-docker-lab/phase1/info-sudohome.json \
+  /usr/bin/docker info > /dev/null 2>&1
+
+echo "=== clean HOME findings ==="
+grep -E '"path"|"description"|"outcome"|"err"' ~/rxray-docker-lab/phase1/info-clean.json
+
+echo "=== sudo HOME findings ==="
+grep -E '"path"|"description"|"outcome"|"err"' ~/rxray-docker-lab/phase1/info-sudohome.json
+```
+
+**Historical expected result:**
+
+
+Clean HOME: 0 findings.
+
+Sudo HOME: 2 findings on /root/.docker/config.json and /root/.docker/cli-plugins, both outcome=failed, err=2 (ENOENT). This is correct detection, not a false positive.
+
+## Phase 2 — docker run --rm
+
+```bash
+mkdir -p ~/rxray-docker-lab/phase2
+cd ~/workspace/runtime-xray
+
+pgrep -x dockerd   # record dockerd PID for cross-reference
+
+# RuntimeXRay trace
+sudo env HOME=/home/ubuntu \
+  ./build/runtimexray trace --follow-forks \
+  --json /home/ubuntu/rxray-docker-lab/phase2/run-trace.json \
+  --report /home/ubuntu/rxray-docker-lab/phase2/run-report.txt \
+  /usr/bin/docker run --rm --network none redis:7 redis-cli --version \
+  > /home/ubuntu/rxray-docker-lab/phase2/run-stdout.txt 2>&1
+
+echo "=== plain run output ==="
+docker run --rm --network none redis:7 redis-cli --version
+
+echo "=== trace summary ==="
+grep -o '"summary": "[^"]*"' ~/rxray-docker-lab/phase2/run-trace.json
+
+echo "=== connect destinations ==="
+grep -E 'connect|addr=' ~/rxray-docker-lab/phase2/run-report.txt | head
+
+echo "=== dockerd PID in report? ==="
+grep -c "$(pgrep -x dockerd)" ~/rxray-docker-lab/phase2/run-report.txt || echo 0
+```
+
+**Historical expected result:** redis-cli 7.4.11. Zero dockerd PID references. All connects AF_UNIX to docker.sock. No findings.
+
+
+## Phase 3 — Credential lifecycle
+
+### Setup — registry (once)
+
+```bash
+docker rm -f rx-registry 2>/dev/null || true
+docker network rm rx-net 2>/dev/null || true
+docker network create rx-net
+
+mkdir -p ~/rxray-docker-lab/phase3/auth
+docker run --rm --entrypoint htpasswd httpd:2 -Bbn \
+  rxray_user 'RXRAY_DOCKER_PASS_X7kQ2mNv8pLr4ZtW9yBc3' \
+  > ~/rxray-docker-lab/phase3/auth/htpasswd
+
+docker run -d --name rx-registry \
+  --network rx-net \
+  -p 127.0.0.1:5000:5000 \
+  -v ~/rxray-docker-lab/phase3/auth:/auth:ro \
+  -e REGISTRY_AUTH=htpasswd \
+  -e REGISTRY_AUTH_HTPASSWD_REALM='rx-local-realm' \
+  -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+  registry:2
+sleep 2
+curl -sS -o /dev/null -w 'registry /v2/ -> %{http_code}\n' http://127.0.0.1:5000/v2/
+
+# Password file (single source for all subsequent tests)
+printf '%s' 'RXRAY_DOCKER_PASS_X7kQ2mNv8pLr4ZtW9yBc3' \
+  > ~/rxray-docker-lab/phase3/password.txt
+chmod 600 ~/rxray-docker-lab/phase3/password.txt
+```
+
+**Historical expected result:** registry /v2/ -> 401.
+
+
+### Experiment 3.1 — login --password-stdin
+
+```bash
+cd ~/rxray-docker-lab/phase3
+CFG=$HOME/rxray-docker-lab/phase3/docker-config
+rm -rf "$CFG" && mkdir -p "$CFG"
+
+# Ground truth
+strace -f -tt -s 200 \
+  -e trace=execve,openat,write,read,connect,socket \
+  -o login-strace.log \
+  env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  docker login --username rxray_user --password-stdin 127.0.0.1:5000 \
+  < password.txt > login-plain.txt 2>&1
+echo "exit=$?"
+cat login-plain.txt
+
+# RuntimeXRay
+cd ~/workspace/runtime-xray
+sudo env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  ./build/runtimexray trace --follow-forks --scan-memory \
+  --json /home/ubuntu/rxray-docker-lab/phase3/login-trace.json \
+  /usr/bin/docker login --username rxray_user --password-stdin 127.0.0.1:5000 \
+  < /home/ubuntu/rxray-docker-lab/phase3/password.txt \
+  > /home/ubuntu/rxray-docker-lab/phase3/login-trace-stdout.txt 2>&1
+
+echo "=== findings ==="
+python3 -c '
+import json
+d = json.load(open("/home/ubuntu/rxray-docker-lab/phase3/login-trace.json"))
+print("total:", d["summary"]["total"])
+for f in d["findings"]:
+    det = f.get("details",{})
+    print("  type={} loc={} stype={} len={}".format(f.get("type", "?"), det.get("location", "-"), det.get("secret_type", "-"), f.get("length", "-")))
+'
+```
+
+**Historical expected result:** Login Succeeded. Findings: at least one memory_secret with stype=password len=39 at write_data, and one stype=auth len=68. No raw password in report.
+
+
+### Experiment 3.2 — logout
+
+```bash
+cd ~/rxray-docker-lab/phase3
+CFG=$HOME/rxray-docker-lab/phase3/docker-config
+
+# Re-login first (non-sudo)
+env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  docker login --username rxray_user --password-stdin 127.0.0.1:5000 \
+  < password.txt > /dev/null 2>&1
+
+# Ground truth strace
+strace -f -tt -s 200 \
+  -e trace=execve,openat,write,read,connect,socket,rename,renameat,unlink,unlinkat \
+  -o logout-strace.log \
+  env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  docker logout 127.0.0.1:5000 > logout-plain.txt 2>&1
+echo "exit=$?"; cat logout-plain.txt
+
+echo "=== config after logout ==="
+cat "$CFG/config.json"
+
+echo "=== connects during logout (should be none) ==="
+grep 'connect(' logout-strace.log || echo "(none)"
+```
+
+**Historical expected result:** Removing login credentials for 127.0.0.1:5000. Config = {"auths": {}}. Zero connects.
+
+
+### Experiment 3.3 — login + logout in one trace
+
+```bash
+cd ~/rxray-docker-lab/phase3
+CFG=/home/ubuntu/rxray-docker-lab/phase3/docker-config
+sudo rm -rf "$CFG" && mkdir -p "$CFG" && chmod 0777 "$CFG"
+
+cd ~/workspace/runtime-xray
+sudo env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  ./build/runtimexray trace --follow-forks --scan-memory \
+  --json /home/ubuntu/rxray-docker-lab/phase3/loginlogout.json \
+  /bin/sh -c 'docker login --username rxray_user --password-stdin 127.0.0.1:5000 < /home/ubuntu/rxray-docker-lab/phase3/password.txt && docker logout 127.0.0.1:5000' \
+  > /dev/null 2>&1
+
+python3 -c '
+import json
+from collections import defaultdict
+d = json.load(open("/home/ubuntu/rxray-docker-lab/phase3/loginlogout.json"))
+by = defaultdict(set)
+for f in d["findings"]:
+    st = f.get("details",{}).get("secret_type","?")
+    fp = f.get("fingerprint","")
+    if fp: by[st].add(fp)
+for st, fps in by.items():
+    print(f"{st}: {len(fps)} distinct fingerprints")
+    for fp in fps: print(f"   {fp}")
+'
+```
+
+**Historical expected result:** auth has exactly 1 distinct fingerprint. It should appear at both write_data (login config write) and read (logout config read). Same value, same trace, one HMAC key.
+
+
+### Experiment 3.4 — -p flag
+
+```bash
+cd ~/rxray-docker-lab/phase3
+CFG=$HOME/rxray-docker-lab/phase3/docker-config
+sudo rm -rf "$CFG" && mkdir -p "$CFG"
+
+strace -f -tt -s 200 \
+  -e trace=execve,openat,write,read,connect,socket \
+  -o login-p-strace.log \
+  env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  docker login --username rxray_user -p 'RXRAY_DOCKER_PASS_X7kQ2mNv8pLr4ZtW9yBc3' 127.0.0.1:5000 \
+  > login-p-plain.txt 2>&1
+echo "exit=$?"; cat login-p-plain.txt
+
+echo "=== raw password occurrences in strace ==="
+grep -c 'RXRAY_DOCKER_PASS_X7kQ2mNv8pLr4ZtW9yBc3' login-p-strace.log
+
+echo "=== execve of docker ==="
+grep 'execve.*docker' login-p-strace.log | grep -v ENOENT
+```
+
+**Historical expected result:** Warning Using --password via the CLI is insecure. Login Succeeded. Raw password appears in execve argv — visible via ps for the process lifetime. Documented insecure mode.
+
+
+### Experiment 3.5 — interactive stdin (should refuse)
+
+```bash
+cd ~/rxray-docker-lab/phase3
+CFG=$HOME/rxray-docker-lab/phase3/docker-config
+sudo rm -rf "$CFG" && mkdir -p "$CFG"
+
+strace -f -tt -s 200 \
+  -e trace=execve,openat,write,read,connect,socket,ioctl \
+  -o login-int-strace.log \
+  env HOME=/home/ubuntu DOCKER_CONFIG="$CFG" \
+  docker login --username rxray_user 127.0.0.1:5000 \
+  < password.txt > login-int-plain.txt 2>&1
+echo "exit=$?"; cat login-int-plain.txt
+
+echo "=== raw password in strace ==="
+grep -c 'RXRAY_DOCKER_PASS_X7kQ2mNv8pLr4ZtW9yBc3' login-int-strace.log
+
+echo "=== TTY ioctl probes ==="
+grep -cE 'ioctl.*(TCGETS|TIOCGWINSZ)' login-int-strace.log
+```
+
+**Historical expected result:** error: cannot perform an interactive login from a non-TTY device. Zero occurrences of the password. Multiple ioctl TCGETS. Docker correctly refuses.
+
+
+## Phase 4 — Credential helper
+
+### Setup — the helper (once)
+
+Create ~/rxray-docker-lab/phase4/bin/docker-credential-rxraytest:
+
+
+```bash
+mkdir -p ~/rxray-docker-lab/phase4/bin
+cat > ~/rxray-docker-lab/phase4/bin/docker-credential-rxraytest <<'HELPER_EOF'
+#!/bin/sh
+set -eu
+cmd="${1:-}"
+shift || true
+
+STORE_DIR="${HELPER_STORE_DIR:-$HOME/.rxray-credtest-store}"
+mkdir -p "$STORE_DIR"
+chmod 0700 "$STORE_DIR"
+
+fname_for() { printf '%s' "$1" | tr '/:' '__'; }
+
+case "$cmd" in
+    store)
+        payload="$(cat)"
+        url="$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin)["ServerURL"])')"
+        f="$(fname_for "$url")"
+        tmp="$STORE_DIR/.tmp.$$"
+        umask 077
+        printf '%s' "$payload" > "$tmp"
+        mv "$tmp" "$STORE_DIR/$f"
+        printf '{}\n'
+        ;;
+    get)
+        url="${1:-}"
+        f="$(fname_for "$url")"
+        if [ -f "$STORE_DIR/$f" ]; then
+            cat "$STORE_DIR/$f"; printf '\n'
+        else
+            printf 'credentials not found\n' >&2; exit 1
+        fi
+        ;;
+    erase)
+        url="${1:-}"
+        rm -f "$STORE_DIR/$(fname_for "$url")"
+        printf '{}\n'
+        ;;
+    list)
+        printf '{}\n'
+        ;;
+    *)
+        printf 'unknown command: %s\n' "$cmd" >&2; exit 1
+        ;;
+esac
+HELPER_EOF
+
+chmod 0755 ~/rxray-docker-lab/phase4/bin/docker-credential-rxraytest
+
+# Config pointing at the helper
+mkdir -p ~/rxray-docker-lab/phase4/docker-config
+cat > ~/rxray-docker-lab/phase4/docker-config/config.json <<'EOF'
+{
+  "credHelpers": {
+    "127.0.0.1:5000": "rxraytest"
+  }
+}
+EOF
+chmod 0600 ~/rxray-docker-lab/phase4/docker-config/config.json
+
+ls -la ~/rxray-docker-lab/phase4/bin/
+cat ~/rxray-docker-lab/phase4/docker-config/config.json
+```
+
+### Experiment 4.1 — helper invocation, untraced sanity
+
+```bash
+HELPER_BIN=/home/ubuntu/rxray-docker-lab/phase4/bin
+CFG=/home/ubuntu/rxray-docker-lab/phase4/docker-config
+STORE=/home/ubuntu/rxray-docker-lab/phase4/helper-store
+
+rm -rf "$STORE" && mkdir -p "$STORE" && chmod 0700 "$STORE"
+
+env PATH="$HELPER_BIN:$PATH" HOME=/home/ubuntu \
+    DOCKER_CONFIG="$CFG" HELPER_STORE_DIR="$STORE" \
+    docker login --username rxray_user --password-stdin 127.0.0.1:5000 \
+    < ~/rxray-docker-lab/phase3/password.txt
+
+echo "=== config after login (should keep credHelpers, empty auths) ==="
+cat "$CFG/config.json"
+
+echo "=== helper store file ==="
+ls -la "$STORE"
+cat "$STORE"/* 2>/dev/null
+```
+
+**Historical expected result:** Login Succeeded. Config = {"auths":{"127.0.0.1:5000":{}},"credHelpers":{...}}. Store file contains the credential JSON.
+
+
+### Experiment 4.2 — helper boundary, RuntimeXRay
+
+```bash
+HELPER_BIN=/home/ubuntu/rxray-docker-lab/phase4/bin
+CFG=/home/ubuntu/rxray-docker-lab/phase4/docker-config
+STORE=/home/ubuntu/rxray-docker-lab/phase4/helper-store
+
+sudo rm -rf "$STORE" && mkdir -p "$STORE" && chmod 0777 "$STORE"
+
+cd ~/workspace/runtime-xray
+sudo env PATH="$HELPER_BIN:$PATH" HOME=/home/ubuntu \
+         DOCKER_CONFIG="$CFG" HELPER_STORE_DIR="$STORE" \
+  ./build/runtimexray trace --follow-forks --scan-memory \
+    --json /home/ubuntu/rxray-docker-lab/phase4/helper-trace.json \
+    /usr/bin/docker login --username rxray_user --password-stdin 127.0.0.1:5000 \
+    < /home/ubuntu/rxray-docker-lab/phase3/password.txt \
+    > /dev/null 2>&1
+
+python3 -c '
+import json
+from collections import defaultdict
+d = json.load(open("/home/ubuntu/rxray-docker-lab/phase4/helper-trace.json"))
+by = defaultdict(lambda: defaultdict(int))
+for f in d["findings"]:
+    st = f.get("details",{}).get("secret_type","<none>")
+    fp = f.get("fingerprint","")
+    if fp: by[st][fp] += 1
+for st, fps in by.items():
+    print(st+":")
+    for fp, n in fps.items():
+        print(f"   {n} findings share fp={fp}")
+'
+```
+
+**Historical expected result:** one fingerprint with ~10 occurrences across write_data, read, stdout, memory, plus one correlated. Same value, same trace, same HMAC key.
+
+
+### Experiment 4.3 — FD and env inheritance
+
+Insert the diagnostic block into the helper right after shift || true:
+
+
+```sh
+# === DIAGNOSTIC BLOCK ===
+DUMP_DIR="${HELPER_DUMP_DIR:-/tmp/rxray-helper-dump}"
+mkdir -p "$DUMP_DIR"
+umask 077
+{
+    echo "=== argv ==="; printf '%s\n' "$@"
+    echo "=== environ ==="; cat /proc/self/environ | tr '\0' '\n'
+    echo "=== fds ==="
+    for fd in /proc/self/fd/*; do
+        n="$(basename "$fd")"
+        target="$(readlink "$fd" 2>/dev/null || echo "?")"
+        printf '%s -> %s\n' "$n" "$target"
+    done
+} > "$DUMP_DIR/dump.$$"
+# === END DIAGNOSTIC BLOCK ===
+```
+
+Then run:
+
+
+```bash
+HELPER_BIN=/home/ubuntu/rxray-docker-lab/phase4/bin
+CFG=/home/ubuntu/rxray-docker-lab/phase4/docker-config
+STORE=/home/ubuntu/rxray-docker-lab/phase4/helper-store
+DUMP=/home/ubuntu/rxray-docker-lab/phase4/helper-dump
+
+rm -rf "$STORE" "$DUMP"
+mkdir -p "$STORE" "$DUMP"
+chmod 0777 "$STORE" "$DUMP"
+
+env PATH="$HELPER_BIN:$PATH" HOME=/home/ubuntu \
+    DOCKER_CONFIG="$CFG" HELPER_STORE_DIR="$STORE" HELPER_DUMP_DIR="$DUMP" \
+    docker login --username rxray_user --password-stdin 127.0.0.1:5000 \
+    < ~/rxray-docker-lab/phase3/password.txt
+
+for f in "$DUMP"/dump.*; do
+    [ -f "$f" ] || continue
+    echo "--- $f ---"; cat "$f"
+done
+```
+
+**Historical expected result:**
+
+
+FDs: stdin/stdout/stderr pipes to Docker; 2 -> /dev/null. No docker.sock FD, no config FD, no password.txt FD.
+
+Env: full shell environment inherited — including SSH_CLIENT, SSH_CONNECTION, DBUS_SESSION_BUS_ADDRESS, and any user-exported secrets. Standard execve behavior, not a Docker bug.
+
+### Original execution notes
+
+Run the phases as written. Do not skip Phase 0 or the registry setup. Each phase is independent after its setup, but Phase 3 setup must run before 3.1–3.5, and Phase 4 setup before 4.1–4.3.
+
+Paste outputs phase by phase. I will classify each result and flag anything that deviates from the expected behavior listed here.
+
+**Historical note (from the original playbook):** the post-exec SIGTRAP tracer fix (tachikoma.cpp) was applied and verified at 56/56 ctest, but I have never seen it committed. If git status --short shows src/tachikoma.cpp modified, commit it before re-running — otherwise a fresh checkout will reproduce the Phase 4 nested-shell bug and the results will not match what is documented here. This describes the state *at the time of the original runbook*, not the present Git state; verify `git status` and `git log` before running.
+
+---
+
+# Appendix B — October 19, 2026: coordinator validation against the same registry
+
+This follow-on validation used a running Basic-auth-protected local Docker registry (`http://127.0.0.1:5000/v2/`) as the controlled network endpoint. The **traced application was `/usr/bin/curl`, not the Docker CLI**. It should therefore be described as *Docker-registry-backed curl credential testing*, rather than a demonstration of complete Docker daemon or container-process tracing.
+
+These experiments were run **after** the memory-region prioritization work and integration of `MemoryScanCoordinator`, `ProcessImageKey`, and `TraceMemoryScanSession`. They verify credential discovery and lineage evidence at two different points in the lifecycle.
+
+## B.1 — C1: `.netrc` credential read and outbound HTTP Basic auth
+
+### Preconditions and manual execution
+
+```bash
+cd ~/workspace/runtime-xray
+LAB=/home/ubuntu/rxray-curl-lab
+
+curl -sS -o /dev/null \
+  -w 'Registry HTTP %{http_code}\n' \
+  http://127.0.0.1:5000/v2/
+# Observed: Registry HTTP 401
+
+ls -l "$LAB/c1.netrc"
+# Observed: restricted file mode -rw------- (0600)
+
+sudo env HOME=/home/ubuntu \
+  ./build/runtimexray trace \
+  --follow-forks \
+  --scan-memory \
+  --json "$LAB/c1-coordinator.json" \
+  --report "$LAB/c1-coordinator-report.txt" \
+  /usr/bin/curl \
+  -sS \
+  --netrc-file "$LAB/c1.netrc" \
+  -w 'HTTP %{http_code}\n' \
+  http://127.0.0.1:5000/v2/ \
+  > "$LAB/c1-coordinator-stdout.txt" 2>&1
+```
+
+**Observed:** tracer exit status `0`; outputs included a JSON report of ~589 KiB, text report of ~86 KiB, and runtime log. The test's first context inspection did not find a credential in `cmdline`/`environment`. Two later event-driven memory scans were authorized for the **same process image**:
+
+```text
+Initial process context inspection: TGID=1358540 instance=1 generation=0 observations=0
+Runtime memory scan: TGID=1358540 instance=1 generation=0 reason=SensitiveDataDiscovery pages=1000 observations=0
+Runtime memory scan: TGID=1358540 instance=1 generation=0 reason=DataBoundaryCrossing pages=1000 observations=1
+```
+
+A JSON analysis of the recorded lineage graph yielded:
+
+```json
+{
+  "memory_observations": 1,
+  "memory_matches_read": 1,
+  "memory_matches_sendto": 1,
+  "observed_at_edges": 2,
+  "memory_context": [
+    {
+      "process_instance_id": 1,
+      "exec_generation": 0,
+      "secret_type": "http_basic_password"
+    }
+  ]
+}
+```
+
+**Interpretation:** The second memory scan found an HTTP Basic password value already observed in the incoming `read()` evidence and outgoing `sendto()` evidence. The per-run HMAC fingerprints match across all three contexts. The process identity is stable (`instance=1`, `generation=0`). The scans each inspected 1,000 pages; this is **2,000 scan page operations**, not necessarily 2,000 *distinct* pages. Exact fingerprint equality establishes detected-value identity; it is not by itself a proof of which bytes were copied from which buffer.
+
+### New automated C1 regression
+
+A repeatable integration test was added at:
+
+```text
+tests/test_c1_memory_scan_coordinator.sh
+```
+
+The script creates a temporary `0600` `.netrc` containing disposable generated credentials; it does **not** depend on the historical `c1.netrc`, nor does it print the generated secrets or fingerprints. It checks:
+
+- A `SensitiveDataDiscovery` scan and a separate `DataBoundaryCrossing` scan occur for the same process image.
+- Both scan page counts respect the per-scan and per-image budgets.
+- An `http_basic_password` memory observation has the same fingerprint as `read` and `sendto` events.
+- `observed_at` edges join the **correct event/data sequence IDs**, not merely a count of edges.
+- The memory observation has an `observed_in` edge to the correct process node.
+- Missing local registry/dependencies/privileges yield exit code `125` (CTest skip), while incorrect evidence yields nonzero failure.
+
+```bash
+cd ~/workspace/runtime-xray
+sh tests/test_c1_memory_scan_coordinator.sh ./build/runtimexray
+ctest --test-dir build -R '^check_c1_memory_scan_coordinator$' --output-on-failure -V
+```
+
+**Observed:** manual script `exit=0`, nine PASS assertions; registered CTest `check_c1_memory_scan_coordinator` **passed in 11.58 seconds**.
+
+## B.2 — A1: command-line credential to memory and HTTP send
+
+The second follow-on experiment passed a disposable credential via `curl --user`, rather than reading it from `.netrc`. That deliberately changes the credential's entry point.
+
+```bash
+cd ~/workspace/runtime-xray
+LAB=/home/ubuntu/rxray-curl-lab
+
+sudo env HOME=/home/ubuntu \
+  ./build/runtimexray trace \
+  --backend ptrace \
+  --follow-forks \
+  --scan-memory \
+  --json "$LAB/a1-coordinator.json" \
+  --report "$LAB/a1-coordinator-report.txt" \
+  /usr/bin/curl \
+  --silent --show-error \
+  --user 'rxray_a1:A1_test_password_2026' \
+  --output /dev/null \
+  http://127.0.0.1:5000/v2/ \
+  > "$LAB/a1-coordinator-stdout.txt" 2>&1
+```
+
+**Observed:** tracer `exit=0`. The initial context inspection found **one** observation and a subsequent `DataBoundaryCrossing` memory scan examined **1,000** pages and found **one** memory observation. This test did *not* require a `SensitiveDataDiscovery` scan.
+
+```json
+{
+  "cmdline_count": 1,
+  "memory_count": 1,
+  "sendto_fingerprints": 1,
+  "same_secret_in_all_three": true
+}
+```
+
+**Interpretation:** the same detected credential value was present in command-line context, runtime memory, and a `sendto()` event. The result is value correlation, not proof of a specific copy operation between buffers.
+
+## B.3 — Full test-suite validation
+
+The complete build's CTest suite was executed after registering the new C1 integration test:
+
+```bash
+ctest --test-dir build --output-on-failure -j"$(nproc)"
+```
+
+**Observed:** `61/61` tests passed; `0` failed; real time `51.00 seconds`. This covers current unit, integration, ptrace flow, resource/FD inheritance and related regression tests available in that configuration. It does not establish correctness for all future kernel versions, backends, Docker environments, or arbitrary credentials.
+
+## B.4 — What changed, what remains unproven
+
+This validation specifically supports the benefit of replacing an old one-time-per-PID memory scan with per-`ProcessImageKey` event-driven scans. In C1, the first scan found no credential and a subsequent allowed scan found one.
+
+Remaining future work (not claimed as completed by this record):
+
+- Trigger `InitialInspection` **memory** scans in new child process images after `fork` and on appropriate post-`exec` events. The current initial context inspection covers argv/environment, not a guaranteed heap scan.
+- Distinguish possible COW-inherited secrets from directly observed secrets in each child; do not claim inheritance provenance from matching address and fingerprint alone.
+- Ensure future security findings distinguish presence/exposure from verified application use or data-flow causality.
+- Establish whole-session resource/scan budgets and measure overhead under heavier process trees.
+- Broaden validation beyond Docker/registry/curl workloads.
+
+As with the earlier Docker cycle, the guiding principle remains: **the strongest defensible conclusion, and no stronger.**
