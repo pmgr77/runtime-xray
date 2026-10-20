@@ -36,6 +36,7 @@ set(RUNTIMEXRAY_SOURCES
     src/tachikoma.cpp
     src/syscall_names.cpp
     src/dynamic_analysis.cpp
+    src/memory_reader.cpp
     src/memory_scanner.cpp
     src/memory_region_policy.cpp
     src/memory_scan_coordinator.cpp
@@ -259,6 +260,7 @@ add_test(NAME check_json_mem
 
 add_executable(test_memory_scanner_self
     tests/memory_scanner/test_memory_scanner_self.cpp
+    src/memory_reader.cpp
     src/memory_scanner.cpp
     src/memory_region_policy.cpp
     src/secret_extractor.cpp
@@ -583,6 +585,70 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:runtimexray>
     )
     set_tests_properties(check_fork_cow_initial_inspection PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 120)
+
+    # -----------------------------------------------------------------------
+    # Stage C.2: Memory inspection across exec transitions
+    #
+    # Verify that failed execve preserves the current executable image,
+    # while successful execve advances the executable generation.
+    #
+    # Both generations must receive independent InitialInspection scans.
+    # Secret observations must remain attributed to the correct image,
+    # without carrying stale memory evidence across successful exec.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_exec_memory_transition
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_exec_memory_transition.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_exec_memory_transition PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 120)
+
+    # -----------------------------------------------------------------------
+    # Stage C.3: Fork/COW memory mutation and lineage regression
+    #
+    # Verify independent process images and memory evidence for two
+    # forked children under parent-first and child-first COW mutations.
+    #
+    # The fixture validates byte-level COW isolation. Physical PFN
+    # assertions are disabled during RuntimeXRay memory inspection,
+    # because remote memory scanning may alter COW page topology.
+    #
+    # RuntimeXRay must attribute observations to the correct process
+    # and must not invent DataFlow edges from memory fingerprint matches.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_fork_cow_mutation_lineage
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fork_cow_mutation_lineage.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_fork_cow_mutation_lineage PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
+
+    # -----------------------------------------------------------------------
+    # Stage D: Differential COW behavior of remote memory readers
+    #
+    # Negative control:
+    #   process_vm_readv is expected to trigger early COW unsharing.
+    #
+    # Positive control:
+    #   /proc/<pid>/mem must preserve shared PFNs until application write.
+    #
+    # Requires access to physical PFNs through /proc/<pid>/pagemap.
+    # Return code 125 means the environment cannot perform the test.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_memory_reader_cow_differential
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_memory_reader_cow_differential.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_memory_reader_cow_differential PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 180)
+
+    # Stage D.2: Semantic evidence parity between memory readers
+    add_test(NAME check_memory_reader_evidence_parity
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_memory_reader_evidence_parity.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_memory_reader_evidence_parity PROPERTIES TIMEOUT 180)
 
     add_test(NAME check_ptrace_fd_alias_flow
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fd_alias_flow.sh

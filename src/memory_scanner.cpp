@@ -25,16 +25,17 @@
 #include "memory_scanner.hpp"
 #include "secret_extractor.hpp"
 #include "memory_region_policy.hpp"
+#include "memory_reader.hpp"
 #include "logger.hpp"
 
 #include <chrono>
 #include <utility>
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
-#include <sys/uio.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <cerrno>
@@ -119,6 +120,41 @@ std::vector<std::string> split_nul_strings(const std::string& data) {
     return parts;
 }
 
+// Experimental, process-wide backend selection. This is intentionally
+// explicit: never silently switch methods after a read/open failure.
+// The default remains the project's original process_vm_readv() path.
+bool select_memory_read_backend(MemoryReadBackend& backend)
+{
+    backend = MemoryReadBackend::ProcessVmReadv;
+    const char* selected = std::getenv("RXRAY_MEMORY_READ_BACKEND");
+
+    if (selected == nullptr || selected[0] == '\0' ||
+        std::strcmp(selected, "vmread") == 0) {
+        return true;
+    }
+
+    if (std::strcmp(selected, "proc") == 0) {
+        backend = MemoryReadBackend::ProcMem;
+        return true;
+    }
+
+    Logger::log(
+        LogLevel::Error,
+        "Invalid RXRAY_MEMORY_READ_BACKEND (expected 'vmread' or 'proc')");
+    return false;
+}
+
+const char* backend_name(MemoryReadBackend backend)
+{
+    switch (backend) {
+    case MemoryReadBackend::ProcessVmReadv:
+        return "process_vm_readv";
+    case MemoryReadBackend::ProcMem:
+        return "/proc/<pid>/mem";
+    }
+    return "unknown";
+}
+
 } // namespace
 
 std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
@@ -147,8 +183,8 @@ void scan_memory_for_secrets(
     size_t max_pages,
     size_t* pages_scanned)
 {
-    // Fast path: no memory pages should be scanned
-    if (max_pages == 0) {
+    // Fast path: no memory pages should be scanned.
+    if (max_pages == 0 || max_observations == 0) {
         if (pages_scanned) {
             *pages_scanned = 0;
         }
@@ -160,21 +196,48 @@ void scan_memory_for_secrets(
         if (pages_scanned) {
             *pages_scanned = 0;
         }
-        return; // No readable regions or failed to read maps
+        return; // No readable regions or failed to read maps.
     }
 
     // Prioritize memory likely to contain runtime credentials.
     // The existing page and observation limits remain unchanged.
     prioritize_memory_regions(regions);
 
-    // Compute total pages
+    MemoryReadBackend backend;
+    if (!select_memory_read_backend(backend)) {
+        if (pages_scanned) {
+            *pages_scanned = 0;
+        }
+        return;
+    }
+
+    // One reader per scan: do not retain an mm_struct across execve().
+    auto reader = open_memory_reader(pid, backend);
+    if (!reader) {
+        const int saved_errno = errno;
+        Logger::log(LogLevel::Error,
+            "Unable to open memory reader for pid=" + std::to_string(pid) +
+            " backend=" + backend_name(backend) +
+            " errno=" + std::to_string(saved_errno) +
+            " (" + std::strerror(saved_errno) + ")");
+        if (pages_scanned) {
+            *pages_scanned = 0;
+        }
+        return;
+    }
+
+    // Compute total pages.
     size_t total_pages = 0;
     for (const auto& region : regions) {
         total_pages += (region.end - region.start + 4095) / 4096;
     }
-    Logger::log(LogLevel::Debug, "Total readable pages: " + std::to_string(total_pages) +
-               ", max_pages: " + std::to_string(max_pages));
+    Logger::log(LogLevel::Debug,
+                "Memory reader=" + std::string(backend_name(backend)) +
+                "; total readable pages=" + std::to_string(total_pages) +
+                "; max_pages=" + std::to_string(max_pages));
 
+    // Retain 4 KiB extraction chunks to avoid changing secret-recognition
+    // behavior while introducing an alternative memory-read mechanism.
     constexpr size_t chunk_size = 4096;
     std::vector<std::byte> buffer(chunk_size);
     size_t found = 0;
@@ -186,27 +249,23 @@ void scan_memory_for_secrets(
         }
         uint64_t address = region.start;
         Logger::log(LogLevel::Debug, "Scanning region 0x" + std::to_string(address) +
-                   " - 0x" + std::to_string(region.end) + " (" + region.perms + ")");        
+                   " - 0x" + std::to_string(region.end) + " (" + region.perms + ")");
         while (address < region.end && found < max_observations && scanned < max_pages) {
             size_t to_read = std::min<size_t>(chunk_size, region.end - address);
 
-            struct iovec local;
-            local.iov_base = buffer.data();
-            local.iov_len = to_read;
-
-            struct iovec remote;
-            remote.iov_base = reinterpret_cast<void*>(address);
-            remote.iov_len = to_read;
-
-            ssize_t n = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+            const ssize_t n = reader->read(static_cast<std::uintptr_t>(address), buffer.data(), to_read);
             if (n <= 0) {
-                Logger::log(LogLevel::Debug, "process_vm_readv failed at 0x" + std::to_string(address) +
-                " errno=" + std::to_string(errno) + " (" + std::strerror(errno) + ")");
-                address += 4096; // skip inaccessible page
+                const int saved_errno = (n < 0) ? errno : 0;
+                Logger::log(LogLevel::Debug,
+                    "Memory read failed at address=" + std::to_string(address) +
+                    " backend=" + backend_name(backend) +
+                    " errno=" + std::to_string(saved_errno) +
+                    " (" + (n < 0 ? std::strerror(saved_errno) : "EOF") + ")");
+                address += 4096; // Skip inaccessible page.
                 ++scanned;
                 if (scanned % 100 == 0) {
                     Logger::log(LogLevel::Debug, "Scanned " + std::to_string(scanned) + " pages (skipped)");
-                }                
+                }
                 continue;
             }
 
