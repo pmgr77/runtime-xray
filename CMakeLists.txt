@@ -720,3 +720,17 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_cross_boundary_evidence PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 30)
 
 endif()
+
+# ---------------------------------------------------------------------------
+# Stage D.3: Memory reader lifecycle regression
+#
+# Tests munmap/remap, mprotect, concurrent VMA changes, execve and process exit
+# for both process_vm_readv and /proc/<pid>/mem.
+# ---------------------------------------------------------------------------
+add_executable(test_memory_reader_lifecycle
+    tests/test_memory_reader_lifecycle.cpp
+    src/memory_reader.cpp
+)
+target_include_directories(test_memory_reader_lifecycle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_test(NAME check_memory_reader_lifecycle COMMAND $<TARGET_FILE:test_memory_reader_lifecycle>)
+set_tests_properties(check_memory_reader_lifecycle PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 125)
