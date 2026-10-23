@@ -882,6 +882,150 @@ The curl tests remain one controlled real-world validation scenario, not a compr
 
 ---
 
+# Planned expansion — Credential Source Matrix (2026-10-23)
+
+**Status:** proposed follow-up campaign, not a results report. All October 19 A1/C1 results above remain historical; no expanded-scenario PASS is claimed here.
+
+The existing local HTTP Basic-auth registry and evidence discipline remain the baseline. For each new case, use only disposable credentials and record the actual kernel, curl version, RuntimeXRay commit, trace backend and memory reader. Keep generated credential files (`0600`) and unredacted artifacts outside version control.
+
+The first additional target is config-file credentials (B1), followed by direct header (D1), URL userinfo (E1), stdin (F1) and interactive prompt (G1). Negative controls must ensure that fingerprint equality alone never creates a false causal flow.
+
+## Scenario matrix
+
+Test IDs are stable. The rows marked **planned** are proposals, not claimed results.
+
+| ID | Input mechanism | Intended distinct evidence | Status / notes |
+| --- | --- | --- | --- |
+| **A1** | `--user user:password` | Initial argv; in-memory recognition; outbound HTTP Basic | Historical PASS; rerun first |
+| **C1** | `--netrc-file FILE` | File read / FD context; memory; outbound HTTP Basic | Historical PASS; maintained regression |
+| **B1** | `--config FILE` containing a `user` option | Config file read; authentication derived from its content; network boundary | Planned; avoid putting password in argv |
+| **D1** | `--header 'Authorization: Basic ...'` | Encoded header supplied in argv; outbound Basic header; decoded-value detector if supported | Planned; do **not** require a plaintext password memory hit |
+| **E1** | `http://user:password@127.0.0.1:5000/v2/` | URL userinfo in argv; outbound Basic; URL parsing/normalization | Planned; credentials intentionally occur in argv |
+| **F1** | `--config -` with config bytes from stdin | Read from FD 0/pipe; outbound Basic; correct FD/source attribution | Planned; stdin is the source, not necessarily a named file |
+| **G1** | `--user user` with password supplied at an interactive prompt | PTY/TTY input; outbound Basic; absence of password from original argv | Planned; must use a real PTY fixture |
+| **H1** | Environment-mediated invocation | Distinguish the originating shell/wrapper from curl's actual input | Optional; curl does not have a generic `CURL_PASSWORD` input mechanism |
+| **N0** | No authentication | No invented secret observation or auth-specific flow | Planned negative control |
+| **N1** | Unrelated decoy secret present but not sent | No fabricated decoy-to-network DataFlow solely from a fingerprint or temporal proximity | Future controlled fixture |
+
+Implementation notes:
+
+- For **B1**, a curl config file can set the `user` option. Capture its read without leaking its contents into logs.
+- For **D1**, the exact bytes supplied to curl are **already encoded**. Keep separate the raw header value, a decoded password, and any transformation tag such as `base64_decoded`. Missing plaintext in memory is not automatically a bug.
+- For **F1**, avoid creating the supposed stdin-origin secret as an argument or environment variable of the traced curl process. A dedicated parent fixture can write the private config into a pipe; document any extra helper process explicitly.
+- For **G1**, a pipe is not equivalent to an interactive terminal. Use a PTY harness and record whether the tested curl version actually prompts.
+- For **H1**, shell expansion of `$SOME_SECRET` into `--user` produces an **argv** input to curl. A correct report should not claim that curl itself read that variable unless such a read was observed.
+- Send every case to the local endpoint only. Do not mix redirects, proxies, HTTPS or multiple transfers into this first matrix; they are later, independent scenarios.
+
+## Required evidence per run
+
+Each test produces a small private record with:
+
+| Category | Required fields / checks |
+| --- | --- |
+| Provenance | Commit, UTC timestamp, `curl --version`, kernel, architecture, endpoint, fixture variant |
+| RuntimeXRay mode | `ptrace` or `ebpf`; `proc` or `vmread`; scan-memory enabled; budget/limit settings |
+| Ground truth | Input mechanism, expected credential representation, local server response, curl/tracer exit statuses |
+| Secret observations | `type`, `source`, `secret_type`, `transform` when present, count, fingerprint equality **within this run** |
+| Process identity | TGID, process instance, exec generation; ensure observations belong to the correct image |
+| Syscall/resource evidence | `read`/`recv`/`sendto`/`sendmsg`/`write` as actually seen, FD identity, file/socket and destination when supported |
+| Graph structure | Verify `observed_at` / `observed_in` **endpoints** (`from_seq`, `to_seq`), not just edge counts |
+| Memory scanning | Scan reason, attempted pages, budget, observation count; record misses as bounded observations |
+| Output safety | No plaintext credential in default JSON, human report, or diagnostic logs; no raw secrets published |
+
+Important: fingerprints use a **per-run HMAC key**. Comparing literal fingerprint strings across independent runs is invalid. Compare the structure and classification of the evidence across runs instead.
+
+For `sendto`, prefer the captured syscall and socket/FD evidence over assuming the application always uses a particular syscall. A different syscall is not itself a failure if the same observable boundary is reliably represented.
+
+## PASS / FAIL / INCONCLUSIVE / SKIP
+
+### PASS
+
+A scenario passes when its **scenario-specific required** observations and process/resource relations are found, its positive correlations use the right per-run fingerprints and transformations, graph endpoints are valid, and outputs remain redacted. It must not manufacture a causality or exfiltration finding for the expected local authentication exchange.
+
+For **A1/C1 regression**, retain the stronger previously established assertions, including memory evidence, where required by the maintained test. If they cease to hold, investigate the changed code, timing, memory coverage and reader configuration; do not weaken the test silently.
+
+### FAIL
+
+Fail on demonstrated incorrect attribution, invalid edge endpoints, a mismatch of a required detected value, unredacted credential exposure by the default reporter, a fabricated source-to-sink causal assertion, an unexpected crash, or an unmet hard assertion under a valid fixture.
+
+### INCONCLUSIVE
+
+Use this for a memory observation absent under a bounded scan **when memory presence is not a mandatory scenario assertion**, or when instrumentation cannot distinguish two plausible explanations. Preserve coverage and timing evidence. A zero-hit scan means only “not detected in the pages inspected at that time,” not “the process never had the secret.”
+
+### SKIP / BLOCKED
+
+Use this for a missing local server, unsupported eBPF privileges, unavailable PTY fixture, missing binaries, or another unmet external prerequisite. A `125` CTest skip is **not** a PASS.
+
+## Execution phases and gates
+
+### Phase I — Re-establish the baseline
+
+1. Verify the loopback registry returns unauthenticated HTTP `401`.
+2. Capture fresh host, `curl`, RuntimeXRay and commit versions.
+3. Run the existing C1 integration regression with **actual execution**, not a CTest skip:
+
+   ```bash
+   ctest --test-dir build \
+     -R '^check_c1_memory_scan_coordinator
+
+- [`docker.md`](docker.md): earlier real-world Docker validation, local registry setup, credential-helper work, and original Docker Phases 0–4 runbook.
+- [`../../tests/test_c1_memory_scan_coordinator.sh`](../../tests/test_c1_memory_scan_coordinator.sh): maintained C1 integration regression.
+- [`../../include/memory_scan_coordinator.hpp`](../../include/memory_scan_coordinator.hpp): scan reasons and default budgets.
+- [`../../include/process_image_key.hpp`](../../include/process_image_key.hpp): process image identity.
+- [`../../src/commands/trace_command.cpp`](../../src/commands/trace_command.cpp): `TraceMemoryScanSession` and syscall-driven scan requests.
+- [`../../src/memory_region_policy.cpp`](../../src/memory_region_policy.cpp): memory-region prioritization.
+- [`../../tests/unit/test_memory_scan_coordinator.cpp`](../../tests/unit/test_memory_scan_coordinator.cpp): coordinator unit tests.
+- [`../../tests/unit/test_process_image_identity.cpp`](../../tests/unit/test_process_image_identity.cpp): process-image identity unit tests.
+
+This document is intended as both a reproducible validation record and source material for a future technical article on evidence-driven memory inspection and credential correlation in a real Linux application.
+
+ \
+     --output-on-failure -V
+   ```
+
+4. Repeat A1 using the safe, synthetic invocation already recorded in [`curl.md`](curl.md); initially select `--backend ptrace --memory-reader proc` explicitly.
+5. Compare observation sources, fingerprints **within each run**, identity and graph endpoints with the historical expectations. Record differences instead of assuming parity.
+
+**Gate I:** A1 and C1 run successfully on the current build, or any regression is diagnosed before adding new cases.
+
+### Phase II — Add three new source mechanisms
+
+Implement and verify **B1 config file**, **D1 direct Authorization header**, and **E1 URL userinfo**, separately. For each case, begin with a manual trace and a saved assertion specification. Convert it to an automated regression only after its detection contract is clear.
+
+**Gate II:** Each case has independently reproducible local ground truth, source-specific attribution, validated graph endpoints, and redacted default output.
+
+### Phase III — Input boundaries and negative controls
+
+Add **F1 stdin**, **G1 PTY prompt**, and **N0 unauthenticated**. Add **H1 environment-mediated** only if the wrapper/input provenance can be independently controlled. Design **N1 decoy** as a distinct fixture, not a claim inferred from a normal curl run.
+
+**Gate III:** No false transfer is asserted for an unrelated value, and origin attribution survives the extra input boundary.
+
+### Phase IV — Backend and memory-reader parity
+
+Once a case is stable under `ptrace + proc`, repeat selected cases under `ptrace + vmread` and, where supported, `ebpf + proc` / `ebpf + vmread`. Compare **semantic evidence**, not byte-identical reports, time ordering, physical page identity, or elapsed runtime.
+
+Remember Stage D: on the tested kernel `process_vm_readv()` caused COW unsharing in controlled cases, while `/proc/<pid>/mem` preserved sharing. Reader selection is part of provenance, not a reason to demand identical physical-memory side effects.
+
+**Gate IV:** Essential detections and supported graph claims agree across available modes, or differences are documented with reproducible traces and clear limitations.
+
+## Automation and publication policy
+
+- Add one maintained regression per stable scenario, or a table-driven harness that reports individual scenario outcomes; do not create a single opaque “curl works” PASS.
+- Preserve separate test IDs in logs and CTest names; detect test skips explicitly.
+- Generate synthetic credentials at runtime. Restrict temporary directories and always clean up, including failure paths.
+- Keep secret-bearing reports private. Public evidence should contain structured counts, redacted fields, test result summaries, and methodology only.
+- Capture curl/server response independently where practical; do not equate tracer success with successful HTTP authentication.
+- Retain a minimal sanitized failure artifact plus reproduction metadata when a regression is found; do not commit raw command lines containing disposable passwords just because they are synthetic.
+- Publish a dated **results** document only after the campaign runs. This plan is not a results report and does not assert future PASS outcomes.
+
+## Immediate next action
+
+**Run Phase I only.** First verify the controlled local endpoint and rerun `check_c1_memory_scan_coordinator` against the current commit. Then rerun A1. Inspect the current `proc` reader path and the graph evidence before changing implementation or building out the rest of the matrix.
+
+If Phase I is green, start **B1** (config-file credentials), because it introduces a new real input surface without adding PTY complexity or already-encoded header ambiguity.
+
+---
+
 # Related records and implementation
 
 - [`docker.md`](docker.md): earlier real-world Docker validation, local registry setup, credential-helper work, and original Docker Phases 0–4 runbook.
