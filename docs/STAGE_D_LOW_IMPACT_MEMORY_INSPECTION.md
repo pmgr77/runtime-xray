@@ -1,273 +1,271 @@
 # Stage D — Low-Impact Memory Inspection
 
-**RuntimeXRay engineering validation record**  
-**Date:** 2026-10-20 
-**Validation host:** Linux `6.17.0-1018-oracle`, Ubuntu on ARM64 
-**Status:** Implementation and regression validation GREEN on the validation host; default backend has **not** been changed.
+**RuntimeXRay engineering and experimental validation record**
+**Updated:** 2026-10-23
+**Validation machine:** Ubuntu ARM64, Linux 6.17.0-1018-oracle, ARM Neoverse-N1, 1 vCPU, 4 KiB pages
+**Status:** Stage D.1–D.5 implemented and reported GREEN on this host; default backend is now `proc`.
 
-## 1. Summary and decision
+## 1. Executive conclusion
 
-RuntimeXRay now offers two explicitly selectable backends for its **bulk process-memory scanner**:
+RuntimeXRay needs to inspect a running process without unnecessarily changing the execution state being observed. Its remote-memory reader supports two Linux mechanisms:
 
-- `vmread`: `process_vm_readv(2)`, the original/default mechanism;
-- `proc`: `pread(2)` on `/proc/<pid>/mem`, opened once per scan and closed using RAII.
+| Backend | Mechanism | Selection |
+| --- | --- | --- |
+| `proc` | `pread()` on `/proc/<pid>/mem` | **Default** |
+| `vmread` | `process_vm_readv()` | Explicit opt-in |
 
-The decision is to **retain both backends**, validate them independently and prefer `proc` as a *candidate* for low-impact scanning. On the tested kernel, a read-only `process_vm_readv()` caused private fork/COW physical pages to become unshared **before the traced application wrote to them**. Equivalent `/proc/<pid>/mem` reads preserved shared physical-page identity in the tested scenarios. This matters because an observer should avoid perturbing the process state it is measuring.
+On the tested ARM64 Linux kernel, read-only `process_vm_readv()` caused physical unsharing of fork-inherited private pages **before an application write**. Equivalent reads through `/proc/<pid>/mem` preserved shared PFN identity. This was reproducible both in a standalone C fixture and under RuntimeXRay.
 
-The original default remains `vmread` during Stage D. The experiments do **not** establish that `/proc/<pid>/mem` is side-effect-free on every kernel, mapping type, or workload. Nor do they establish that all RuntimeXRay reads, including syscall-buffer capture elsewhere in the tracer, are free of COW side effects.
+The measured tradeoff is real: `proc` is considerably faster for a first read of these shared pages, while `vmread` is faster after those pages have already become unshared. We are not claiming that `proc` is universally faster, side-effect-free, or equivalent on every Linux kernel.
 
-## 2. Why we investigated
+**Decision:** Keep both mechanisms, use `proc` as the normal reader, expose `--memory-reader proc|vmread` for deliberate comparison, and do not silently fall back between mechanisms. This is an observational-impact decision informed by correctness tests, not a claim of a universal throughput win.
 
-A forked child may share the same physical `MAP_PRIVATE` page with its parent until the first application write. RuntimeXRay performs `InitialInspection` for each process image, including forked children. The original bulk scanner read target pages with `process_vm_readv()`; during strict COW regression, the fixture observed unexpected PFN divergence **prior to the first application write**.
+The separately maintained [benchmark page](benchmarks/memory-readers.html) contains interactive graphs and downloadable statistical summaries.
 
-We isolated the effect using a standalone parent/child program with a pre-populated private page and `/proc/<pid>/pagemap` PFN comparison. The outcomes on the validation host were:
+## 2. Origin of the investigation
 
-| Remote-read operation | PFNs before read | PFNs after read | Observation |
+After `fork()`, a parent and child can share the same physical pages for private mappings until one writes. RuntimeXRay may inspect a child during its bounded `InitialInspection`, before application writes occur. Earlier strict `fork_cow_mutation` tests detected unexpected divergence of parent/child page-frame numbers (PFNs) at this pre-write stage.
+
+A standalone reproducer compared the parent and child PFNs using `/proc/<pid>/pagemap`:
+
+| Operation before first application write | PFNs before | PFNs after | Result |
 | --- | --- | --- | --- |
-| No remote read | Equal | Equal | Shared COW page retained |
-| One-byte `process_vm_readv()` | Equal | Different | Remote read alone caused physical unsharing |
-| One-byte `/proc/<pid>/mem` `pread()` | Equal | Equal | Remote read retained physical sharing |
+| No remote read | Equal | Equal | Expected COW sharing |
+| One-byte `process_vm_readv()` read | Equal | Different | Early physical unsharing |
+| One-byte `pread(/proc/<pid>/mem)` | Equal | Equal | Sharing preserved |
 
-The test was independent of RuntimeXRay. The result supports a kernel-level cause, not a RuntimeXRay lineage-algorithm defect. A plausible kernel mechanism is the `FOLL_PIN` / `gup_must_unshare()` path used by `process_vm_readv()` on this kernel; do not generalize the exact mechanism to every Linux version without checking its source and configuration.
+This isolates the observation from RuntimeXRay's evidence graph. A plausible kernel explanation is the `FOLL_PIN` / `gup_must_unshare()` path on the specific tested kernel; it is a hypothesis about the kernel implementation, not proof that all Linux versions take the same path.
 
-## 3. Implementation
+PFN divergence measures page identity, **not** an equivalent measured increase in RSS, PSS or private-dirty bytes.
 
-| File | Responsibility |
+## 3. Implementation and configuration
+
+The design includes a common reader interface and backend selection:
+
+| Component | Role |
 | --- | --- |
-| `include/memory_reader.hpp` | `MemoryReader` interface, `MemoryReadBackend`, `open_memory_reader()` factory |
-| `src/memory_reader.cpp` | `ProcessVmMemoryReader`, `ProcMemMemoryReader`, error checking and descriptor RAII |
-| `src/memory_scanner.cpp` | Calls the selected reader instead of directly invoking `process_vm_readv()` |
-| `CMakeLists.txt` | Compiles `src/memory_reader.cpp` and registers Stage D regression tests |
-| `tests/test_memory_reader_cow_differential.sh` | Controlled negative/positive COW comparison of the two backends |
-| `tests/test_memory_reader_evidence_parity.sh` | Semantic evidence parity across fork and exec scenarios |
+| `include/memory_reader.hpp` | `MemoryReader` interface, `MemoryReadBackend` and factory |
+| `src/memory_reader.cpp` | `ProcMemMemoryReader` and `ProcessVmMemoryReader` with resource/error handling |
+| `src/memory_scanner.cpp` | Bulk scanner reads through the selected interface |
+| `include/common_cli.hpp` / `src/common_cli.cpp` | Default and CLI parsing |
+| `src/commands/trace_command.cpp` | Trace command and scan-session selection |
+| `src/commands/mem_command.cpp` | Standalone memory-scan command |
+| `include/itrace_backend.hpp` | Propagation in `TraceConfig` |
+| `src/ptrace_backend.cpp` / `src/ebpf_backend.cpp` | Userspace capture readers |
+| `src/tachikoma.cpp` | Ptrace tracer memory reads |
 
-Selection is currently via an **experimental environment variable**:
+The default is `MemoryReadBackend::ProcMem`. The selection flows explicitly through the trace/mem commands and reader-using components. It is not a runtime-global setting or a hidden mutable environment dependency.
 
-```sh
-# Legacy default: process_vm_readv()
-./build/runtimexray trace ...
+~~~sh
+# Default (proc)
+./build/runtimexray mem <pid>
+./build/runtimexray trace --backend ptrace --scan-memory /bin/true
 
-# Explicit old backend
-RXRAY_MEMORY_READ_BACKEND=vmread ./build/runtimexray trace ...
+# Opt into process_vm_readv
+./build/runtimexray mem --memory-reader vmread <pid>
+./build/runtimexray trace --memory-reader vmread --backend ptrace --scan-memory /bin/true
+~~~
 
-# Experimental alternative
-RXRAY_MEMORY_READ_BACKEND=proc ./build/runtimexray trace ...
-```
+Both `--memory-reader proc` and `--memory-reader=proc` forms are supported by the common CLI parser. `RXRAY_MEMORY_READ_BACKEND` was an experimental Stage D.1/D.2 setting and is **no longer the selector**. The old documentation describing `vmread` as the default is superseded by this revision.
 
-This is not yet a documented end-user CLI setting. Reader selection does not silently fall back to the other backend. A `ProcMem` descriptor is opened for one scan and is not retained across `execve()` generations. Existing VMA prioritization, 4096-byte scanner chunks, secret extraction and scan-budget accounting were intended to remain unchanged by the backend substitution.
+The reader does **not** automatically switch methods after a read failure. Such a switch would change COW and access semantics without a deliberate user decision. A `/proc/<pid>/mem` descriptor is scoped to its reader/session, not intentionally retained across process-image generations.
 
-**Scope boundary:** the new abstraction covers the **bulk memory scanner**. It does not automatically change every other tracer facility that may read a tracee's memory.
+The independent memory-reader lifecycle regression (commit `357f722`) exercises reader behavior across VMA and process transitions. Direct production `process_vm_readv()` calls were audited: the actual invocation is in `src/memory_reader.cpp`; syscall-name tables and standalone test benchmarks are intentional exceptions.
 
-## 4. Contiguous 32 MiB benchmark
+See [Stage D.5 configuration](STAGE_D5_UNIFIED_MEMORY_READER_CONFIGURATION.md) for the end-to-end option contract and test matrix.
 
-**Environment:** validation host, 32 MiB resident private anonymous memory, 8192 4-KiB pages; first (“cold”) pass plus five repeated (“warm”) passes, separate fork for each configuration. The benchmark timed the read sweeps, excluding process creation and auxiliary pagemap/smaps measurements. One timed run per configuration; these are measurements, not confidence intervals.
+## 4. Benchmark method and host
 
-Source: `tests/benchmarks/benchmark_remote_memory_cow.c` (if copied into the repository; otherwise retain the original experimental source).
+The measurements were taken on 2026-10-22 UTC:
 
-Command:
+- Linux `6.17.0-1018-oracle`, AArch64, ARM Neoverse-N1, **one virtual CPU**.
+- 4096-byte pages, root/privileged access to PFN information.
+- Two separate C fixtures in `tests/benchmarks/`.
+- Read chunks of 4, 64 and 256 KiB.
+- Fresh fork per benchmark case; one first (**cold**) pass and five subsequent (**warm**) passes.
+- Ten invocations per method/block/layout in the final main series.
+- Contiguous run order alternated `proc` / `vmread`; the VMA fixture uses its fixed method order.
+- Results below are **medians** in MiB/s. IQR is the interpolated P25–P75 interval from ten observations.
+- Timed loops exclude fork, `pagemap`, `smaps`, and open/close. The `proc` reader needs extra file-open/close operations not reflected in these throughput numbers.
 
-```sh
+**Important:** the two readers finish the cold sweep in different COW states. Warm-pass rates are useful but should not be read as measurements of identical resulting physical memory layouts.
+
+### 4.1 Contiguous 32 MiB private-memory fixture
+
+There are 8192 tracked pages. Every case starts from a fresh shared COW state.
+
+| Method | Block | Cold median | Cold P25–P75 | Warm median | Warm P25–P75 | PFN splits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `proc` | 4 KiB | 2765.30 | 2720.05–2777.25 | 2694.90 | 2678.57–2702.55 | 0/8192 |
+| `vmread` | 4 KiB | 901.25 | 874.45–913.58 | 3007.85 | 2993.88–3033.93 | 8192/8192 |
+| `proc` | 64 KiB | 3574.60 | 3452.20–3692.10 | 3598.20 | 3534.10–3665.77 | 0/8192 |
+| `vmread` | 64 KiB | 977.65 | 972.22–988.40 | 4667.80 | 4643.10–4680.55 | 8192/8192 |
+| `proc` | 256 KiB | 3608.45 | 3597.25–3685.68 | 3643.30 | 3606.57–3704.45 | 0/8192 |
+| `vmread` | 256 KiB | 922.25 | 906.08–958.55 | 4707.10 | 4686.68–4756.10 | 8192/8192 |
+
+At 256 KiB, `proc` had approximately **3.91×** the cold throughput, whereas `vmread` had approximately **29% higher** warm throughput. The split count was invariant across all ten repetitions in each configuration.
+
+### 4.2 Fragmented readable mappings — 410 VMA
+
+The fixture models private anonymous RW/RO/RX, shared anonymous, private/shared file-backed mappings, `PROT_NONE` and holes. The maps-aware policy scans **only the readable ranges** and respects VMA boundaries. Readable data: **25.62 MiB**. Tracked shared COW pages: **3296**.
+
+| Method | Block | Cold median | Cold P25–P75 | Warm median | Warm P25–P75 | PFN splits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `proc` | 4 KiB | 2489.75 | 2465.82–2541.32 | 2634.40 | 2623.57–2658.95 | 0/3296 |
+| `vmread` | 4 KiB | 886.75 | 868.50–915.50 | 3018.20 | 3003.17–3036.97 | 3296/3296 |
+| `proc` | 64 KiB | 3330.00 | 3216.15–3349.45 | 3538.80 | 3462.65–3594.25 | 0/3296 |
+| `vmread` | 64 KiB | 1006.00 | 981.02–1021.52 | 4780.20 | 4672.50–4824.20 | 3296/3296 |
+| `proc` | 256 KiB | 3288.95 | 3188.70–3385.82 | 3507.55 | 3484.20–3537.65 | 0/3296 |
+| `vmread` | 256 KiB | 991.30 | 973.95–1009.20 | 4748.80 | 4661.68–4877.65 | 3296/3296 |
+
+For this layout, 64- and 256-KiB buffers both require 410 cold read calls because the readable VMAs are generally only 64 KiB.
+
+### 4.3 Fragmented readable mappings — 102 VMA
+
+Readable data: **25.50 MiB**. Tracked shared COW pages: **3264**.
+
+| Method | Block | Cold median | Cold P25–P75 | Warm median | Warm P25–P75 | PFN splits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `proc` | 4 KiB | 2546.00 | 2531.90–2562.53 | 2635.15 | 2617.40–2659.22 | 0/3264 |
+| `vmread` | 4 KiB | 911.30 | 897.05–917.75 | 3000.95 | 2978.50–3043.13 | 3264/3264 |
+| `proc` | 64 KiB | 3308.90 | 3285.55–3359.65 | 3496.60 | 3452.22–3523.07 | 0/3264 |
+| `vmread` | 64 KiB | 1007.40 | 993.23–1023.55 | 4700.20 | 4634.70–4807.30 | 3264/3264 |
+| `proc` | 256 KiB | 3300.95 | 3244.25–3319.68 | 3540.55 | 3524.45–3574.13 | 0/3264 |
+| `vmread` | 256 KiB | 977.15 | 947.80–983.95 | 4898.90 | 4756.73–4931.27 | 3264/3264 |
+
+At 102 VMAs, the 256-KiB size reduces read calls relative to 64-KiB, but the observed `proc` throughput gain is small. Increasing RuntimeXRay's actual scan size remains **future work**: the scanner currently processes 4096-byte chunks, and boundary-spanning secret recognition must be validated before changing it.
+
+## 5. Access semantics: explicit probe across inaccessible ranges
+
+The VMA benchmark also has a deliberate `--probe` mode. Unlike the maps-aware throughput tests, it attempts reads across mapped readable regions, `PROT_NONE` and unmapped holes. The two APIs therefore have **different workloads**. The measurements below are from one probe run per layout, using 4-KiB blocks.
+
+| Layout | Method | Data read | Failed read attempts | Interpretation |
+| --- | --- | ---: | ---: | --- |
+| 410 VMA | `vmread` | 25.62 MiB | 1632 | `PROT_NONE` and holes rejected |
+| 410 VMA | `proc` | 28.81 MiB | 816 | `PROT_NONE` read; holes rejected |
+| 102 VMA | `vmread` | 25.50 MiB | 1664 | `PROT_NONE` and holes rejected |
+| 102 VMA | `proc` | 28.75 MiB | 832 | `PROT_NONE` read; holes rejected |
+
+The extra approximately 3.19/3.25 MiB read through `proc` corresponds to the probe's `PROT_NONE` pages. This does **not** imply a privilege bypass: inspecting the process still requires appropriate process-access permissions. It means API selection and VMA selection policy are different questions. RuntimeXRay must not accidentally broaden its scan to intentionally protected mappings just because one reader can access them.
+
+Do **not** compare probe MiB/s as equivalent workloads. Some larger-block probe rows also report short reads at protection boundaries; these are access-semantics diagnostics, not throughput evidence.
+
+## 6. RuntimeXRay correctness regressions
+
+### 6.1 Strict fork/COW differential
+
+`tests/test_memory_reader_cow_differential.sh` compares:
+
+1. The untraced fixture's shared-before-write physical PFNs.
+2. `vmread` as the **expected negative control** on the validation kernel: early unsharing must fail the fixture specifically for a pre-write PFN mismatch.
+3. `proc` as the positive control: both parent-first and child-first write orders preserve sharing until the application writes.
+4. Bounded child `InitialInspection` evidence and the expected three-node process graph.
+
+The earlier strict run recorded shared PFNs before writing and divergent PFNs only after the first application write, with both parent-first and child-first content checks passing. The fixture's captured output, not just the tracer's exit code, is checked.
+
+The script uses exit code **125** for an unsupported privilege/PFN environment; CTest should register `SKIP_RETURN_CODE 125`. The negative control is specifically host dependent. Lack of a COW side effect on another Linux kernel is not automatically a RuntimeXRay regression.
+
+### 6.2 Secret evidence parity
+
+`tests/test_memory_reader_evidence_parity.sh` verifies semantic rather than byte-for-byte JSON parity for:
+
+- `fork_cow_secret`: inherited child secret, separate process instances, child memory observation, no fabricated secret `DataFlow`.
+- `exec_memory_transition`: failed exec remains generation 0, successful exec becomes generation 1 in the same process instance, old/new secrets stay attributed to their correct images.
+- Bounded `InitialInspection` in the correct generation.
+
+Each RuntimeXRay invocation creates a new random HMAC fingerprint key. Fingerprint bytes are **not** comparable across separate runs; normalized semantic claims and within-report fingerprints are.
+
+### 6.3 Reader lifecycle and CLI
+
+- `tests/test_memory_reader_lifecycle.cpp` covers reader lifecycle across VMA/process transitions; committed locally as `357f722`.
+- `tests/test_memory_reader_cli.sh` checks default/explicit reader selection, errors for missing/invalid values, and actual syscall selection where `strace` is available.
+- Both standalone `mem` and `trace` commands use the same explicit selection model.
+- Earlier Stage D differential/parity scripts were migrated from `RXRAY_MEMORY_READ_BACKEND` to `--memory-reader`.
+
+The user reported the dedicated tests and the relevant full CTest runs **GREEN**. This is a validation record for the tested source tree and host, not a claim that every kernel/environment has been tested.
+
+## 7. Reproduction
+
+From the repository root:
+
+~~~sh
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure -j"$(nproc)"
+~~~
+
+Run the independent microbenchmarks:
+
+~~~sh
 cc -std=c11 -O2 -Wall -Wextra -Werror \
   tests/benchmarks/benchmark_remote_memory_cow.c \
   -o /tmp/benchmark_remote_memory_cow
-sudo /tmp/benchmark_remote_memory_cow --mb 32 --warm 5
-```
 
-| Reader | Block | Cold, ms | Cold, MiB/s | Warm, MiB/s | Shared PFNs before → after | PFN splits |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `vmread` | 4 KiB | 35.76 | 894.9 | 3596.6 | 8192 → 0 | 8192 |
-| `proc` | 4 KiB | 11.81 | 2710.6 | 2839.9 | 8192 → 8192 | 0 |
-| `vmread` | 64 KiB | 32.45 | 986.2 | 5348.4 | 8192 → 0 | 8192 |
-| `proc` | 64 KiB | 8.44 | 3789.6 | 3942.0 | 8192 → 8192 | 0 |
-| `vmread` | 256 KiB | 34.88 | 917.3 | 6324.6 | 8192 → 0 | 8192 |
-| `proc` | 256 KiB | 8.21 | 3897.1 | 3942.2 | 8192 → 8192 | 0 |
+sudo /tmp/benchmark_remote_memory_cow --mb 32 --warm 5 --method both
 
-The `proc` path was substantially faster on the first pass; `vmread` was faster on repeated passes. Crucially, after the first pass the physical-page sharing state was **different**, so warm-pass timings are informative but not comparisons of precisely identical memory state. The 8192 diverged pages represent 32 MiB of private physical-page identities, **not** a direct measurement of a 32-MiB increment in RSS or `Private_Dirty`.
-
-## 5. Fragmented VMA benchmark
-
-A second synthetic tracee models a fragmented address space containing private anonymous RW/RO/RX, shared anonymous RW, private file-backed RO and dirty, shared file-backed RW/RO, `PROT_NONE`, and unmapped holes. The `maps` policy visits readable mappings and respects VMA boundaries. The `probe` policy deliberately attempts to cross protected/unmapped regions and is primarily for access-semantics diagnostics.
-
-Source: `tests/benchmarks/benchmark_remote_memory_vma.c` (if copied into the repository).
-
-```sh
 cc -std=c11 -O2 -Wall -Wextra -Werror \
   tests/benchmarks/benchmark_remote_memory_vma.c \
   -o /tmp/benchmark_remote_memory_vma
 
-sudo /tmp/benchmark_remote_memory_vma \
-  --mb 32 --warm 5 --segment-pages 16 --probe
+sudo /tmp/benchmark_remote_memory_vma --mb 32 --warm 5 --segment-pages 16
+sudo /tmp/benchmark_remote_memory_vma --mb 32 --warm 5 --segment-pages 64
+sudo /tmp/benchmark_remote_memory_vma --mb 32 --warm 5 --segment-pages 16 --probe
+~~~
 
-sudo /tmp/benchmark_remote_memory_vma \
-  --mb 32 --warm 5 --segment-pages 64 --probe
-```
+The repeated benchmark logs were saved by the operator under `build/benchmarks/stage-d/`:
 
-### `maps` policy: directly comparable workloads
+- `system.txt` — uname, CPU and page size.
+- `cow-baseline.txt` — initial contiguous measurement.
+- `cow-repeats.txt` — ten contiguous repeats (60 data rows).
+- `vma-maps-repeats.txt` — ten repeats at each VMA density (120 data rows).
+- `vma-probe.txt` — explicit access-semantics probe.
 
-| Readable VMAs | Data | Reader | Block | Cold, ms | Cold, MiB/s | Warm, MiB/s | Read calls, cold | Tracked PFN splits |
-| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 410 | 25.62 MiB | `vmread` | 4 KiB | 27.02 | 948.5 | 3155.1 | 6560 | 3296 / 3296 |
-| 410 | 25.62 MiB | `proc` | 4 KiB | 9.87 | 2597.2 | 2815.0 | 6560 | 0 / 3296 |
-| 410 | 25.62 MiB | `vmread` | 64 KiB | 24.13 | 1062.1 | 5002.3 | 410 | 3296 / 3296 |
-| 410 | 25.62 MiB | `proc` | 64 KiB | 7.25 | 3532.6 | 3677.9 | 410 | 0 / 3296 |
-| 410 | 25.62 MiB | `vmread` | 256 KiB | 24.78 | 1034.1 | 5138.4 | 410 | 3296 / 3296 |
-| 410 | 25.62 MiB | `proc` | 256 KiB | 7.17 | 3575.3 | 3772.7 | 410 | 0 / 3296 |
-| 102 | 25.50 MiB | `vmread` | 64 KiB | 25.53 | 998.6 | 4972.9 | 408 | 3264 / 3264 |
-| 102 | 25.50 MiB | `proc` | 64 KiB | 7.90 | 3227.7 | 3841.4 | 408 | 0 / 3264 |
-| 102 | 25.50 MiB | `vmread` | 256 KiB | 25.13 | 1014.8 | 5391.4 | 102 | 3264 / 3264 |
-| 102 | 25.50 MiB | `proc` | 256 KiB | 7.42 | 3434.7 | 3923.0 | 102 | 0 / 3264 |
+The HTML page embeds aggregate results and exports a summary CSV. **Before public publication**, consider checking in sanitized raw logs or a machine-readable raw dataset to make the calculation of quantiles independently verifiable. The raw logs have not been claimed to be committed.
 
-At 410 VMAs, a 256-KiB buffer still produces 410 reads because VMAs are generally only 64 KiB. Increasing the buffer past the typical accessible VMA size cannot reduce the number of reads. At 102 VMAs, 256-KiB blocks reduce cold read-call count from 408 to 102, but offer only a modest additional gain for `proc`. A 64-KiB read block is an interesting **future optimization candidate**, *not* yet an approved scanner change: secret extraction currently operates on 4096-byte chunks, and changing boundaries may alter detections.
+## 8. Historical Stage D.1/D.2 exploratory measurements
 
-### `probe` policy: intentionally different workloads
+Before the ten-repeat campaign, single-invocation benchmark runs on the same host motivated the implementation. They were never confidence intervals.
 
-For the 410-VMA, 4-KiB case:
+| Layout | Reader | Block | Earlier cold MiB/s | Earlier warm MiB/s | PFN splits |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Contiguous 32 MiB | `vmread` | 4 KiB | 894.9 | 3596.6 | 8192 |
+| Contiguous 32 MiB | `proc` | 4 KiB | 2710.6 | 2839.9 | 0 |
+| Contiguous 32 MiB | `vmread` | 64 KiB | 986.2 | 5348.4 | 8192 |
+| Contiguous 32 MiB | `proc` | 64 KiB | 3789.6 | 3942.0 | 0 |
+| Contiguous 32 MiB | `vmread` | 256 KiB | 917.3 | 6324.6 | 8192 |
+| Contiguous 32 MiB | `proc` | 256 KiB | 3897.1 | 3942.2 | 0 |
 
-| Reader | Bytes read | Cold read errors | Interpretation |
-| --- | ---: | ---: | --- |
-| `vmread` | 25.62 MiB | 1632 | Unmapped holes and `PROT_NONE` unreadable in this experiment |
-| `proc` | 28.81 MiB | 816 | `PROT_NONE` readable through this API on this host; holes unreadable |
+Earlier fragmented runs likewise showed 3296/3296 or 3264/3264 split by `vmread` and zero split by `proc`. The present 10-repeat series supersedes earlier single-sample rates for reporting. Historical figures are retained so the decision trail is not lost.
 
-The data volume is **not equal** under `probe`; therefore a throughput comparison of these rows is not a fair same-workload performance comparison. Reading otherwise protected mappings is a separate **policy and security** choice, not something to enable accidentally as a consequence of changing the API.
+## 9. Limitations, risks and follow-up
 
-## 6. Strict COW regression under RuntimeXRay
+1. **Kernel dependence.** `FOLL_PIN` behavior, procfs access semantics, huge pages, process permissions, and special mappings vary. Recheck on x86-64 and other kernels.
+2. **Timing boundaries.** End-to-end scanner performance includes open/close, VMA enumeration, selection, secret extraction, scheduling and report generation; the microbenchmark does not.
+3. **Physical accounting.** PFN identity is not RSS/PSS. Use `smaps` and complementary measurements before claiming memory-capacity savings.
+4. **Protected regions.** `proc` may read `PROT_NONE` under authorized inspection; use explicit VMA policy rather than backend-dependent accidental expansion.
+5. **Races and lifecycle.** A target can exit, exec, change permissions or remap a VMA while scanning. Preserve correct short-read and error behavior.
+6. **Application representativeness.** Synthetic contiguous and mixed-VMA mappings do not establish results for all real applications. Add controlled real-process tests.
+7. **Buffer size.** Preserve existing 4-KiB scanner chunks until detection parity is demonstrated at larger read granularity.
+8. **Non-COW side effects.** Neither backend has been proven completely non-invasive for every mapping and device type; use precise claims.
+9. **Raw data provenance.** Publish raw trial outputs with environment metadata when turning the HTML dashboard into a public research artifact.
 
-The `fork_cow_mutation` fixture executes independent **parent-first** and **child-first** write orders. Each pair reads its original private page before either party writes, confirms shared PFNs, performs the first write, then verifies distinct PFNs and correct private contents. PFNs come from `/proc/<pid>/pagemap` and must be genuinely available; masking them is not acceptable proof of COW preservation.
+## 10. Acceptance record
 
-**Manual strict `proc` run:**
-
-```sh
-D=$(sudo mktemp -d /tmp/rxr-procmem-XXXXXX)
-sudo env -u RXRAY_SKIP_PFN_CHECK RXRAY_MEMORY_READ_BACKEND=proc \
-  ./build/runtimexray trace \
-    --backend ptrace --follow-forks --scan-memory \
-    --json "$D/report.json" --report /dev/null \
-    /tmp/fork_cow_mutation
-```
-
-Observed log on the validation host:
-
-```text
-PFN_CHECK stage=before_write parent_pid=1385852 child_pid=1385853 ... parent_pfn=0x122430 child_pfn=0x122430 equal=1
-PFN_CHECK stage=after_first_write parent_pid=1385852 child_pid=1385853 ... parent_pfn=0x1644ae child_pfn=0x122430 equal=0
-PFN_CHECK stage=before_write parent_pid=1385852 child_pid=1385854 ... parent_pfn=0x151f95 child_pfn=0x151f95 equal=1
-PFN_CHECK stage=after_first_write parent_pid=1385852 child_pid=1385854 ... parent_pfn=0x151f95 child_pfn=0x169e9d equal=0
-PASS: parent-first COW preserves child's original, then isolates both edits
-PASS: child-first COW preserves parent's original, then isolates both edits
-PASS: physical PFN shared after reads; PFNs diverged after first COW write
-```
-
-The JSON report contained **three `process` nodes** (one parent, two children). RuntimeXRay logs showed separate bounded `InitialInspection` scans for both children. This run omitted `RXRAY_SKIP_PFN_CHECK`; the physical PFN assertions genuinely ran.
-
-### Automated differential control
-
-`tests/test_memory_reader_cow_differential.sh`:
-
-1. Runs the untraced fixture as a physical-PFN baseline.
-2. Runs RuntimeXRay with `RXRAY_MEMORY_READ_BACKEND=vmread`. **Expected negative control:** the fixture fails specifically with `physical PFN relationship unexpected (before first write)`. An unrelated failure does not pass.
-3. Runs with `RXRAY_MEMORY_READ_BACKEND=proc`. **Expected positive control:** both write orders pass strict PFN assertions.
-4. Checks the process graph and evidence that children received bounded `InitialInspection` scans. It inspects the **tracee's captured fixture output**, not merely RuntimeXRay's exit status.
-
-Verified output:
-
-```text
-PASS: baseline COW PFN behavior verified without RuntimeXRay
-PASS: vmread caused early COW PFN unsharing (expected negative control)
-PASS: proc preserved shared PFNs until application write, in both orders
-PASS: both backends performed bounded child InitialInspection scans
-PASS: Stage D differential COW regression
-```
-
-The test uses **exit code 125 as SKIP** when essential environmental requirements (e.g. readable PFNs or usable sudo) are unavailable. In CTest it must be registered with `SKIP_RETURN_CODE 125`. The negative control is **kernel-specific**: on a kernel without `vmread`-induced COW unsharing, the test should be adapted or classified as not applicable, not misinterpreted as a product regression.
-
-## 7. Evidence parity regression
-
-`tests/test_memory_reader_evidence_parity.sh` runs the `fork_cow_secret` and `exec_memory_transition` fixtures separately under both backends (four traced runs total). It compares **semantic invariants**, not whole JSON files:
-
-- Inherited password in the child after parent erase, distinct parent/child process instances, and child `observed_in` memory evidence.
-- No invented secret `DataFlow` in the memory-only fork case.
-- A failed `execve` remains in generation 0; successful `execve` advances the image to generation 1 in the same process instance.
-- Each generation independently has environment and memory evidence for its password, linked by fingerprint **within that report**; old password is not spuriously attributed to the new image.
-- `InitialInspection` is bounded and attached to the expected process generation.
-
-**Important:** the `SecretFingerprinter` creates a new random HMAC key per RuntimeXRay run. Fingerprint strings are **not** comparable across independently executed trace sessions. The test compares matching fingerprints within a report and a normalized set of semantic claims between reports. Duplicate environment observations are allowed if they agree on one **distinct** password fingerprint; an exact count of one observation would be an invalid assertion.
-
-Verified output:
-
-```text
-PASS: fork evidence parity (child password, observed_in, instance separation)
-PASS: exec evidence parity (two generations, old/new secret isolation)
-PASS: both backends use bounded InitialInspection
-PASS: no invented secret DataFlow in either scenario
-PASS: Stage D.2 memory reader evidence parity
-```
-
-The original overly restrictive environment assertion was corrected (one unique fingerprint instead of one observation); the revised test was reported GREEN.
-
-## 8. Reproduction and regression commands
-
-From the repository root:
-
-```sh
-cmake -S . -B build
-cmake --build build -j"$(nproc)"
-
-# Explicitly validate Stage D tests
-ctest --test-dir build --output-on-failure \
-  -R '^check_memory_reader_(cow_differential|evidence_parity)$'
-
-# Full default regression suite
-ctest --test-dir build --output-on-failure -j"$(nproc)"
-
-# Full suite with experimental bulk-scanner backend
-RXRAY_MEMORY_READ_BACKEND=proc \
-  ctest --test-dir build --output-on-failure -j"$(nproc)"
-```
-
-The user reported **GREEN** for both the default and `proc` full test runs, followed by **GREEN** after registering the Stage D evidence-parity test. The exact final number of registered tests was not recorded here; do not infer a count. Some older scripts may invoke `sudo` without preserving inherited environment variables; dedicated Stage D tests explicitly set the reader backend across `sudo` and are the authoritative backend-specific controls.
-
-Direct invocation of the two Stage D scripts:
-
-```sh
-./tests/test_memory_reader_cow_differential.sh ./build/runtimexray
-./tests/test_memory_reader_evidence_parity.sh ./build/runtimexray
-```
-
-### Required sources and prerequisites
-
-- Built `./build/runtimexray` (ptrace backend supported).
-- POSIX shell, C compiler and Python 3; passwordless `sudo` or root for privileged scripts.
-- The test fixtures in `tests/dynamic_analysis/`: `fork_cow_mutation.c`, `fork_cow_secret.c`, `exec_memory_transition.c`.
-- Readable physical PFNs through `/proc/<pid>/pagemap` for the strict differential COW test.
-- CTest test names and `SKIP_RETURN_CODE 125` as described above.
-- Benchmark C sources must be checked in to `tests/benchmarks/` if reproducibility from a fresh clone is desired.
-
-## 9. Limitations and follow-up
-
-1. **Host-specific observations.** COW/unshare and `FOLL_PIN` behavior, ptrace permission checks, procfs semantics, huge pages, and special mappings can differ by kernel and configuration. Do not globally promise non-invasive reads.
-2. **Benchmark representativeness.** Test mappings are synthetic; run against controlled real applications too. Repeat runs, randomize order, assess noise and include whole-trace overhead before using these numbers for performance claims.
-3. **Physical memory accounting.** PFN divergence alone does not establish RSS/PSS deltas. For memory-cost claims, measure per-mapping `Private_Clean`, `Private_Dirty`, RSS and PSS before/after alongside pagemap and (where appropriate) system-wide consumption.
-4. **Beyond bulk scanning.** Audit any tracer paths that still call `process_vm_readv()` for syscall arguments or other captures; a bulk-scanner backend switch does not eliminate potential side effects elsewhere.
-5. **Access-policy difference.** `/proc/<pid>/mem` may access `PROT_NONE` on this kernel; preserve deliberate VMA filtering until policy and security implications are reviewed.
-6. **Correctness under races.** VMAs can change while being scanned; short reads, holes, target exit, permission changes and `execve()` transitions remain real cases. Continue tests for each.
-7. **Buffer size.** Maintain 4096-byte scanner chunks until detection behavior (especially boundary-crossing secrets) is validated with larger read sizes.
-8. **Default selection.** A change from `vmread` to `proc` as the product default should be a **separate, explicit change** backed by tests and documentation; Stage D alone does not change the default.
-
-## 10. Stage D acceptance record
-
-| Acceptance criterion | Result |
+| Criterion | Status |
 | --- | --- |
-| Explicit backend abstraction, no silent fallback | Implemented |
-| Existing behavior retained by default | Implemented (`vmread`) |
-| Standalone kernel-level COW differential reproducer | PASS on validation host |
-| Contiguous and fragmented-VMA benchmarks | Completed; results above |
-| Strict parent-first and child-first PFN check with `proc` | PASS |
-| `vmread` negative COW control | PASS (expected early PFN split) |
-| `proc` positive COW control | PASS (sharing preserved to first write) |
-| Fork and exec semantic evidence parity | PASS |
-| Stage D tests registered in CTest | Reported complete |
-| Full CTest regressions | Reported GREEN |
-| Switch production default to `proc` | **Not yet performed** |
+| Memory reader abstraction with two backends | Implemented |
+| No silent fallback | Implemented |
+| Default switched to `proc` | Implemented |
+| Unified `--memory-reader proc|vmread` for trace and mem | Implemented |
+| Experimental env selector removed | Implemented |
+| Reader-using tracer/scanner paths audited | Reported complete |
+| Standalone kernel-level COW differential | PASS on validation host |
+| Ten-repeat contiguous and VMA benchmarks | Complete (180 rows) |
+| Explicit `PROT_NONE`/hole probe | Complete |
+| Strict fork COW positive/negative controls | PASS on validation host |
+| Fork/exec evidence parity | PASS |
+| Lifecycle and CLI selection tests | Reported GREEN |
+| Full regression suite | Reported GREEN |
+| Public HTML visualization | Prepared at `docs/benchmarks/memory-readers.html` |
 
-**Conclusion:** On the measured Linux host, `/proc/<pid>/mem` is a compelling lower-impact backend for bounded RuntimeXRay memory inspection. Both mechanisms remain available so behavior can be measured and validated rather than assumed. Stage D captures the implementation, experimental evidence and reproducible acceptance tests; changing the production default is the next independent decision.
-
+**Conclusion:** The measured evidence supports `/proc/<pid>/mem` as the default lower-perturbation reader for the tested RuntimeXRay workflow, while preserving explicit access to `process_vm_readv()` for comparison, compatibility and future kernels. The remaining work is wider-host validation, raw data publication and end-to-end workload benchmarking.

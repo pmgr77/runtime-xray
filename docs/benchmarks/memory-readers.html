@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Reproducible Linux memory reader benchmarks: performance, fork/COW effects and access semantics.">
+  <meta name="color-scheme" content="dark">
+  <title>Memory Reader Benchmarks · RuntimeXRay</title>
+  <style>
+    :root{--bg:#071116;--panel:#0e2029;--line:#29454f;--fg:#ecf6f9;--muted:#aac0c9;--teal:#55e2c9;--purple:#bda4ff;--amber:#ffc98a;--rose:#ff879a}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}
+    body{margin:0;color:var(--fg);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(ellipse at 82% 0%,#173846 0%,transparent 42%),var(--bg)}
+    body:before{content:"";position:fixed;inset:0;background-image:radial-gradient(#375b68 .6px,transparent .6px);background-size:23px 23px;opacity:.21;z-index:-1;pointer-events:none}
+    a{color:var(--teal);text-underline-offset:3px}a:hover{color:#c3fff1}
+    .wrap{max-width:1130px;margin:auto;padding:0 24px}
+    header{border-bottom:1px solid #213b46;padding:18px 0}
+    nav{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .brand{font-weight:800;color:var(--fg);text-decoration:none;display:flex;align-items:center;gap:10px}
+    .logo{font:800 16px ui-monospace,monospace;color:var(--teal);border:1px solid #487b7e;border-radius:9px;width:33px;height:33px;display:grid;place-items:center}
+    .navlinks{display:flex;gap:20px;font-size:.84rem}.navlinks a{color:#a9c0c9;text-decoration:none}
+    .hero{padding:78px 0 39px;max-width:850px}
+    .eyebrow{font:700 .75rem ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+    h1{font-size:clamp(2.7rem,6.2vw,5.5rem);letter-spacing:-.06em;line-height:1.06;margin:19px 0 22px}
+    h1 span{background:linear-gradient(100deg,#52e3c9,#bcfff0 58%,#bda4ff);color:transparent;background-clip:text}
+    .lead{max-width:720px;color:#b8ced7;font-size:1.16rem;line-height:1.7}
+    .tags{display:flex;gap:9px;flex-wrap:wrap;margin-top:27px}
+    .tag{font:.74rem ui-monospace,monospace;padding:7px 11px;border:1px solid #2b4b58;border-radius:100px;background:#0d2631;color:#a9c5cf}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px;margin:10px 0 79px}
+    .stat,.panel,.tile{background:linear-gradient(145deg,#112b35,#0b1921);border:1px solid var(--line);border-radius:16px}
+    .stat{padding:23px 20px;min-height:139px}
+    .stat strong{font-size:clamp(2rem,3.5vw,3rem);line-height:1.1;letter-spacing:-.045em;font-variant-numeric:tabular-nums}
+    .stat p{margin:12px 0 0;color:var(--muted);font-size:.82rem}
+    .teal{color:var(--teal)}.purple{color:var(--purple)}.amber{color:var(--amber)}.rose{color:var(--rose)}
+    section{margin-bottom:78px;scroll-margin-top:32px}
+    .section-id{font:.75rem ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase;color:var(--teal)}
+    h2{font-size:clamp(1.85rem,3.5vw,2.55rem);line-height:1.16;letter-spacing:-.035em;margin:10px 0}
+    h3{margin:0 0 7px;font-size:1.08rem}
+    .sub{color:var(--muted);max-width:760px;margin:12px 0 22px}
+    .panel{padding:25px}.panel+ .panel{margin-top:16px}
+    .controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
+    .seg{display:flex;gap:4px;padding:5px;border:1px solid #2e4b57;background:#091b23;border-radius:11px;flex-wrap:wrap}
+    button{cursor:pointer;font:inherit}
+    .seg button{font-size:.83rem;border:0;background:transparent;color:#b3c8d2;border-radius:8px;padding:7px 12px}
+    .seg button[aria-pressed=true]{background:var(--teal);color:#051c20;font-weight:750}
+    .seg.phase button[aria-pressed=true]{background:#56647a;color:white}
+    .chart{min-height:345px;margin-top:14px}.chart svg{width:100%;height:auto;display:block}
+    .legend{display:flex;gap:22px;flex-wrap:wrap;color:#adc4cc;font-size:.83rem;align-items:center;margin-top:7px}
+    .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px}
+    .callout{border-left:2px solid var(--teal);background:#102d36;padding:13px 17px;color:#c2d9df;border-radius:0 8px 8px 0;font-size:.89rem;margin-top:18px}
+    .insight{color:var(--amber);font-size:.91rem;margin:15px 0}
+    code{font:.9em ui-monospace,SFMono-Regular,Consolas,monospace;color:#b9f2e7;background:#1a3440;padding:2px 5px;border-radius:4px}
+    .cow-row{display:grid;grid-template-columns:155px 65px 1fr 146px;gap:13px;align-items:center;margin:17px 0;font-size:.83rem}
+    .cow-row .name{color:#c8d9df}.cow-row .method{color:var(--muted);font-family:ui-monospace,monospace}
+    .track{background:#203742;overflow:hidden;border-radius:20px;height:13px}
+    .fill{height:100%;background:var(--rose);border-radius:20px}.fill.proc{background:var(--teal)}
+    .cow-count{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+    .separator{border-top:1px solid #2c4852;margin:25px 0}
+    .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .tile{padding:21px}.tile .row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:13px 0 7px}
+    .tile .row strong{font-variant-numeric:tabular-nums}
+    .tile .track{height:11px}.small{font-size:.83rem;color:var(--muted)}
+    .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .method-card p{color:var(--muted);font-size:.9rem}
+    details{margin-top:19px}summary{cursor:pointer;font-weight:650;color:#cbe2e9}
+    .scroll{max-width:100%;overflow-x:auto;border-radius:9px}
+    table{border-collapse:collapse;width:100%;min-width:570px;font-size:.83rem}
+    td,th{padding:10px 12px;border-bottom:1px solid #2c4753;text-align:right;white-space:nowrap}
+    td:first-child,th:first-child{text-align:left}th{background:#17313b;color:#bdd2da;font-size:.76rem}
+    .codeblock{white-space:pre;overflow-x:auto;border:1px solid #254653;background:#06151d;border-radius:10px;padding:16px;color:#b7d8db;font:.8rem/1.65 ui-monospace,monospace}
+    .links{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
+    .linkbtn{display:inline-block;padding:10px 13px;background:#173743;color:#dcfff6;text-decoration:none;border:1px solid #46717b;border-radius:9px;font-weight:700;font-size:.81rem}
+    .linkbtn:hover{background:#25535c}.linkbtn.alt{background:transparent;color:#b6ced6}
+    footer{border-top:1px solid #27404b;padding:29px 0 49px;margin-top:70px;color:#8da6b1;font-size:.83rem;display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}
+    @media(max-width:800px){.stats{grid-template-columns:repeat(2,1fr)}.grid2,.grid3{grid-template-columns:1fr}.hero{padding:50px 0 30px}.cow-row{grid-template-columns:105px 58px 1fr}.cow-count{grid-column:3;text-align:left}}
+    @media(max-width:520px){.wrap{padding:0 14px}.stat{padding:17px 13px}.panel{padding:17px}.navlinks{gap:10px}.navlinks a{font-size:.72rem}.cow-row{grid-template-columns:98px 55px 1fr;gap:8px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  </style>
+</head>
+<body>
+  <header><div class="wrap"><nav><a href="../index.html" class="brand"><span class="logo">R×</span> RuntimeXRay <span class="small">/ Research</span></a><div class="navlinks"><a href="#performance">Performance</a><a href="#cow">COW</a><a href="#methodology">Methods</a></div></nav></div></header>
+  <main class="wrap">
+    <div class="hero">
+      <div class="eyebrow">Stage D · Experimental evidence · October 2026</div>
+      <h1>Inspect memory.<br><span>Don't change it.</span></h1>
+      <p class="lead">A read-only debugger can alter the process it observes. We benchmarked two Linux remote-memory readers to quantify performance, copy-on-write effects and access semantics.</p>
+      <div class="tags"><span class="tag">ARM64 / Neoverse-N1</span><span class="tag">Linux 6.17.0-1018-oracle</span><span class="tag">4 KiB pages</span><span class="tag">10 repeats per configuration</span></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><strong class="teal">0</strong><p>COW pages split by <code>proc</code></p></div>
+      <div class="stat"><strong class="rose">100%</strong><p>Tracked COW pages split by <code>vmread</code></p></div>
+      <div class="stat"><strong class="amber">3.9×</strong><p>Faster cold read with <code>proc</code> at 256 KiB, contiguous</p></div>
+      <div class="stat"><strong class="purple">+29%</strong><p>Faster warm read with <code>vmread</code> at 256 KiB, contiguous</p></div>
+    </div>
+    <section id="performance">
+      <div class="section-id">01 / Throughput</div><h2>Two readers. Different costs.</h2>
+      <p class="sub">Switch between memory layouts and cold or warm reads. Bars show median MiB/s; white ticks mark the 25th–75th percentile interval across ten repeats.</p>
+      <div class="panel">
+        <div class="controls">
+          <div class="seg" aria-label="Address space layout" id="layout-buttons">
+            <button data-layout="contiguous" aria-pressed="true">Contiguous</button>
+            <button data-layout="vma410" aria-pressed="false">410 VMA</button>
+            <button data-layout="vma102" aria-pressed="false">102 VMA</button>
+          </div>
+          <div class="seg phase" aria-label="Read phase" id="phase-buttons">
+            <button data-phase="cold" aria-pressed="true">Cold read</button>
+            <button data-phase="warm" aria-pressed="false">Warm ×5</button>
+          </div>
+        </div>
+        <div class="chart" id="throughput-chart" role="img" aria-label="Median memory reader throughput chart"></div>
+        <div class="legend"><span><i class="dot" style="background:var(--teal)"></i><code>/proc/&lt;pid&gt;/mem</code></span><span><i class="dot" style="background:var(--purple)"></i><code>process_vm_readv()</code></span><span>Higher is better ↑</span></div>
+        <p id="insight" class="insight" aria-live="polite"></p>
+        <details><summary>Exact medians and interquartile intervals</summary><div class="scroll" style="margin-top:12px"><table><thead><tr><th>Block</th><th>Method</th><th>P25</th><th>Median</th><th>P75</th></tr></thead><tbody id="results-table"></tbody></table></div></details>
+        <div class="callout">Cold read includes any COW work induced by the initial inspection. Warm throughput uses five further passes. Timing excludes fork, pagemap, smaps and file open/close overhead.</div>
+      </div>
+    </section>
+    <section id="cow">
+      <div class="section-id">02 / Copy-on-write</div><h2>Read-only doesn't mean side-effect-free.</h2>
+      <p class="sub">Fraction of tracked private pages physically unshared after reading a forked child's memory.</p>
+      <div class="panel"><div id="cow-chart"></div><div class="legend"><span><i class="dot" style="background:var(--rose)"></i>vmread: unshared</span><span><i class="dot" style="background:var(--teal)"></i>proc: unshared</span></div>
+        <div class="callout">Every observed <code>vmread</code> case on this kernel caused 100% tracked-PFN divergence before an application write; every <code>proc</code> case preserved sharing. Do not assume identical behavior on other kernels.</div>
+      </div>
+    </section>
+    <section id="probe">
+      <div class="section-id">03 / Access semantics</div><h2>What counts as readable?</h2>
+      <p class="sub">In an explicit 4 KiB probe crossing <code>PROT_NONE</code> regions and unmapped holes, the readers returned different byte counts. These are not equal-workload performance tests.</p>
+      <div class="grid2" id="probe-cards"></div>
+      <div class="callout"><code>/proc/&lt;pid&gt;/mem</code> read additional <code>PROT_NONE</code> pages on this tested kernel; <code>process_vm_readv()</code> did not. Both failed on holes. Access to another process still requires appropriate inspection permissions; this is not a privilege-escalation claim.</div>
+    </section>
+    <section id="methodology">
+      <div class="section-id">04 / Methodology</div><h2>Measured, not assumed.</h2><p class="sub">Direct syscall-level microbenchmarks, separate from RuntimeXRay's end-to-end tracing and scanning paths.</p>
+      <div class="grid3">
+        <div class="tile method-card"><h3>01 · Forked fixture</h3><p>Each case uses a fresh fork. A 32 MiB contiguous arena or 25.62/25.50 MiB of readable mappings spread across 410/102 VMAs. Reads use 4, 64 or 256 KiB blocks.</p></div>
+        <div class="tile method-card"><h3>02 · Ten repetitions</h3><p>Every reader × block × layout was measured ten times. Charts show median and interpolated P25–P75. Contiguous runs alternate reader order; VMA runs have fixed order.</p></div>
+        <div class="tile method-card"><h3>03 · Five warm passes</h3><p>Five subsequent reads follow each cold pass. Physical-page sharing is counted outside the timed loop. Opening and closing <code>/proc/pid/mem</code> is also excluded.</p></div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h3>Environment</h3>
+        <p class="small">ARM Neoverse-N1 · Oracle VM with 1 vCPU · Linux <code>6.17.0-1018-oracle</code> on AArch64 · Ubuntu 24.04-based kernel · 4096-byte pages · measured 22 Oct 2026 UTC · 180 primary data rows and a separate single-run probe.</p>
+        <h3 style="margin-top:25px">Reproduction</h3>
+        <div class="codeblock">cc -std=c11 -O2 -Wall -Wextra -Werror tests/benchmarks/benchmark_remote_memory_cow.c -o /tmp/rxr-cow
+sudo /tmp/rxr-cow --mb 32 --warm 5 --method both
+
+cc -std=c11 -O2 -Wall -Wextra -Werror tests/benchmarks/benchmark_remote_memory_vma.c -o /tmp/rxr-vma
+sudo /tmp/rxr-vma --mb 32 --warm 5 --segment-pages 16
+sudo /tmp/rxr-vma --mb 32 --warm 5 --segment-pages 64
+sudo /tmp/rxr-vma --mb 32 --warm 5 --segment-pages 16 --probe</div>
+        <p class="small">Limitations: one kernel and single-vCPU VM; host scheduling may vary. The compared fixtures keep work equivalent in maps-aware mode. Probe intentionally does not. Results describe read-loop throughput, not total scanning cost. The <code>proc</code> backend requires additional open/close calls outside the timing region.</p>
+        <div class="links">
+          <a class="linkbtn" href="https://github.com/pmgr77/runtime-xray/blob/main/tests/benchmarks/benchmark_remote_memory_cow.c">Contiguous fixture ↗</a>
+          <a class="linkbtn" href="https://github.com/pmgr77/runtime-xray/blob/main/tests/benchmarks/benchmark_remote_memory_vma.c">VMA fixture ↗</a>
+          <a class="linkbtn alt" href="https://github.com/pmgr77/runtime-xray/blob/main/docs/STAGE_D_LOW_IMPACT_MEMORY_INSPECTION.md">Stage D notes ↗</a>
+          <button type="button" class="linkbtn alt" id="csv">Download summary CSV ↓</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div class="wrap"><footer><span>RuntimeXRay · Memory Reader Research</span><span>Observed on one Linux kernel. Reproduce before generalizing.</span></footer></div>
+  <script>
+    "use strict";
+    // Each triple is [25th percentile, median, 75th percentile] in MiB/s,
+    // calculated from ten measured benchmark runs for that combination.
+    const BENCH={
+      contiguous:{name:"Contiguous 32 MiB",pages:8192,
+        cold:{proc:[[2720.05,2765.30,2777.25],[3452.20,3574.60,3692.10],[3597.25,3608.45,3685.68]],vmread:[[874.45,901.25,913.58],[972.22,977.65,988.40],[906.08,922.25,958.55]]},
+        warm:{proc:[[2678.57,2694.90,2702.55],[3534.10,3598.20,3665.77],[3606.57,3643.30,3704.45]],vmread:[[2993.88,3007.85,3033.93],[4643.10,4667.80,4680.55],[4686.68,4707.10,4756.10]]}},
+      vma410:{name:"410 VMA · 25.62 MiB",pages:3296,
+        cold:{proc:[[2465.82,2489.75,2541.32],[3216.15,3330.00,3349.45],[3188.70,3288.95,3385.82]],vmread:[[868.50,886.75,915.50],[981.02,1006.00,1021.52],[973.95,991.30,1009.20]]},
+        warm:{proc:[[2623.57,2634.40,2658.95],[3462.65,3538.80,3594.25],[3484.20,3507.55,3537.65]],vmread:[[3003.17,3018.20,3036.97],[4672.50,4780.20,4824.20],[4661.68,4748.80,4877.65]]}},
+      vma102:{name:"102 VMA · 25.50 MiB",pages:3264,
+        cold:{proc:[[2531.90,2546.00,2562.53],[3285.55,3308.90,3359.65],[3244.25,3300.95,3319.68]],vmread:[[897.05,911.30,917.75],[993.23,1007.40,1023.55],[947.80,977.15,983.95]]},
+        warm:{proc:[[2617.40,2635.15,2659.22],[3452.22,3496.60,3523.07],[3524.45,3540.55,3574.13]],vmread:[[2978.50,3000.95,3043.13],[4634.70,4700.20,4807.30],[4756.73,4898.90,4931.27]]}}
+    };
+    const PROBE=[
+      {label:"410 VMA",none:816,holes:816,proc:[28.81,816],vmread:[25.62,1632]},
+      {label:"102 VMA",none:832,holes:832,proc:[28.75,832],vmread:[25.50,1664]}
+    ];
+    const fmt=n=>n.toLocaleString("en-US",{maximumFractionDigits:0});
+    const fmt2=n=>n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+    let layout="contiguous",phase="cold";
+    function drawThroughput(){
+      const data=BENCH[layout][phase],W=1000,H=380,L=75,R=25,T=48,B=68;
+      const w=W-L-R,h=H-T-B,max=Math.ceil(Math.max(...Object.values(data).flatMap(x=>x.map(v=>v[2])))*1.16/1000)*1000;
+      const y=v=>T+h-v/max*h;
+      let parts=['<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Throughput by read block size">'];
+      for(let t=0;t<=5;t++){const v=max*t/5,yy=y(v);
+        parts.push('<line x1="'+L+'" y1="'+yy+'" x2="'+(W-R)+'" y2="'+yy+'" stroke="#35505b" stroke-dasharray="'+(t?'4 7':'1 0')+'"/>');
+        parts.push('<text x="'+(L-14)+'" y="'+(yy+5)+'" text-anchor="end" fill="#94aeba" font-size="15">'+fmt(v)+'</text>');
+      }
+      parts.push('<text x="'+L+'" y="22" fill="#a9c1ca" font-size="14">Throughput · MiB/s</text>');
+      [4,64,256].forEach((block,i)=>{
+        const cx=L+w*(i+.5)/3,bw=Math.min(75,w/12);
+        ["proc","vmread"].forEach((reader,j)=>{
+          const values=data[reader][i],mid=values[1],x=cx+(j?6:-bw-6),barY=y(mid),mx=x+bw/2,col=reader==="proc"?"#55e2c9":"#bda4ff";
+          parts.push('<rect x="'+x+'" y="'+barY+'" width="'+bw+'" height="'+(T+h-barY)+'" rx="7" fill="'+col+'" opacity=".86"><title>'+reader+': median '+fmt2(mid)+' MiB/s; P25–P75 '+fmt2(values[0])+'–'+fmt2(values[2])+'</title></rect>');
+          parts.push('<line x1="'+mx+'" y1="'+y(values[2])+'" x2="'+mx+'" y2="'+y(values[0])+'" stroke="#fff" stroke-width="2"/>');
+          [0,2].forEach(k=>parts.push('<line x1="'+(mx-10)+'" x2="'+(mx+10)+'" y1="'+y(values[k])+'" y2="'+y(values[k])+'" stroke="#fff" stroke-width="2"/>'));
+          parts.push('<text x="'+mx+'" y="'+Math.max(barY-13,32)+'" text-anchor="middle" fill="'+col+'" font-weight="750" font-size="15">'+fmt(mid)+'</text>');
+        });
+        parts.push('<text x="'+cx+'" y="'+(H-22)+'" text-anchor="middle" fill="#c0d3d9" font-size="16">'+block+' KiB</text>');
+      });
+      parts.push('</svg>');
+      document.getElementById("throughput-chart").innerHTML=parts.join("");
+      document.getElementById("results-table").innerHTML=[4,64,256].map((b,i)=>["proc","vmread"].map(m=>{
+        const v=data[m][i];return '<tr><td>'+b+' KiB</td><td>'+m+'</td><td>'+fmt2(v[0])+'</td><td><b>'+fmt2(v[1])+'</b></td><td>'+fmt2(v[2])+'</td></tr>';
+      }).join("")).join("");
+      const a=data.proc[2][1],b=data.vmread[2][1],winner=a>b?"proc":"vmread",ratio=Math.max(a,b)/Math.min(a,b);
+      document.getElementById("insight").textContent="256 KiB: "+winner+" is "+fmt2(ratio)+"× faster on the "+phase+" pass ("+BENCH[layout].name+").";
+      document.querySelectorAll("[data-layout]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.layout===layout)));
+      document.querySelectorAll("[data-phase]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.phase===phase)));
+    }
+    document.querySelectorAll("[data-layout]").forEach(b=>b.addEventListener("click",()=>{layout=b.dataset.layout;drawThroughput()}));
+    document.querySelectorAll("[data-phase]").forEach(b=>b.addEventListener("click",()=>{phase=b.dataset.phase;drawThroughput()}));
+    drawThroughput();
+    document.getElementById("cow-chart").innerHTML=["contiguous","vma410","vma102"].map((key,i)=>{
+      const x=BENCH[key],split=x.pages;
+      const row=(method,n)=>'<div class="cow-row"><span class="name">'+x.name+'</span><span class="method">'+method+'</span><div class="track"><div class="fill '+(method==="proc"?"proc":"")+'" style="width:'+(100*n/x.pages)+'%"></div></div><span class="cow-count">'+fmt(n)+' / '+fmt(x.pages)+' · '+(100*n/x.pages)+'%</span></div>';
+      return row("vmread",split)+row("proc",0)+(i<2?'<div class="separator"></div>':'');
+    }).join("");
+    document.getElementById("probe-cards").innerHTML=PROBE.map(x=>{
+      const max=x.proc[0];
+      const bar=m=>'<div class="row"><span>'+m+'</span><strong>'+fmt2(x[m][0])+' MiB</strong></div><div class="track"><div class="fill '+(m==="proc"?"proc":"")+'" style="width:'+100*x[m][0]/max+'%"></div></div>';
+      return '<div class="tile"><h3>'+x.label+' · 4 KiB probe</h3>'+bar("vmread")+bar("proc")+
+        '<p class="teal">+'+fmt2(x.proc[0]-x.vmread[0])+' MiB accessible via proc</p>'+
+        '<p class="small">Read failures: proc '+fmt(x.proc[1])+' · vmread '+fmt(x.vmread[1])+
+        '<br>PROT_NONE pages: '+fmt(x.none)+' · unmapped pages: '+fmt(x.holes)+'</p></div>';
+    }).join("");
+    document.getElementById("csv").addEventListener("click",()=>{
+      const rows=["layout,phase,block_kib,reader,p25_mib_s,median_mib_s,p75_mib_s,replicates"];
+      for(const [key,d] of Object.entries(BENCH))for(const phase of ["cold","warm"])for(const reader of ["proc","vmread"])for(let i=0;i<3;i++)rows.push([key,phase,[4,64,256][i],reader,...d[phase][reader][i],10].join(","));
+      const url=URL.createObjectURL(new Blob([rows.join("\n")+"\n"],{type:"text/csv;charset=utf-8"}));
+      const a=document.createElement("a");a.href=url;a.download="runtimexray-memory-reader-summary.csv";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    });
+  </script>
+</body>
+</html>
