@@ -3,144 +3,259 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RuntimeXRay</title>
+    <meta name="description" content="RuntimeXRay is an evidence-driven security analysis tool for compiled Linux applications. Static ELF inspection, runtime tracing and memory evidence.">
+    <meta name="theme-color" content="#071116">
+    <meta name="color-scheme" content="dark">
+    <title>RuntimeXRay · Evidence-Driven Linux Security</title>
     <style>
+        :root {
+            --bg: #071116;
+            --panel: #0e2029;
+            --line: #29454f;
+            --fg: #ecf6f9;
+            --muted: #aac0c9;
+            --teal: #55e2c9;
+            --purple: #bda4ff;
+            --amber: #ffc98a;
+        }
+
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; scroll-padding-top: 88px; }
         body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            margin: 2rem auto;
-            max-width: 900px;
-            padding: 0 1rem 3rem;
-            background: #f9fafb;
-            color: #1f2937;
-            line-height: 1.6;
+            margin: 0;
+            font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(ellipse at 82% 0%, #173846 0%, transparent 42%), var(--bg);
+            color: var(--fg);
         }
-
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image: radial-gradient(#375b68 .6px, transparent .6px);
+            background-size: 23px 23px;
+            opacity: .21;
+            z-index: -1;
+            pointer-events: none;
+        }
+        a { color: var(--teal); text-underline-offset: 3px; }
+        a:hover { color: #c3fff1; }
+        .wrap { max-width: 1130px; margin: 0 auto; padding: 0 24px; }
+        .site-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: rgba(7, 17, 22, .91);
+            border-bottom: 1px solid #213b46;
+            backdrop-filter: blur(18px);
+        }
+        .site-nav { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 73px; }
+        .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--fg); font-weight: 800; text-decoration: none; white-space: nowrap; }
+        .logo {
+            display: grid;
+            place-items: center;
+            width: 35px;
+            height: 35px;
+            border: 1px solid #487b7e;
+            border-radius: 9px;
+            font: 800 16px ui-monospace, monospace;
+            color: var(--teal);
+        }
+        .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px 22px; }
+        .nav-links a { text-decoration: none; color: var(--muted); font-size: .85rem; }
+        .nav-links a:hover { color: var(--teal); }
+        .hero { padding: 86px 0 58px; border-bottom: 1px solid #233f4b; }
+        .eyebrow, .section-id {
+            color: var(--teal);
+            font: 700 .75rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+        }
         h1 {
-            font-size: 2.6rem;
-            margin-bottom: 0.25rem;
+            max-width: 940px;
+            font-size: clamp(2.8rem, 6.2vw, 5.6rem);
+            letter-spacing: -.06em;
+            line-height: 1.05;
+            margin: 22px 0;
         }
-
-        h2 {
-            margin-top: 2.5rem;
-            margin-bottom: 0.75rem;
-        }
-
-        h3 {
-            margin-bottom: 0.25rem;
-        }
-
-        .tagline {
-            font-size: 1.75rem;
-            color: #111827;
-            font-style: italic;
-            margin-bottom: 1.5rem;
-            line-height: 1.4;
-        }
-
-        .tagline strong {
+        h1 span {
             display: block;
-            font-style: normal;
-            font-weight: 600;
-            color: #2563eb;
-            margin-top: 0.5rem;
+            background: linear-gradient(100deg, #52e3c9, #bcfff0 58%, #bda4ff);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
         }
-
-        .intro {
+        .hero-lead { font-size: 1.2rem; max-width: 780px; color: #b8ced7; margin: 0 0 25px; }
+        .hero-actions { display: flex; flex-wrap: wrap; gap: 11px; margin: 28px 0 34px; }
+        .button {
+            display: inline-flex;
+            align-items: center;
+            padding: 11px 16px;
+            border-radius: 9px;
+            text-decoration: none;
+            font-size: .87rem;
+            font-weight: 750;
+            border: 1px solid #46717b;
+            background: #173743;
+            color: #dcfff6;
+        }
+        .button:hover { background: #25535c; color: white; }
+        .button-primary { background: var(--teal); border-color: var(--teal); color: #051c20; }
+        .button-primary:hover { background: #a0fff0; color: #051c20; }
+        .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+        .tag {
+            font: .77rem ui-monospace, monospace;
+            color: #a9c5cf;
+            padding: 8px 11px;
+            border: 1px solid #2b4b58;
+            border-radius: 999px;
+            background: #0d2631;
+        }
+        .overview { padding-top: 44px; }
+        .intro { font-size: 1.07rem; max-width: 960px; color: #c2d9df; }
+        .scenario-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 25px 0 28px; }
+        .scenario, .panel, .research-card, main > ul {
+            background: linear-gradient(145deg, #112b35, #0b1921);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+        }
+        .scenario { padding: 22px 24px; }
+        h3 { margin: 0 0 8px; line-height: 1.4; font-size: 1.08rem; }
+        .scenario p { margin: 0; color: var(--muted); font-size: .93rem; }
+        blockquote {
+            margin: 19px 0 30px;
+            border-left: 3px solid var(--teal);
+            background: #102d36;
+            border-radius: 0 10px 10px 0;
+            padding: 18px 22px;
+            color: #dcf3f4;
             font-size: 1.05rem;
         }
-
-        .scenario {
-            margin-bottom: 1.5rem;
+        .panel { padding: 24px 28px; margin: 18px 0 27px; }
+        .panel > strong:first-child { color: var(--teal); font-size: 1.05rem; }
+        .panel-dark { border-color: #43566a; }
+        .panel-dark > strong:first-child { color: var(--purple); }
+        .panel-green { border-color: #337f75; }
+        .panel-green > strong:first-child { color: var(--teal); }
+        .panel p:last-child { margin-bottom: 0; }
+        h2 {
+            margin: 65px 0 18px;
+            padding-top: 3px;
+            font-size: clamp(1.85rem, 3.5vw, 2.5rem);
+            letter-spacing: -.035em;
+            line-height: 1.2;
         }
-
-        .scenario p {
-            margin-top: 0;
-            color: #374151;
+        .section-id { display: block; margin-bottom: 10px; }
+        .research-card {
+            margin-top: 33px;
+            padding: 28px 30px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 25px;
+            border-color: #3c6d72;
+            background: radial-gradient(circle at 90% 0%, #19404a, transparent 55%), linear-gradient(145deg, #112b35, #0b1921);
         }
-
-        .panel {
-            margin-top: 2rem;
-            padding: 1.25rem;
-            background: #fff;
-            border-left: 4px solid #2563eb;
-            border-radius: 0.25rem;
-        }
-
-        .panel-dark {
-            border-left-color: #111827;
-        }
-
-        .panel-green {
-            border-left-color: #16a34a;
-        }
-
+        .research-card h2 { margin: 5px 0 13px; font-size: clamp(1.5rem, 3vw, 2rem); }
+        .research-card p { color: var(--muted); margin: 0; max-width: 700px; }
+        .research-card a { white-space: nowrap; }
         code {
-            background: #f3f4f6;
-            padding: 0.1rem 0.3rem;
-            border-radius: 0.2rem;
-            font-size: 0.9rem;
+            background: #1a3440;
+            color: #b9f2e7;
+            padding: .14rem .34rem;
+            border-radius: 5px;
+            font: .91em ui-monospace, SFMono-Regular, Consolas, monospace;
+            overflow-wrap: anywhere;
         }
-
         pre {
-            background: #111827;
-            color: #f9fafb;
-            padding: 1rem;
+            background: #06151d;
+            color: #b7d8db;
+            padding: 20px;
+            border: 1px solid #254653;
+            border-radius: 11px;
+            line-height: 1.6;
             overflow-x: auto;
-            border-radius: 0.4rem;
-            line-height: 1.4;
         }
-
-        pre code {
-            background: transparent;
-            color: inherit;
-            padding: 0;
+        pre code { background: transparent; color: inherit; padding: 0; overflow-wrap: normal; }
+        main > ul {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 7px 30px;
+            padding: 24px 28px 24px 46px;
+            margin: 18px 0 25px;
         }
-
-        ul {
-            padding-left: 1.25rem;
-        }
-
-        ul li {
-            margin-bottom: 0.35rem;
-        }
-
-        .badge {
-            margin: 2rem 0 1rem;
-        }
-
-        .links {
-            margin-top: 2rem;
-        }
-
+        ul li { padding-left: 2px; }
+        ul li::marker { color: var(--teal); }
+        .badge { margin: 42px 0 22px; }
+        .badge img { max-width: 100%; }
+        .links { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 34px; }
         .links a {
-            display: inline-block;
-            margin-right: 1rem;
-            margin-bottom: 0.5rem;
-            color: #2563eb;
+            display: inline-flex;
+            align-items: center;
+            padding: 9px 12px;
+            border: 1px solid #345462;
+            background: #102935;
+            border-radius: 9px;
             text-decoration: none;
-            font-weight: 500;
+            color: #cce9e5;
+            font-size: .83rem;
+            font-weight: 650;
         }
-
-        .links a:hover {
-            text-decoration: underline;
+        .links a:hover { background: #204450; color: white; }
+        .small { color: var(--muted); font-size: .89rem; }
+        .site-footer { border-top: 1px solid #27404b; padding: 24px 0 48px; margin-top: 70px; }
+        .site-footer p { margin: 0; }
+        @media (max-width: 760px) {
+            .site-nav { align-items: flex-start; flex-direction: column; padding-top: 13px; padding-bottom: 12px; }
+            .nav-links { justify-content: flex-start; gap: 9px 18px; }
+            .hero { padding: 56px 0 42px; }
+            .scenario-grid { grid-template-columns: 1fr; }
+            .research-card { grid-template-columns: 1fr; }
+            main > ul { grid-template-columns: 1fr; }
         }
-
-        .small {
-            color: #4b5563;
-            font-size: 0.95rem;
+        @media (max-width: 520px) {
+            .wrap { padding: 0 15px; }
+            .hero { padding-top: 42px; }
+            .hero-lead { font-size: 1.04rem; }
+            .scenario, .panel, .research-card { padding: 20px; }
+            main > ul { padding: 20px 20px 20px 37px; }
+            h2 { margin-top: 52px; }
         }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
     </style>
 </head>
 
 <body>
+    <header class="site-header">
+        <nav class="site-nav wrap" aria-label="Main navigation">
+            <a class="brand" href="index.html"><span class="logo" aria-hidden="true">R×</span> RuntimeXRay</a>
+            <div class="nav-links">
+                <a href="#overview">Overview</a>
+                <a href="#capabilities">Capabilities</a>
+                <a href="#architecture">Architecture</a>
+                <a href="#research">Research</a>
+                <a href="#docs">Docs &amp; GitHub</a>
+            </div>
+        </nav>
+    </header>
 
-    <h1>RuntimeXRay</h1>
+    <main class="wrap" id="top">
+    <section class="hero" aria-labelledby="hero-title">
+        <div class="eyebrow">Open source / Evidence-driven Linux security</div>
+        <h1 id="hero-title">Don't tell me my application is insecure — <span>show me why.</span></h1>
+        <p class="hero-lead">See what an attacker can learn from your application at runtime.</p>
+        <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/pmgr77/runtime-xray">Explore on GitHub ↗</a>
+            <a class="button" href="benchmarks/memory-readers.html">Explore the research →</a>
+        </div>
+        <div class="tags" aria-label="Project topics">
+            <span class="tag">Static ELF inspection</span>
+            <span class="tag">ptrace / eBPF</span>
+            <span class="tag">Process memory</span>
+            <span class="tag">Evidence &amp; lineage</span>
+        </div>
+    </section>
 
-    <p class="tagline">
-        Don't tell me my application is insecure —
-        <strong>show me why.</strong>
-        <span>See what an attacker can learn from your application at runtime.</span>
-    </p>
+    <section class="overview" id="overview" aria-label="RuntimeXRay overview">
 
     <p class="intro">
         RuntimeXRay is an <strong>evidence-driven security analysis tool for compiled Linux applications</strong>.
@@ -157,6 +272,7 @@
         <strong>What happened, where did it happen, and what evidence proves it?</strong>
     </blockquote>
 
+    <div class="scenario-grid">
     <div class="scenario">
         <h3>🤖 “The AI wrote it. But what did it actually build?”</h3>
         <p>
@@ -188,6 +304,7 @@
             actually occurred in a controlled execution.
         </p>
     </div>
+    </div>
 
     <div class="panel panel-dark">
         <strong>Evidence, not intent</strong>
@@ -207,7 +324,17 @@
         </p>
     </div>
 
-    <h2>What RuntimeXRay can do today</h2>
+    <div class="research-card" id="research">
+        <div>
+            <span class="section-id">Research / Stage D</span>
+            <h2>Inspect memory. Don't change it.</h2>
+            <p>Explore our measured comparison of Linux remote-memory readers, including performance, fork copy-on-write effects, and access semantics.</p>
+        </div>
+        <a class="button" href="benchmarks/memory-readers.html">View benchmarks →</a>
+    </div>
+    </section>
+
+    <h2 id="capabilities">What RuntimeXRay can do today</h2>
 
     <div class="panel">
         <strong>Unified CLI</strong>
@@ -347,7 +474,7 @@ Process C</code></pre>
         </p>
     </div>
 
-    <h2>Current architecture</h2>
+    <h2 id="architecture">Current architecture</h2>
 
     <pre><code>Static ELF collection
         │
@@ -549,6 +676,7 @@ Optional AI explanation</code></pre>
         </a>
     </div>
 
+    <h2 id="docs">Documentation &amp; project links</h2>
     <div class="links">
         <a href="https://github.com/pmgr77/runtime-xray">GitHub Repository</a>
         <a href="https://github.com/pmgr77/runtime-xray/blob/main/README.md">README</a>
@@ -563,10 +691,16 @@ Optional AI explanation</code></pre>
         <a href="https://github.com/pmgr77/runtime-xray/blob/main/FAQ.md">FAQ</a>
     </div>
 
+    </main>
+
+    <footer class="site-footer">
+    <div class="wrap">
     <p class="small">
         RuntimeXRay is under active development. Documentation describes the current project direction;
         implementation and automated tests remain the source of truth for exact behavior.
     </p>
+    </div>
+    </footer>
 
 </body>
 </html>
