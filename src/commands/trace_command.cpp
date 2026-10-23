@@ -640,10 +640,12 @@ public:
     TraceMemoryScanSession(
     bool enabled,
     const runtimexray::LineageAnalyzer& analyzer,
-    std::vector<runtimexray::Observation>& observations)
+    std::vector<runtimexray::Observation>& observations,
+    runtimexray::MemoryReadBackend memory_reader_backend)
     : enabled_(enabled),
       analyzer_(analyzer),
       observations_(observations),
+      memory_reader_backend_(memory_reader_backend),
       coordinator_(make_trace_scan_policy())
     {
     }
@@ -791,6 +793,7 @@ public:
         runtimexray::scan_memory_for_secrets(
             target->tgid,
             observations_,
+            memory_reader_backend_,
             permit->max_observations,
             permit->max_pages,
             &pages_scanned);
@@ -933,6 +936,8 @@ private:
 
     std::vector<runtimexray::Observation>& observations_;
 
+    runtimexray::MemoryReadBackend memory_reader_backend_;
+
     // Independent semantic scan accounting and page budgets.
     runtimexray::MemoryScanCoordinator coordinator_;
 
@@ -1034,13 +1039,15 @@ namespace runtimexray {
             config.timeout = timeout_;
             config.follow_forks = follow_forks_;
             config.debug = Logger::is_enabled(LogLevel::Debug);
+            config.memory_reader = common.memory_reader;
 
             // Own runtime memory scan policy and accounting for this trace.
             // The session uses LineageAnalyzer for process-image identity.
             TraceMemoryScanSession memory_scans(
                 scan_memory_,
                 lineage_analyzer,
-                secret_observations);
+                secret_observations,
+                common.memory_reader);
 
             config.callback = [&](const runtimexray::SyscallEvent& ev) {
                 // Feed the analyzer first. It creates the entry observation and later
@@ -1363,6 +1370,7 @@ namespace runtimexray {
         std::cout << "Usage: runtimexray trace [--report FILE] [--json FILE] "
                   << "[--log-level LEVEL] [--log-file FILE] [--min-severity LEVEL] "
                   << "[--timeout SECONDS] [--follow-forks|--no-follow-forks] "
+                  << "[--memory-reader proc|vmread] "
                   << "--backend ptrace|ebpf <program> [args...]\n";
         std::cout << "Options:\n";
         std::cout << "  --report FILE         Write human-readable report to FILE (default: stdout)\n";
@@ -1375,6 +1383,7 @@ namespace runtimexray {
         std::cout << "  --follow-forks        Trace child processes (default)\n";
         std::cout << "  --no-follow-forks     Do not trace child processes\n";
         std::cout << "  --scan-memory         Scan process memory for secrets\n";
+        std::cout << "  --memory-reader READER  Select memory reader (proc or vmread, default: proc)\n";
         std::cout << "  --backend BACKEND     Select tracing backend (ptrace or ebpf, default: ptrace)\n";
         std::cout << "  --help                Show this help\n";
     }

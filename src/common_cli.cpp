@@ -1,13 +1,12 @@
 /**
  * @file    common_cli.cpp
- * @brief   Implementation of global command‑line option parsing.
+ * @brief   Implementation of global command-line option parsing.
  *
  * @author  Peter Magram
  * @date    2026-08-22
  * @copyright Copyright 2026 Peter Magram.
  * @license Apache-2.0 (see LICENSE file in the repository root)
  */
-
 // Copyright 2026 Peter Magram
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,14 +22,14 @@
 // limitations under the License.
 
 #include "common_cli.hpp"
+
 #include <iostream>
 
 namespace runtimexray {
 
 namespace {
 
-// Helper to parse a severity string into FindingSeverity.
-// Returns true if successful; false on invalid input.
+// Parse a severity string into FindingSeverity.
 bool parse_severity(const std::string& severity_str, FindingSeverity& out) {
     if (severity_str == "Critical") {
         out = FindingSeverity::Critical;
@@ -48,6 +47,19 @@ bool parse_severity(const std::string& severity_str, FindingSeverity& out) {
     return true;
 }
 
+// Memory access selection is independent of the trace backend (ptrace/eBPF).
+bool parse_memory_reader(const std::string& value, MemoryReadBackend& out) {
+    if (value == "proc") {
+        out = MemoryReadBackend::ProcMem;
+        return true;
+    }
+    if (value == "vmread") {
+        out = MemoryReadBackend::ProcessVmReadv;
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool parse_global_options(const std::vector<std::string>& args,
@@ -56,15 +68,17 @@ bool parse_global_options(const std::vector<std::string>& args,
     remaining.clear();
     remaining.reserve(args.size());
 
-    // Set defaults
+    // Reset defaults, including the reader (independent of the environment).
     opts.report_file.clear();
     opts.json_file.clear();
     opts.log_level = "info";
     opts.log_file.clear();
     opts.min_severity = FindingSeverity::Medium;
+    opts.show_secrets = false;
+    opts.memory_reader = MemoryReadBackend::ProcMem;
 
     for (size_t i = 0; i < args.size(); ++i) {
-        const std::string arg = args[i];
+        const std::string& arg = args[i];
 
         if (arg == "--report") {
             if ((i + 1) >= args.size()) {
@@ -131,8 +145,27 @@ bool parse_global_options(const std::vector<std::string>& args,
             }
         } else if (arg == "--show-secrets") {
             opts.show_secrets = true;
+        } else if (arg == "--memory-reader") {
+            if ((i + 1) >= args.size()) {
+                std::cerr << "Error: Missing value for --memory-reader (proc or vmread).\n";
+                return false;
+            }
+            const std::string& value = args[++i];
+            if (!parse_memory_reader(value, opts.memory_reader)) {
+                std::cerr << "Error: Invalid --memory-reader value '" << value
+                          << "' (expected proc or vmread).\n";
+                return false;
+            }
+        } else if (arg.rfind("--memory-reader=", 0) == 0) {
+            const std::string value =
+                arg.substr(std::string("--memory-reader=").size());
+            if (!parse_memory_reader(value, opts.memory_reader)) {
+                std::cerr << "Error: Invalid --memory-reader value '" << value
+                          << "' (expected proc or vmread).\n";
+                return false;
+            }
         } else {
-            // Not a common option; pass it through to the command
+            // Not a common option; pass it through to the command.
             remaining.push_back(arg);
         }
     }

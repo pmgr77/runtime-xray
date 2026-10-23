@@ -24,11 +24,13 @@
 #ifndef RUNTIMEXRAY_MEMORY_SCANNER_HPP
 #define RUNTIMEXRAY_MEMORY_SCANNER_HPP
 
-
 #include "lineage.hpp"
+#include "memory_reader.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 namespace runtimexray {
@@ -73,6 +75,7 @@ namespace runtimexray {
      * @brief Scans all primary process data (memory, cmdline, environ) for secrets.
      * @param pid Process ID.
      * @param observations Output list to append Data observations to.
+     * @param backend Explicit remote-memory reader selection (no fallback).
      * @param max_observations Total maximum number of observations to add.
      * @param max_pages Maximum number of memory pages to scan.
      * @param pages_scanned Optional output parameter; set to number of memory pages actually scanned.
@@ -80,6 +83,7 @@ namespace runtimexray {
     void scan_process_for_secrets(
         pid_t pid,
         std::vector<Observation>& observations,
+        MemoryReadBackend backend,
         size_t max_observations = 50,
         size_t max_pages = 1000,
         size_t* pages_scanned = nullptr);
@@ -88,6 +92,7 @@ namespace runtimexray {
      * @brief Scans readable memory of a process for secrets.
      * @param pid Process ID.
      * @param observations Output list to append Data observations to.
+     * @param backend Explicit remote-memory reader selection (no fallback).
      * @param max_observations Maximum number of observations to add.
      * @param max_pages Maximum number of memory pages to scan.
      * @param pages_scanned Optional output parameter; set to number of memory pages actually scanned.
@@ -95,6 +100,7 @@ namespace runtimexray {
     void scan_memory_for_secrets(
         pid_t pid,
         std::vector<Observation>& observations,
+        MemoryReadBackend backend,
         size_t max_observations = 50,
         size_t max_pages = 1000,
         size_t* pages_scanned = nullptr);

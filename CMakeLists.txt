@@ -734,3 +734,16 @@ add_executable(test_memory_reader_lifecycle
 target_include_directories(test_memory_reader_lifecycle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_test(NAME check_memory_reader_lifecycle COMMAND $<TARGET_FILE:test_memory_reader_lifecycle>)
 set_tests_properties(check_memory_reader_lifecycle PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 125)
+
+
+# Stage D.5: Unified memory reader CLI configuration.
+#
+# Verify default and explicit reader selection for both trace and mem.
+# strace checks the actual kernel syscalls, not just CLI parsing.
+# Exit code 125 means the environment cannot perform the test.
+add_test(NAME check_memory_reader_cli
+        COMMAND sh
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_memory_reader_cli.sh
+        $<TARGET_FILE:runtimexray>
+)
+set_tests_properties(check_memory_reader_cli PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 180)

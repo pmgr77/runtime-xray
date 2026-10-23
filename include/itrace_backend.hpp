@@ -32,7 +32,8 @@
 #include <vector>
 #include <memory>
 
-#include "tachikoma.hpp"   // for SyscallEvent
+#include "tachikoma.hpp"      // for SyscallEvent
+#include "memory_reader.hpp" // for MemoryReadBackend
 
 namespace runtimexray {
 
@@ -43,6 +44,13 @@ using TraceEventCallback = std::function<void(const SyscallEvent&)>;
 
 /**
  * @brief Configuration for a tracing session.
+ *
+ * The memory_reader setting controls userspace reads of tracee memory,
+ * including syscall arguments and payloads read through ITraceBackend.
+ * It is independent of the ptrace/eBPF tracing backend itself.
+ *
+ * The bulk memory scanner receives the same value separately from the
+ * trace command; it does not read a global environment variable.
  */
 struct TraceConfig {
     std::string program;
@@ -51,6 +59,7 @@ struct TraceConfig {
     TraceEventCallback callback;
     bool debug = false;
     bool follow_forks = true;
+    MemoryReadBackend memory_reader = MemoryReadBackend::ProcMem;
 };
 
 /**
@@ -66,7 +75,7 @@ public:
 
     /** @return Unique backend name, e.g., "ptrace", "ebpf". */
     virtual std::string name() const = 0;
-    
+
     /** @return PID of the traced process. */
     virtual pid_t get_pid() const = 0;
 
@@ -89,7 +98,7 @@ public:
     virtual std::string read_string(uint64_t address, size_t max_len = 256) const {
         return read_string(get_pid(), address, max_len);
     }
-    
+
     /**
      * @brief Reads arbitrary bytes from the traced process memory.
      * @param address Virtual address in the traced process.
@@ -99,7 +108,7 @@ public:
     virtual std::vector<std::byte> read_memory(uint64_t address, size_t size) const {
         return read_memory(get_pid(), address, size);
     }
-    
+
     /**
      * @brief Reads a null-terminated string from a specific process memory.
      * @param pid Process ID to read from.

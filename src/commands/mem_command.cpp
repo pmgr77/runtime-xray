@@ -82,7 +82,9 @@ namespace runtimexray
 
         // ---- Scan process memory ----
         try {
-            runtimexray::scan_process_for_secrets(pid_, secret_observations, 50, max_pages_, &pages_scanned);
+            runtimexray::scan_process_for_secrets(
+                pid_, secret_observations, common.memory_reader,
+                50, max_pages_, &pages_scanned);
             Logger::log(LogLevel::Info, "Scanned " + std::to_string(pages_scanned) + " pages for PID " + std::to_string(pid_));
             // -- debug --
             Logger::log(LogLevel::Info, "Starting mem scan for PID " + std::to_string(pid_));
@@ -179,7 +181,7 @@ namespace runtimexray
     void MemCommand::print_help() const {
         std::cout << "Usage: runtimexray mem [--report FILE] [--json FILE] "
                   << "[--log-level LEVEL] [--log-file FILE] [--min-severity LEVEL] "
-                  << "[--max-pages N] <pid>\n";
+                  << "[--memory-reader proc|vmread] [--max-pages N] <pid>\n";
         std::cout << "Options:\n";
         std::cout << "  --report FILE         Write human-readable report to FILE (default: stdout)\n";
         std::cout << "  --json FILE           Write JSON report to FILE\n";
@@ -187,6 +189,7 @@ namespace runtimexray
         std::cout << "  --log-file FILE       Write logs to FILE (default: stderr)\n";
         std::cout << "  --min-severity LEVEL  Minimum severity for findings (Critical, High, Medium, Low, Info)\n";
         std::cout << "  --show-secrets         Show raw secret values in reports (default: hidden)\n";
+        std::cout << "  --memory-reader MODE  Read memory via proc (default) or vmread\n";
         std::cout << "  --max-pages N         Maximum number of memory pages to scan (default: 1000)\n";
         std::cout << "                        0 = skip page scanning, only check cmdline/environ\n";
         std::cout << "  --help                Show this help\n";

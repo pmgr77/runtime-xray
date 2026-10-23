@@ -41,7 +41,6 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
-#include <sys/uio.h>   // for process_vm_readv and struct iovec
 #include <set>
 #include <map>
 #include <fstream>
@@ -255,6 +254,7 @@ namespace runtimexray {
           in_syscall_state_(std::move(other.in_syscall_state_)),
           pending_syscall_entry_(std::move(other.pending_syscall_entry_)),
           tgid_by_tid_(std::move(other.tgid_by_tid_)) {
+        memory_reader_backend_ = other.memory_reader_backend_;
         other.child_pid_ = -1;
         other.running_ = false;
         other.timed_out_ = false;
@@ -274,6 +274,7 @@ namespace runtimexray {
                 waitpid(-1, nullptr, -1);
             }
 
+            memory_reader_backend_ = other.memory_reader_backend_;
             child_pid_ = other.child_pid_;
             running_ = other.running_;
             timed_out_ = other.timed_out_;
@@ -296,64 +297,73 @@ namespace runtimexray {
         return *this;
     }
 
-    std::string Tachikoma::read_string(uint64_t address, size_t max_len) const {
+    std::string Tachikoma::read_string(uint64_t address, size_t max_len) const
+    {
         if (address == 0 || max_len == 0 || child_pid_ <= 0) {
-            return std::string{};
+            return {};
+        }
+
+        auto reader = open_memory_reader(child_pid_, memory_reader_backend_);
+        if (!reader) {
+            return {};
         }
 
         std::string result;
-        char buffer[256] = { 0 };
+        char buffer[256];
         size_t total_read = 0;
 
         while (total_read < max_len) {
-            struct iovec local;
-            local.iov_base = buffer;
-            local.iov_len = sizeof(buffer);
+            const size_t to_read = std::min(max_len - total_read, sizeof(buffer));
 
-            struct iovec remote;
-            remote.iov_base = reinterpret_cast<void*>(static_cast<uintptr_t>(address + total_read));
-            remote.iov_len = sizeof(buffer);
+            const ssize_t n = reader->read(
+                static_cast<std::uintptr_t>(address + total_read),
+                buffer,
+                to_read);
 
-            ssize_t n = process_vm_readv(child_pid_, &local, 1, &remote, 1, 0);
             if (n <= 0) {
-                break; // error or no more data
+                break;
             }
-            for (ssize_t i = 0; i < n; ++i) {
-                char c = buffer[i];
-                if (c == '\0') {
+
+            for (size_t i = 0; i < static_cast<size_t>(n); ++i) {
+                if (buffer[i] == '\0') {
                     return result;
                 }
-                result.push_back(c);
-                if (result.size() >= max_len) {
-                    return result;
-                }
+                result.push_back(buffer[i]);
             }
+
             total_read += static_cast<size_t>(n);
         }
+
         return result;
     }
 
-    std::vector<std::byte> Tachikoma::read_memory(uint64_t address, size_t size) const {
-        std::vector<std::byte> buffer(size);
-        if (address == 0 || child_pid_ <= 0) {
-            return std::vector<std::byte>{};
-        }
-
-        struct iovec local;
-        local.iov_base = buffer.data();
-        local.iov_len = size;
-
-        struct iovec remote;
-        remote.iov_base = reinterpret_cast<void*>(static_cast<uintptr_t>(address));
-        remote.iov_len = size;
-
-        ssize_t n = process_vm_readv(child_pid_, &local, 1, &remote, 1, 0);
-        if (n < 0) {
+    std::vector<std::byte> Tachikoma::read_memory(uint64_t address, size_t size) const
+    {
+        if (address == 0 || size == 0 || child_pid_ <= 0) {
             return {};
         }
+
+        auto reader = open_memory_reader(child_pid_, memory_reader_backend_);
+
+        if (!reader) {
+            return {};
+        }
+
+        std::vector<std::byte> buffer(size);
+
+        const ssize_t n = reader->read(
+            static_cast<std::uintptr_t>(address),
+            buffer.data(),
+            size);
+
+        if (n <= 0) {
+            return {};
+        }
+
         buffer.resize(static_cast<size_t>(n));
         return buffer;
     }
+
 
     // ---------------------------------------------------------------------------
     // Private helpers

@@ -25,6 +25,8 @@
 #ifndef RUNTIMEXRAY_TACHIKOMA_HPP
 #define RUNTIMEXRAY_TACHIKOMA_HPP
 
+#include "memory_reader.hpp"
+
 #include <string>
 #include <vector>
 #include <set>
@@ -138,6 +140,10 @@ public:
     // Enable/disable following forks
     void set_follow_forks(bool follow);
 
+    void set_memory_reader(MemoryReadBackend backend) noexcept {
+        memory_reader_backend_ = backend;
+    }
+
     /**
     * @brief Reads a null-terminated string from the traced process memory.
     * @param address Virtual address of the string in the traced process.
@@ -194,6 +200,8 @@ private:
     //   tid 1001 -> tgid 1000   worker thread
     //   tid 1002 -> tgid 1000   worker thread
     std::map<pid_t, pid_t> tgid_by_tid_;
+
+    MemoryReadBackend memory_reader_backend_ = MemoryReadBackend::ProcMem;
     
     pid_t resolve_tgid(pid_t tid);
 

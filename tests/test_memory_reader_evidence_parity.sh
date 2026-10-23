@@ -82,17 +82,15 @@ run_case() {
         if [ "$scenario" = 'exec_memory_transition' ]; then
             timeout 120 sudo -n env \
                 -u RXRAY_SKIP_PFN_CHECK \
-                "RXRAY_MEMORY_READ_BACKEND=$backend" \
                 "RXRAY_EXEC_OLD=$OLD_SECRET" \
-                "$BIN" trace --backend ptrace --follow-forks --scan-memory \
+                "$BIN" trace --memory-reader "$backend" --backend ptrace --follow-forks --scan-memory \
                 --log-level info --json "$report" --report /dev/null \
                 "$fixture" >"$tracer_log" 2>&1 || trace_rc=$?
         else
             timeout 120 sudo -n env \
                 -u RXRAY_SKIP_PFN_CHECK \
                 -u RXRAY_EXEC_OLD \
-                "RXRAY_MEMORY_READ_BACKEND=$backend" \
-                "$BIN" trace --backend ptrace --follow-forks --scan-memory \
+                "$BIN" trace --memory-reader "$backend" --backend ptrace --follow-forks --scan-memory \
                 --log-level info --json "$report" --report /dev/null \
                 "$fixture" >"$tracer_log" 2>&1 || trace_rc=$?
         fi
@@ -100,17 +98,15 @@ run_case() {
         if [ "$scenario" = 'exec_memory_transition' ]; then
             timeout 120 env \
                 -u RXRAY_SKIP_PFN_CHECK \
-                "RXRAY_MEMORY_READ_BACKEND=$backend" \
                 "RXRAY_EXEC_OLD=$OLD_SECRET" \
-                "$BIN" trace --backend ptrace --follow-forks --scan-memory \
+                "$BIN" trace --memory-reader "$backend" --backend ptrace --follow-forks --scan-memory \
                 --log-level info --json "$report" --report /dev/null \
                 "$fixture" >"$tracer_log" 2>&1 || trace_rc=$?
         else
             timeout 120 env \
                 -u RXRAY_SKIP_PFN_CHECK \
                 -u RXRAY_EXEC_OLD \
-                "RXRAY_MEMORY_READ_BACKEND=$backend" \
-                "$BIN" trace --backend ptrace --follow-forks --scan-memory \
+                "$BIN" trace --memory-reader "$backend" --backend ptrace --follow-forks --scan-memory \
                 --log-level info --json "$report" --report /dev/null \
                 "$fixture" >"$tracer_log" 2>&1 || trace_rc=$?
         fi

@@ -23,6 +23,7 @@
 // limitations under the License.
 
 #include "itrace_backend.hpp"
+#include "memory_reader.hpp"
 #include "trace_bpf_bytecode.h"
 #include "logger.hpp"
 #include "syscall_names.hpp"
@@ -33,7 +34,6 @@
 #include <memory>
 #include <unordered_map>
 #include <stdexcept>
-#include <sys/uio.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -110,6 +110,7 @@ public:
     std::string child_output_path() const override { return child_output_path_; }
 
     int trace(const TraceConfig& config) override {
+        memory_reader_backend_ = config.memory_reader;
         suppress_initial_exec_ = true;
         pending_exec_tid_by_tgid_.clear();
         // 1. Fork + exec the target program
@@ -349,54 +350,82 @@ private:
     }
     // Support functions for process memory reading (like Tachikoma)
 
-    static std::vector<std::byte> read_process_memory_bytes(pid_t pid, uint64_t addr, size_t size) {
+    std::vector<std::byte> read_process_memory_bytes(
+        pid_t pid,
+        uint64_t addr,
+        size_t size) const
+    {
+        if (pid <= 0 || addr == 0 || size == 0) {
+            return {};
+        }
+
+        auto reader = open_memory_reader(pid, memory_reader_backend_);
+        if (!reader) {
+            return {};
+        }
+
         std::vector<std::byte> buffer(size);
 
-        struct iovec local;
-        local.iov_base = buffer.data();
-        local.iov_len = size;
+        const ssize_t n = reader->read(
+            static_cast<std::uintptr_t>(addr),
+            buffer.data(),
+            size);
 
-        struct iovec remote;
-        remote.iov_base = reinterpret_cast<void*>(addr);
-        remote.iov_len = size;
+        if (n <= 0) {
+            return {};
+        }
 
-        ssize_t n = process_vm_readv(pid, &local, 1, &remote, 1, 0);
-        if (n < 0) { return std::vector<std::byte>{}; }
         buffer.resize(static_cast<size_t>(n));
         return buffer;
     }
 
-    static std::string read_process_memory_string(pid_t pid, uint64_t addr, size_t max_len) {
+    std::string read_process_memory_string(
+        pid_t pid,
+        uint64_t addr,
+        size_t max_len) const
+    {
+        if (pid <= 0 || addr == 0 || max_len == 0) {
+            return {};
+        }
+
+        auto reader = open_memory_reader(pid, memory_reader_backend_);
+        if (!reader) {
+            return {};
+        }
+
         std::string result;
         char buffer[256];
+
         size_t total = 0;
 
         while (total < max_len) {
-            struct iovec local;
-            local.iov_base = buffer;
-            local.iov_len = sizeof(buffer);
+            const size_t remaining = max_len - total;
 
-            struct iovec remote;
-            remote.iov_base = reinterpret_cast<void*>(addr + total);
-            remote.iov_len = sizeof(buffer);
+            const size_t to_read =
+                remaining < sizeof(buffer)
+                    ? remaining
+                    : sizeof(buffer);
 
-            ssize_t n = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+            const ssize_t n = reader->read(
+                static_cast<std::uintptr_t>(addr + total),
+                buffer,
+                to_read);
+
             if (n <= 0) {
                 break;
             }
 
             for (ssize_t i = 0; i < n; ++i) {
-                char c = buffer[i];
-                if (c == '\0') {
+                if (buffer[i] == '\0') {
                     return result;
                 }
-                result.push_back(c);
-                if (result.size() >= max_len) {
-                    return result;
-                }
+
+                result.push_back(buffer[i]);
             }
+
             total += static_cast<size_t>(n);
         }
+
         return result;
     }
 
@@ -567,6 +596,7 @@ private:
     // The first exec of child_pid_ is RuntimeXRay launching the requested
     // target. It establishes generation 0 and is not a runtime exec transition.
     bool suppress_initial_exec_ = true;
+    MemoryReadBackend memory_reader_backend_ = MemoryReadBackend::ProcMem;
 
     // TGID -> TID that entered execve/execveat.
     //

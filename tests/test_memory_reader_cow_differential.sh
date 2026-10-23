@@ -73,7 +73,8 @@ grep -Fq 'PASS: physical PFN shared after reads; PFNs diverged after first COW w
     "$TMP/baseline.log" || fail 'baseline did not verify physical COW behavior'
 
 # Every run is a new traced process and a new isolated JSON report.
-# Force the backend explicitly across sudo, and remove PFN-bypass flags.
+# Select the memory reader explicitly via CLI.
+# Remove PFN-bypass flags in both privileged and unprivileged runs.
 run_backend() {
     mode="$1"
     report="$TMP/$mode.json"
@@ -83,16 +84,16 @@ run_backend() {
     if [ "$SUDO" -eq 1 ]; then
         timeout 120 sudo -n env \
             -u RXRAY_SKIP_PFN_CHECK \
-            "RXRAY_MEMORY_READ_BACKEND=$mode" \
             "$BIN" trace \
+            --memory-reader "$mode" \
             --backend ptrace --follow-forks --scan-memory \
             --log-level info --json "$report" --report /dev/null \
             "$FIXTURE" >"$tracer_log" 2>&1 || trace_rc=$?
     else
         timeout 120 env \
             -u RXRAY_SKIP_PFN_CHECK \
-            "RXRAY_MEMORY_READ_BACKEND=$mode" \
             "$BIN" trace \
+            --memory-reader "$mode" \
             --backend ptrace --follow-forks --scan-memory \
             --log-level info --json "$report" --report /dev/null \
             "$FIXTURE" >"$tracer_log" 2>&1 || trace_rc=$?

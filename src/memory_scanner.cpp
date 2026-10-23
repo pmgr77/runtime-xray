@@ -32,7 +32,6 @@
 #include <utility>
 #include <algorithm>
 #include <cstring>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -120,30 +119,6 @@ std::vector<std::string> split_nul_strings(const std::string& data) {
     return parts;
 }
 
-// Experimental, process-wide backend selection. This is intentionally
-// explicit: never silently switch methods after a read/open failure.
-// The default remains the project's original process_vm_readv() path.
-bool select_memory_read_backend(MemoryReadBackend& backend)
-{
-    backend = MemoryReadBackend::ProcessVmReadv;
-    const char* selected = std::getenv("RXRAY_MEMORY_READ_BACKEND");
-
-    if (selected == nullptr || selected[0] == '\0' ||
-        std::strcmp(selected, "vmread") == 0) {
-        return true;
-    }
-
-    if (std::strcmp(selected, "proc") == 0) {
-        backend = MemoryReadBackend::ProcMem;
-        return true;
-    }
-
-    Logger::log(
-        LogLevel::Error,
-        "Invalid RXRAY_MEMORY_READ_BACKEND (expected 'vmread' or 'proc')");
-    return false;
-}
-
 const char* backend_name(MemoryReadBackend backend)
 {
     switch (backend) {
@@ -179,6 +154,7 @@ std::vector<MemoryRegion> get_readable_regions(pid_t pid) {
 void scan_memory_for_secrets(
     pid_t pid,
     std::vector<Observation>& observations,
+    MemoryReadBackend backend,
     size_t max_observations,
     size_t max_pages,
     size_t* pages_scanned)
@@ -203,23 +179,16 @@ void scan_memory_for_secrets(
     // The existing page and observation limits remain unchanged.
     prioritize_memory_regions(regions);
 
-    MemoryReadBackend backend;
-    if (!select_memory_read_backend(backend)) {
-        if (pages_scanned) {
-            *pages_scanned = 0;
-        }
-        return;
-    }
-
     // One reader per scan: do not retain an mm_struct across execve().
     auto reader = open_memory_reader(pid, backend);
     if (!reader) {
         const int saved_errno = errno;
-        Logger::log(LogLevel::Error,
+        Logger::log(
+            LogLevel::Error,
             "Unable to open memory reader for pid=" + std::to_string(pid) +
-            " backend=" + backend_name(backend) +
-            " errno=" + std::to_string(saved_errno) +
-            " (" + std::strerror(saved_errno) + ")");
+                " backend=" + backend_name(backend) +
+                " errno=" + std::to_string(saved_errno) +
+                " (" + std::strerror(saved_errno) + ")");
         if (pages_scanned) {
             *pages_scanned = 0;
         }
@@ -253,14 +222,18 @@ void scan_memory_for_secrets(
         while (address < region.end && found < max_observations && scanned < max_pages) {
             size_t to_read = std::min<size_t>(chunk_size, region.end - address);
 
-            const ssize_t n = reader->read(static_cast<std::uintptr_t>(address), buffer.data(), to_read);
+            const ssize_t n = reader->read(
+                static_cast<std::uintptr_t>(address),
+                buffer.data(),
+                to_read);
             if (n <= 0) {
                 const int saved_errno = (n < 0) ? errno : 0;
-                Logger::log(LogLevel::Debug,
+                Logger::log(
+                    LogLevel::Debug,
                     "Memory read failed at address=" + std::to_string(address) +
-                    " backend=" + backend_name(backend) +
-                    " errno=" + std::to_string(saved_errno) +
-                    " (" + (n < 0 ? std::strerror(saved_errno) : "EOF") + ")");
+                        " backend=" + backend_name(backend) +
+                        " errno=" + std::to_string(saved_errno) +
+                        " (" + (n < 0 ? std::strerror(saved_errno) : "EOF") + ")");
                 address += 4096; // Skip inaccessible page.
                 ++scanned;
                 if (scanned % 100 == 0) {
@@ -434,6 +407,7 @@ void scan_environ_for_secrets(
 void scan_process_for_secrets(
     pid_t pid,
     std::vector<Observation>& observations,
+    MemoryReadBackend backend,
     size_t max_observations,
     size_t max_pages,
     size_t* pages_scanned)
@@ -475,6 +449,7 @@ void scan_process_for_secrets(
     scan_memory_for_secrets(
         pid,
         observations,
+        backend,
         max_observations - produced,
         max_pages,
         &scanned);

@@ -68,6 +68,7 @@ int main(int argc, char* argv[]) {
     runtimexray::scan_process_for_secrets(
         getpid(),
         observations,
+        runtimexray::MemoryReadBackend::ProcMem,
         100,
         max_pages);
 

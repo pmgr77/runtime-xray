@@ -1,5 +1,5 @@
 /**
- * @file    cli_common.hpp
+ * @file    common_cli.hpp
  * @brief   Common CLI options and global argument parsing.
  *
  * @author  Peter Magram
@@ -25,6 +25,7 @@
 #define RUNTIMEXRAY_COMMON_CLI_HPP
 
 #include "finding.hpp"
+#include "memory_reader.hpp"
 
 #include <string>
 #include <vector>
@@ -32,7 +33,12 @@
 namespace runtimexray {
 
 /**
- * @brief Options shared by all subcommands.
+ * @brief Options shared by the RuntimeXRay subcommands.
+ *
+ * memory_reader selects how RuntimeXRay reads a target process's memory.
+ * It applies to both trace and mem commands, including syscall argument
+ * inspection when tracing. It does not select the event tracing backend
+ * (ptrace vs eBPF).
  */
 struct CommonOptions {
     std::string report_file;          // human-readable report file (empty = stdout)
@@ -41,13 +47,17 @@ struct CommonOptions {
     std::string log_file;             // log file (empty = stderr)
     FindingSeverity min_severity = FindingSeverity::Medium;
     bool show_secrets = false;        // whether to show secrets in reports (default: false)
+
+    // /proc/<pid>/mem is the experimentally validated low-impact default.
+    // --memory-reader vmread explicitly selects process_vm_readv instead.
+    MemoryReadBackend memory_reader = MemoryReadBackend::ProcMem;
 };
 
 /**
  * @brief Parses global options from the given arguments.
  *
- * Removes recognised global flags and stores their values in `opts`.
- * All unrecognised arguments are returned in `remaining`.
+ * Removes recognised global flags, including --memory-reader, and stores
+ * their values in opts. Unknown arguments are forwarded to the command.
  *
  * @param args Input arguments (after the subcommand name).
  * @param opts Output common options.
@@ -55,8 +65,8 @@ struct CommonOptions {
  * @return true on success, false on invalid global option.
  */
 bool parse_global_options(const std::vector<std::string>& args,
-                            CommonOptions& opts,
-                            std::vector<std::string>& remaining);
+                          CommonOptions& opts,
+                          std::vector<std::string>& remaining);
 
 } // namespace runtimexray
 
