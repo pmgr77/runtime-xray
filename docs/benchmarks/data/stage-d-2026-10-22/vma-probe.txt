@@ -1,0 +1,36 @@
+
+### PROBE segment_pages=16
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     28.84      888.6    6560     0     0     2151.3   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.74     2385.5    6560     0     0     2500.9   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     26.25      976.1     410     0     0     4671.2    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.67     3342.9     410     0     0     3485.6    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     28.27      906.3     410     0     0     4718.4    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.72     3319.9     410     0     0     3394.9    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+PROBE mode deliberately crosses holes/PROT_NONE. Readable bytes differ by API; do not compare rates as equal workloads.
+vmread probe       4     1     32.62      785.6    8192  1632     0     2701.9   40960  8160     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=1632
+proc   probe       4     1     11.65     2472.2    8192   816     0     2477.4   40960  4080     0   28.81  144.06    3296    3296      0  # sum=1652224/8261120 perm_err=0 fault_err=816
+vmread probe      64     1     28.12      911.3    2042  1632     0     4090.8   10210  8160     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=1632
+proc   probe      64     1      9.08     3172.2    1277   816     0     3309.5    6385  4080     0   28.81  144.06    3296    3296      0  # sum=103264/516320 perm_err=0 fault_err=816
+vmread probe     256     1     28.16      909.9    1735  1632     1     4102.1    8675  8160     5   25.62  128.12    3296       0   3296  # sum=23072/115360 perm_err=0 fault_err=1632
+proc   probe     256     1      9.70     2971.8     969   816    51     3277.0    4845  4080   255   28.81  144.06    3296    3296      0  # sum=34272/171360 perm_err=0 fault_err=816
+
+### PROBE segment_pages=64
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     28.29      901.5    6528     0     0     3034.1   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102      9.93     2566.9    6528     0     0     2628.9   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     26.23      972.2     408     0     0     4740.3    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.60     3354.1     408     0     0     3491.2    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     26.63      957.5     102     0     0     4741.3     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.53     3384.5     102     0     0     3510.4     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+PROBE mode deliberately crosses holes/PROT_NONE. Readable bytes differ by API; do not compare rates as equal workloads.
+vmread probe       4     1     27.75      918.9    8192  1664     0     2801.8   40960  8320     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=1664
+proc   probe       4     1     11.69     2459.0    8192   832     0     2393.8   40960  4160     0   28.75  143.75    3264    3264      0  # sum=1648640/8243200 perm_err=0 fault_err=832
+vmread probe      64     1     25.75      990.1    2072  1664     0     4161.3   10360  8320     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=1664
+proc   probe      64     1      9.14     3146.3    1292   832     0     3277.5    6460  4160     0   28.75  143.75    3264    3264      0  # sum=103040/515200 perm_err=0 fault_err=832
+vmread probe     256     1     27.66      922.0    1766  1664     0     4086.5    8830  8320     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=1664
+proc   probe     256     1      9.11     3157.1     947   832     0     3278.6    4735  4160     0   28.75  143.75    3264    3264      0  # sum=25760/128800 perm_err=0 fault_err=832

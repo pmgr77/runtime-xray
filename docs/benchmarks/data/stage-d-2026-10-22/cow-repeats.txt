@@ -1,0 +1,160 @@
+
+### run=01 method=proc
+kernel-memory-read benchmark: pid=1436132 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.19     2860.1     8192     59.30     2698.1    40960    8192    8192        0         12  # checksum=5505024
+proc        64      9.07     3528.3      512     43.72     3660.0     2560    8192    8192        0         12  # checksum=344064
+proc       256      8.90     3595.4      128     43.13     3709.6      640    8192    8192        0         72  # checksum=86016
+
+### run=01 method=vmread
+kernel-memory-read benchmark: pid=1436138 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     41.13      778.0     8192     53.45     2993.2    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.87      973.5      512     34.20     4677.7     2560    8192       0     8192          8  # checksum=344064
+vmread     256     33.54      954.2      128     34.36     4656.5      640    8192       0     8192         68  # checksum=86016
+
+### run=02 method=vmread
+kernel-memory-read benchmark: pid=1436144 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     34.48      928.0     8192     53.31     3001.4    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.53      983.6      512     34.30     4665.0     2560    8192       0     8192          8  # checksum=344064
+vmread     256     35.25      907.8      128     33.57     4766.4      640    8192       0     8192         68  # checksum=86016
+
+### run=02 method=proc
+kernel-memory-read benchmark: pid=1436150 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     12.00     2666.4     8192     66.58     2403.3    40960    8192    8192        0          8  # checksum=5505024
+proc        64      8.70     3676.8      512     45.36     3527.6     2560    8192    8192        0          8  # checksum=344064
+proc       256      9.19     3480.2      128     43.99     3637.5      640    8192    8192        0         68  # checksum=86016
+
+### run=03 method=proc
+kernel-memory-read benchmark: pid=1436156 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.49     2783.8     8192     59.44     2691.7    40960    8192    8192        0          8  # checksum=5505024
+proc        64      9.36     3419.5      512     45.89     3486.4     2560    8192    8192        0          8  # checksum=344064
+proc       256      9.31     3438.6      128     44.43     3601.5      640    8192    8192        0         68  # checksum=86016
+
+### run=03 method=vmread
+kernel-memory-read benchmark: pid=1436162 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     36.77      870.2     8192     53.45     2993.2    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.06      998.2      512     34.77     4601.2     2560    8192       0     8192          8  # checksum=344064
+vmread     256     33.20      963.9      128     33.95     4712.7      640    8192       0     8192         68  # checksum=86016
+
+### run=04 method=vmread
+kernel-memory-read benchmark: pid=1436168 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     36.07      887.2     8192     53.08     3014.3    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.64      980.5      512     34.32     4662.3     2560    8192       0     8192          8  # checksum=344064
+vmread     256     34.21      935.3      128     34.16     4683.8      640    8192       0     8192         68  # checksum=86016
+
+### run=04 method=proc
+kernel-memory-read benchmark: pid=1436174 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.79     2715.3     8192     59.25     2700.3    40960    8192    8192        0         20  # checksum=5505024
+proc        64      9.84     3250.5      512     44.54     3592.0     2560    8192    8192        0          8  # checksum=344064
+proc       256      8.68     3688.6      128     45.23     3537.2      640    8192    8192        0         68  # checksum=86016
+
+### run=05 method=proc
+kernel-memory-read benchmark: pid=1436180 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.70     2734.3     8192     60.97     2624.2    40960    8192    8192        0          8  # checksum=5505024
+proc        64      8.84     3620.9      512     45.03     3553.6     2560    8192    8192        0          8  # checksum=344064
+proc       256      8.87     3607.4      128     45.98     3479.7      640    8192    8192        0         68  # checksum=86016
+
+### run=05 method=vmread
+kernel-memory-read benchmark: pid=1436186 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     35.89      891.6     8192     52.68     3037.0    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.31      990.3      512     34.26     4670.6     2560    8192       0     8192          8  # checksum=344064
+vmread     256     35.34      905.5      128     34.08     4695.3      640    8192       0     8192         68  # checksum=86016
+
+### run=06 method=vmread
+kernel-memory-read benchmark: pid=1436192 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     35.12      911.1     8192     52.66     3038.3    40960    8192       0     8192         20  # checksum=5505024
+vmread      64     35.50      901.3      512     35.29     4533.4     2560    8192       0     8192          8  # checksum=344064
+vmread     256     39.75      805.0      128     33.81     4732.7      640    8192       0     8192         68  # checksum=86016
+
+### run=06 method=proc
+kernel-memory-read benchmark: pid=1436198 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.51     2779.0     8192     59.77     2677.0    40960    8192    8192        0         12  # checksum=5505024
+proc        64      8.48     3772.7      512     43.11     3711.8     2560    8192    8192        0         12  # checksum=344064
+proc       256      8.61     3715.5      128     43.37     3689.0      640    8192    8192        0         72  # checksum=86016
+
+### run=07 method=proc
+kernel-memory-read benchmark: pid=1436204 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.59     2760.8     8192     59.63     2683.3    40960    8192    8192        0          8  # checksum=5505024
+proc        64      8.58     3728.7      512     43.46     3681.3     2560    8192    8192        0          8  # checksum=344064
+proc       256      8.70     3676.9      128     43.85     3649.1      640    8192    8192        0         68  # checksum=86016
+
+### run=07 method=vmread
+kernel-memory-read benchmark: pid=1436210 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     38.46      832.1     8192     52.90     3024.7    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     36.43      878.4      512     34.51     4636.7     2560    8192       0     8192          8  # checksum=344064
+vmread     256     35.20      909.2      128     34.52     4635.5      640    8192       0     8192         68  # checksum=86016
+
+### run=08 method=vmread
+kernel-memory-read benchmark: pid=1436216 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     35.13      910.9     8192     53.41     2995.9    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.32      990.0      512     34.18     4681.5     2560    8192       0     8192          8  # checksum=344064
+vmread     256     36.63      873.7      128     34.03     4701.5      640    8192       0     8192         68  # checksum=86016
+
+### run=08 method=proc
+kernel-memory-read benchmark: pid=1436222 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.83     2703.9     8192     59.19     2703.3    40960    8192    8192        0          8  # checksum=5505024
+proc        64      9.28     3447.9      512     45.67     3503.3     2560    8192    8192        0          8  # checksum=344064
+proc       256      8.88     3602.8      128     44.18     3621.8      640    8192    8192        0         68  # checksum=86016
+
+### run=09 method=proc
+kernel-memory-read benchmark: pid=1436228 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.54     2772.0     8192     58.12     2753.0    40960    8192    8192        0          8  # checksum=5505024
+proc        64      9.23     3465.1      512     44.39     3604.4     2560    8192    8192        0          8  # checksum=344064
+proc       256      8.45     3785.2      128     42.91     3728.7      640    8192    8192        0         68  # checksum=86016
+
+### run=09 method=vmread
+kernel-memory-read benchmark: pid=1436234 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     34.83      918.7     8192     52.24     3062.8    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.93      971.8      512     33.08     4836.9     2560    8192       0     8192          8  # checksum=344064
+vmread     256     33.33      960.0      128     33.59     4763.9      640    8192       0     8192         68  # checksum=86016
+
+### run=10 method=vmread
+kernel-memory-read benchmark: pid=1436240 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     34.99      914.4     8192     53.47     2992.5    40960    8192       0     8192          8  # checksum=5505024
+vmread      64     32.83      974.8      512     33.59     4763.4     2560    8192       0     8192          8  # checksum=344064
+vmread     256     33.28      961.4      128     32.94     4857.9      640    8192       0     8192         68  # checksum=86016
+
+### run=10 method=proc
+kernel-memory-read benchmark: pid=1436246 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+proc         4     11.55     2769.8     8192     58.16     2751.2    40960    8192    8192        0          8  # checksum=5505024
+proc        64      8.66     3697.2      512     43.62     3667.7     2560    8192    8192        0          8  # checksum=344064
+proc       256      8.87     3609.5      128     43.06     3715.8      640    8192    8192        0         68  # checksum=86016

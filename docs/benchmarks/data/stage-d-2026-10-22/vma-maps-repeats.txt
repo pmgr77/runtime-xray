@@ -1,0 +1,220 @@
+
+### segment_pages=16 run=01
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     27.47      932.7    6560     0     0     3077.0   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410      9.80     2614.5    6560     0     0     2637.0   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     27.32      937.9     410     0     0     4796.3    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.61     3368.8     410     0     0     3631.5    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.64      999.3     410     0     0     4948.2    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.45     3437.6     410     0     0     3519.0    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=02
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     28.54      897.8    6560     0     0     3014.9   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.36     2472.8    6560     0     0     2673.3   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     25.58     1001.7     410     0     0     4833.5    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.72     3318.4     410     0     0     3461.3    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.20     1016.9     410     0     0     4909.2    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.51     3413.2     410     0     0     3483.8    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=03
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     28.92      886.2    6560     0     0     2185.3   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.23     2504.2    6560     0     0     2549.8   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     25.35     1010.8     410     0     0     4752.9    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.65     3351.0     410     0     0     3547.0    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.31     1012.5     410     0     0     4725.8    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      8.09     3167.2     410     0     0     3496.1    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=04
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     27.52      931.1    6560     0     0     3138.8   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410      9.82     2608.1    6560     0     0     2662.9   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     25.68      997.9     410     0     0     4779.2    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.58     3381.2     410     0     0     3577.9    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.19     1017.3     410     0     0     4859.5    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      8.12     3155.7     410     0     0     3312.4    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=05
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     29.65      864.3    6560     0     0     3021.5   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.27     2495.9    6560     0     0     2443.6   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     26.27      975.4     410     0     0     4557.8    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      8.33     3076.0     410     0     0     3404.8    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.83      991.9     410     0     0     4500.5    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      8.11     3159.1     410     0     0     3523.7    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=06
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     34.57      741.3    6560     0     0     3000.7   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     11.02     2325.7    6560     0     0     2647.1   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     25.36     1010.3     410     0     0     4645.7    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.67     3341.6     410     0     0     3466.7    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     28.94      885.5     410     0     0     4449.5    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.88     3253.2     410     0     0     3365.7    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=07
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     28.88      887.3    6560     0     0     3010.6   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.32     2483.6    6560     0     0     2721.7   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     24.84     1031.4     410     0     0     4893.5    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.79     3291.0     410     0     0     3530.6    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.87      990.7     410     0     0     4883.7    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.52     3408.9     410     0     0     3644.1    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=08
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     27.81      921.4    6560     0     0     3040.2   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.03     2553.7    6560     0     0     2631.0   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     24.95     1027.1     410     0     0     4865.8    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      7.66     3344.8     410     0     0     3622.4    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     28.70      892.8     410     0     0     4743.9    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.74     3311.8     410     0     0     3572.4    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=09
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     29.08      881.1    6560     0     0     3027.3   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.64     2408.2    6560     0     0     2631.8   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     25.00     1025.1     410     0     0     4781.2    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      8.03     3191.2     410     0     0     3599.7    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     26.45      968.9     410     0     0     4640.3    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.73     3316.6     410     0     0     3542.3    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=16 run=10
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=16 segments=512 readable_VMA=410 readable=25.62 MiB tracked_COW_pages=3296
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=816 private_file_ro=816 private_file_dirty=816 shared_file_rw=816 prot_none=816 holes=816 private_anon_rx=816 shared_file_ro=816
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   410     31.52      813.1    6560     0     0     2964.6   32800     0     0   25.62  128.12    3296       0   3296  # sum=1469440/7347200 perm_err=0 fault_err=0
+proc   maps        4   410     10.40     2463.5    6560     0     0     2621.1   32800     0     0   25.62  128.12    3296    3296      0  # sum=1469440/7347200 perm_err=0 fault_err=0
+vmread maps       64   410     28.09      912.3     410     0     0     4525.2    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps       64   410      8.07     3174.2     410     0     0     3387.5    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+vmread maps      256   410     25.91      989.1     410     0     0     4753.7    2050     0     0   25.62  128.12    3296       0   3296  # sum=91840/459200 perm_err=0 fault_err=0
+proc   maps      256   410      7.85     3266.1     410     0     0     3485.4    2050     0     0   25.62  128.12    3296    3296      0  # sum=91840/459200 perm_err=0 fault_err=0
+
+### segment_pages=64 run=01
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     43.19      590.4    6528     0     0     3053.1   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.56     2415.0    6528     0     0     2614.2   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     25.69      992.4     408     0     0     4707.5    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      8.50     3001.1     408     0     0     3503.2    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     24.91     1023.8     102     0     0     4932.9     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.74     3295.5     102     0     0     3478.0     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=02
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     28.49      895.0    6528     0     0     3054.4   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102      9.90     2574.9    6528     0     0     2639.9   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     25.36     1005.5     408     0     0     4878.8    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.50     3399.2     408     0     0     3473.6    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     26.08      977.8     102     0     0     4917.7     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.71     3308.2     102     0     0     3566.7     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=03
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     27.50      927.1    6528     0     0     3013.2   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.05     2538.5    6528     0     0     2672.2   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     27.51      927.1     408     0     0     4716.4    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.76     3284.7     408     0     0     3412.4    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     27.78      918.1     102     0     0     5058.9     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.67     3323.5     102     0     0     3576.6     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=04
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     27.19      937.7    6528     0     0     2982.4   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.03     2542.5    6528     0     0     2626.4   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     23.87     1068.1     408     0     0     4902.2    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      8.37     3045.7     408     0     0     3445.1    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     26.81      951.1     102     0     0     4926.4     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.66     3331.0     102     0     0     3525.2     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=05
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     27.76      918.5    6528     0     0     3070.9   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102      9.94     2566.4    6528     0     0     2658.1   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     24.85     1026.2     408     0     0     4692.9    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.75     3290.9     408     0     0     3622.0    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     25.29     1008.5     102     0     0     4880.1     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.66     3329.6     102     0     0     3584.3     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=06
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     27.88      914.7    6528     0     0     2996.2   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.00     2550.9    6528     0     0     2614.4   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     25.26     1009.3     408     0     0     4653.9    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.58     3364.4     408     0     0     3490.0    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     26.94      946.7     102     0     0     4702.9     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.85     3249.8     102     0     0     3587.3     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=07
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     28.23      903.2    6528     0     0     2977.2   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.08     2529.7    6528     0     0     2614.4   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     25.61      995.7     408     0     0     4585.8    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.48     3410.0     408     0     0     3440.1    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     26.08      977.7     102     0     0     4755.7     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.91     3224.4     102     0     0     3524.2     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=08
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     28.09      907.9    6528     0     0     2975.4   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.00     2549.5    6528     0     0     2630.4   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     25.11     1015.6     408     0     0     4627.1    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.76     3288.1     408     0     0     3535.9    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     27.25      935.8     102     0     0     4979.6     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.71     3306.4     102     0     0     3527.3     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=09
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     27.85      915.5    6528     0     0     2958.3   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102     10.13     2518.4    6528     0     0     2674.1   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     24.75     1030.3     408     0     0     4837.6    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.62     3345.4     408     0     0     3508.0    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     26.11      976.6     102     0     0     4700.4     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.86     3242.4     102     0     0     3497.1     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0
+
+### segment_pages=64 run=10
+kernel=6.17.0-1018-oracle; arena=32 MiB page=4096 seg_pages=64 segments=128 readable_VMA=102 readable=25.50 MiB tracked_COW_pages=3264
+VMA classes (pages): private_anon_rw=832 private_anon_ro=832 shared_anon_rw=832 private_file_ro=832 private_file_dirty=832 shared_file_rw=832 prot_none=832 holes=832 private_anon_rx=768 shared_file_ro=768
+METHOD POLICY BLOCKKB VMAs cold_ms cold_MiBs calls errs short warm_MiBs calls errs short cold_MiB warm_MiB PFN_pre PFN_post split
+vmread maps        4   102     31.81      801.6    6528     0     0     3005.7   32640     0     0   25.50  127.50    3264       0   3264  # sum=1462272/7311360 perm_err=0 fault_err=0
+proc   maps        4   102      9.77     2610.5    6528     0     0     2659.6   32640     0     0   25.50  127.50    3264    3264      0  # sum=1462272/7311360 perm_err=0 fault_err=0
+vmread maps       64   102     25.87      985.6     408     0     0     4628.3    2040     0     0   25.50  127.50    3264       0   3264  # sum=91392/456960 perm_err=0 fault_err=0
+proc   maps       64   102      7.66     3326.9     408     0     0     3528.1    2040     0     0   25.50  127.50    3264    3264      0  # sum=91392/456960 perm_err=0 fault_err=0
+vmread maps      256   102     25.86      986.0     102     0     0     4759.8     510     0     0   25.50  127.50    3264       0   3264  # sum=22848/114240 perm_err=0 fault_err=0
+proc   maps      256   102      7.92     3221.5     102     0     0     3553.8     510     0     0   25.50  127.50    3264    3264      0  # sum=22848/114240 perm_err=0 fault_err=0

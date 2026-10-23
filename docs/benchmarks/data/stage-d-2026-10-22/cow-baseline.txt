@@ -1,0 +1,9 @@
+kernel-memory-read benchmark: pid=1435933 memory=32 MiB pages=8192 page_size=4096 warm_passes=5
+method   blockKB cold_ms cold_MiB/s cold_sys warm_ms warm_MiB/s warm_sys  PFN_before PFN_after PFN_split child_PrivateDirty_delta_KiB
+Notes: each case uses a fresh fork; PFN columns count pages still shared. Timing excludes fork, pagemap, smaps, open, and close. proc uses two additional open/close syscalls per case.
+vmread       4     35.01      914.0     8192     53.28     3003.0    40960    8192       0     8192          8  # checksum=5505024
+proc         4     12.00     2666.2     8192     57.48     2783.5    40960    8192    8192        0          8  # checksum=5505024
+vmread      64     31.91     1002.7      512     34.23     4674.4     2560    8192       0     8192          8  # checksum=344064
+proc        64      8.54     3748.2      512     41.16     3886.8     2560    8192    8192        0         68  # checksum=344064
+vmread     256     32.59      982.0      128     34.32     4661.4      640    8192       0     8192         68  # checksum=86016
+proc       256      8.30     3853.6      128     40.26     3974.1      640    8192    8192        0        260  # checksum=86016
