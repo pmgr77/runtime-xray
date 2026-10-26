@@ -55,6 +55,7 @@ set(RUNTIMEXRAY_SOURCES
     src/register_builtin_detection_rules.cpp
     src/secret_extractor.cpp
     src/netrc_extractor.cpp
+    src/curl_config_extractor.cpp
     src/sensitive_data_presence_rule.cpp
     src/hardening_rule.cpp
     src/dangerous_api_rule.cpp
@@ -188,14 +189,21 @@ target_include_directories(test_netrc_extractor PRIVATE include)
 target_compile_options(test_netrc_extractor PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME check_netrc_extractor COMMAND $<TARGET_FILE:test_netrc_extractor>)
 
+# Curl configuration extractor unit tests
+add_executable(test_curl_config_extractor
+    tests/unit/test_curl_config_extractor.cpp
+    src/curl_config_extractor.cpp
+)
+target_include_directories(test_curl_config_extractor PRIVATE include)
+target_compile_options(test_curl_config_extractor PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME check_curl_config_extractor COMMAND $<TARGET_FILE:test_curl_config_extractor>)
+
 add_executable(test_narrative_sessions
     tests/unit/test_narrative_sessions.cpp
     src/narrative.cpp
 )
 target_include_directories(test_narrative_sessions PRIVATE include)
-add_test(NAME check_narrative_sessions
-         COMMAND test_narrative_sessions
-)
+add_test(NAME check_narrative_sessions COMMAND test_narrative_sessions)
 
 add_executable(test_narrative_builder
     tests/unit/test_narrative_builder.cpp
@@ -203,9 +211,7 @@ add_executable(test_narrative_builder
     src/narrative_builder.cpp
 )
 target_include_directories(test_narrative_builder PRIVATE include)
-add_test(NAME check_narrative_builder
-         COMMAND test_narrative_builder
-)
+add_test(NAME check_narrative_builder COMMAND test_narrative_builder)
 
 add_executable(test_reporter_json
     tests/unit/test_reporter_json.cpp
@@ -213,9 +219,7 @@ add_executable(test_reporter_json
 )
 target_include_directories(test_reporter_json PRIVATE include)
 target_link_libraries(test_reporter_json PRIVATE nlohmann_json::nlohmann_json)
-add_test(NAME check_reporter_json
-         COMMAND test_reporter_json
-)
+add_test(NAME check_reporter_json COMMAND test_reporter_json)
 
 # CLI-level mem lineage test
 add_test(NAME check_mem_lineage
@@ -227,6 +231,7 @@ add_executable(test_memory_scanner
     tests/memory_scanner/test_memory_scanner.cpp
     src/secret_extractor.cpp
     src/netrc_extractor.cpp
+    src/curl_config_extractor.cpp
     src/secret_fingerprinter.cpp
     src/logger.cpp
 )
@@ -265,6 +270,7 @@ add_executable(test_memory_scanner_self
     src/memory_region_policy.cpp
     src/secret_extractor.cpp
     src/netrc_extractor.cpp
+    src/curl_config_extractor.cpp
     src/dynamic_analysis.cpp
     src/logger.cpp
     src/secret_fingerprinter.cpp
@@ -566,6 +572,22 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:runtimexray>
     )
     set_tests_properties(check_c1_memory_scan_coordinator PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
+
+    # -----------------------------------------------------------------------
+    # Stage B1: curl config credential-source regression
+    #
+    # Verifies that a password loaded through curl --config is observed
+    # in the file read, process memory, and outgoing sendto payload.
+    #
+    # Requires the same local Basic-auth registry fixture as C1.
+    # Return code 125 indicates that the test environment is unavailable.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_b1_curl_config
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_b1_curl_config.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_b1_curl_config PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
     # -----------------------------------------------------------------------
     # Stage C: Fork/COW inherited-secret InitialInspection regression

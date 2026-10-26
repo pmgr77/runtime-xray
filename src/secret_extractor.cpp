@@ -27,6 +27,7 @@
 #include "logger.hpp"
 #include "secret_fingerprinter.hpp"
 #include "netrc_extractor.hpp"
+#include "curl_config_extractor.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -469,15 +470,25 @@ std::vector<Observation> extract_secret_observations(
     // Recognize structured credentials in file-read buffers.
     // Fingerprinting and Observation creation remain centralized here.
     if (location == "read") {
+        //
+        // Recognize .netrc credentials.
+        //
         const auto netrc_passwords = extract_netrc_passwords(data);
 
         for (const auto& password : netrc_passwords) {
-            matches.push_back({
-                "password",
-                password.value,
-                "[netrc password]",
-                password.offset
-            });
+            matches.push_back({"password", password.value, "[netrc password]", password.offset});
+        }
+
+        //
+        // Recognize curl configuration credentials.
+        //
+        // The extractor returns only the password portion of a
+        // user:password directive, preserving its byte offset.
+        //
+        const auto curl_config_passwords = extract_curl_config_passwords(data);
+
+        for (const auto& password :  curl_config_passwords) {
+            matches.push_back({"password", password.value, "[curl config password]", password.offset});
         }
     }
 

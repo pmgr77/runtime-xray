@@ -301,11 +301,10 @@ static __always_inline int is_pipe_like(__u32 id)
 }
 
 /* ------------------------------------------------------------------ */
-/* Entry-side capture helpers                                          */
+/* Entry-side capture helpers                                         */
 /* ------------------------------------------------------------------ */
 
-static __always_inline void fill_path(struct syscall_event *ev,
-                                      struct sys_enter_ctx *ctx)
+static __always_inline void fill_path(struct syscall_event *ev, struct sys_enter_ctx *ctx)
 {
     __u32 id = (__u32)ctx->id;
     const char *upath = NULL;
@@ -317,32 +316,36 @@ static __always_inline void fill_path(struct syscall_event *ev,
      * parameter -- it will compile but fail to load.
      */
 #if defined(__TARGET_ARCH_x86)
-    if (id == NR_open || id == NR_execve)
+    if (id == NR_open || id == NR_execve) {
         upath = (const char *)ctx->args[0];
-    else if (id == NR_openat || id == NR_execveat)
+    } else if (id == NR_openat || id == NR_execveat) {
         upath = (const char *)ctx->args[1];
+    }
 #else
-    if (id == NR_execve)
+    if (id == NR_execve) {
         upath = (const char *)ctx->args[0];
-    else if (id == NR_openat || id == NR_execveat)
+    } else if (id == NR_openat || id == NR_execveat) {
         upath = (const char *)ctx->args[1];
+    }
 #endif
 
-    if (!upath)
+    if (!upath) {
         return;
+    }
 
     long n = bpf_probe_read_user_str(ev->path, sizeof(ev->path), upath);
-    if (n > 0)
+    if (n > 0) {
         ev->has_path = 1;
+    }
 }
 
-static __always_inline void fill_sockaddr(struct syscall_event *ev,
-                                          struct sys_enter_ctx *ctx)
+static __always_inline void fill_sockaddr(struct syscall_event *ev, struct sys_enter_ctx *ctx)
 {
     const void *usa = (const void *)ctx->args[1];   /* connect(sockfd, addr, len) */
     __u64 addrlen = ctx->args[2];
-    if (!usa || addrlen == 0)
+    if (!usa || addrlen == 0) {
         return;
+    }
     __u32 n = addrlen > MAX_SOCKADDR ? MAX_SOCKADDR : (__u32)addrlen;
     long rc = bpf_probe_read_user(ev->sockaddr, n, usa);
     if (rc == 0) {
@@ -351,12 +354,11 @@ static __always_inline void fill_sockaddr(struct syscall_event *ev,
     }
 }
 
-static __always_inline void fill_payload_from_buf(struct syscall_event *ev,
-                                                  const void *buf,
-                                                  __u64 count)
+static __always_inline void fill_payload_from_buf(struct syscall_event *ev, const void *buf, __u64 count)
 {
-    if (!buf || count == 0)
+    if (!buf || count == 0) {
         return;
+    }
     __u32 n = count > MAX_PAYLOAD ? MAX_PAYLOAD : (__u32)count;
     long rc = bpf_probe_read_user(ev->payload, n, buf);
     if (rc == 0) {
@@ -365,17 +367,14 @@ static __always_inline void fill_payload_from_buf(struct syscall_event *ev,
     }
 }
 
-static __always_inline void fill_payload_on_entry(struct syscall_event *ev,
-                                                  struct sys_enter_ctx *ctx)
+static __always_inline void fill_payload_on_entry(struct syscall_event *ev, struct sys_enter_ctx *ctx)
 {
     __u32 id = (__u32)ctx->id;
 
     /* write(fd, buf, count)         -> buf=arg1, count=arg2
      * sendto(sockfd, buf, len, ...) -> buf=arg1, count=arg2  */
     if (id == 1 || id == 44 || id == 64 || id == 206) {
-        fill_payload_from_buf(ev,
-                              (const void *)ctx->args[1],
-                              ctx->args[2]);
+        fill_payload_from_buf(ev, (const void *)ctx->args[1], ctx->args[2]);
         return;
     }
 
@@ -384,10 +383,12 @@ static __always_inline void fill_payload_on_entry(struct syscall_event *ev,
     if (id == 20 || id == 66) {
         struct iovec iov;
         const void *uiov = (const void *)ctx->args[1];
-        if (!uiov)
+        if (!uiov) {
             return;
-        if (bpf_probe_read_user(&iov, sizeof(iov), uiov) != 0)
+        }
+        if (bpf_probe_read_user(&iov, sizeof(iov), uiov) != 0) {
             return;
+        }
         fill_payload_from_buf(ev, (const void *)iov.iov_base, iov.iov_len);
         return;
     }
@@ -396,11 +397,9 @@ static __always_inline void fill_payload_on_entry(struct syscall_event *ev,
 static __always_inline void fill_pipefds(struct syscall_event *ev, struct sys_enter_ctx *ctx, __u32 *tid)
 {
     __u64 pipefd = ctx->args[0];
-    if (pipefd)
-        bpf_map_update_elem(&pending_pipefd_buf,
-                            tid,
-                            &pipefd,
-                            BPF_ANY);
+    if (pipefd) {
+        bpf_map_update_elem(&pending_pipefd_buf, tid, &pipefd, BPF_ANY);
+    }
 }
 
 static __always_inline void fill_task_create(struct syscall_event *ev, __u32 tid)
@@ -426,34 +425,41 @@ static __always_inline void fill_task_create(struct syscall_event *ev, __u32 tid
 /* ------------------------------------------------------------------ */
 
 SEC("tracepoint/raw_syscalls/sys_enter")
-int trace_sys_enter(struct sys_enter_ctx *ctx) {
+int trace_sys_enter(struct sys_enter_ctx *ctx)
+{
     __u32 zero = 0;
     __u64 *cnt = bpf_map_lookup_elem(&enter_counter, &zero);
-    if (cnt) (*cnt)++;
+    if (cnt) {
+        (*cnt)++;
+    }
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     __u32 tid = pid_tgid & 0xffffffff;
 
     __u32 *target = bpf_map_lookup_elem(&pid_filter, &pid);
-    if (!target)
+    if (!target) {
         return 0;
-    if (*target != 0 && pid != *target)
+    }
+    if (*target != 0 && pid != *target) {
         return 0;
+    }
 
     __u32 id = (__u32)ctx->id;
     
     /* Stash read/recvfrom buffer pointer so the exit event can use it. */
     if (is_read_like(id)) {
         __u64 buf = ctx->args[1];
-        if (buf)
+        if (buf) {
             bpf_map_update_elem(&pending_read_buf, &tid, &buf, BPF_ANY);
+        }
     }
 
     struct syscall_event *ev;
     ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
-    if (!ev)
+    if (!ev) {
         return 0;
+    }
 
     /* Zero-init the header portion we always fill; leave the captured
      * buffers as-is and rely on the has_* flags. */
@@ -497,29 +503,34 @@ int trace_sys_enter(struct sys_enter_ctx *ctx) {
 }
 
 SEC("tracepoint/raw_syscalls/sys_exit")
-int trace_sys_exit(struct sys_exit_ctx *ctx) {
+int trace_sys_exit(struct sys_exit_ctx *ctx)
+{
     __u32 zero = 0;
     __u64 *cnt = bpf_map_lookup_elem(&exit_counter, &zero);
-    if (cnt)
+    if (cnt) {
         (*cnt)++;
+    }
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     __u32 tid = (__u32)pid_tgid;
 
     __u32 *target = bpf_map_lookup_elem(&pid_filter, &pid);
-    if (!target) 
+    if (!target) {
         return 0;
-    if (*target != 0 && pid != *target)
+    }
+    if (*target != 0 && pid != *target) {
         return 0;
+    }
 
     __u32 id = (__u32)ctx->id;
 
     // Count clone/clone3 exits (ARM64: 220, 435; x86_64: 56, 435)
     if (id == 220 || id == 435) {
         __u64 *cnt = bpf_map_lookup_elem(&clone_exit_counter, &zero);
-        if (cnt)
+        if (cnt) {
             (*cnt)++;
+        }
     }
 
     // Try to reserve ring buffer
@@ -527,8 +538,9 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
     ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
     if (!ev) {
         __u64 *fail = bpf_map_lookup_elem(&ringbuf_reserve_fail, &zero);
-        if (fail)
+        if (fail) {
             (*fail)++;
+        }
         return 0;
     }
 
@@ -560,8 +572,9 @@ int trace_sys_exit(struct sys_exit_ctx *ctx) {
         __u64 *bufp = bpf_map_lookup_elem(&pending_read_buf, &tid);
         if (bufp && *bufp) {
             __u32 n = (__u32)ctx->ret;
-            if (n > MAX_PAYLOAD)
+            if (n > MAX_PAYLOAD) {
                 n = MAX_PAYLOAD;
+            }
 
             // ctx->ret is a signed long. The cap above compiles to a signed
             // comparison, so the verifier cannot prove n is non-negative and
@@ -635,11 +648,7 @@ int trace_sched_process_fork(struct sched_process_fork_ctx *ctx)
 
     __u32 value = child_pid;
 
-    bpf_map_update_elem(
-        &pid_filter,
-        &child_pid,
-        &value,
-        BPF_ANY);
+    bpf_map_update_elem(&pid_filter, &child_pid, &value, BPF_ANY);
 
     return 0;
 }
