@@ -590,6 +590,23 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_b1_curl_config PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
     # -----------------------------------------------------------------------
+    # Stage D1: HTTP Basic Authorization header regression
+    #
+    # Verifies Base64-decoded credential correlation across cmdline,
+    # process memory, and sendto_data, including evidence edges
+    # and plaintext redaction.
+    #
+    # Requires the local Basic-auth registry fixture.
+    # Return code 125 indicates an unavailable test environment.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_d1_authorization_header
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_d1_authorization_header.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_d1_authorization_header PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
+
+    # -----------------------------------------------------------------------
     # Stage C: Fork/COW inherited-secret InitialInspection regression
     #
     # Verifies that a child retaining a private inherited secret
