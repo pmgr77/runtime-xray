@@ -607,6 +607,22 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_d1_authorization_header PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
     # -----------------------------------------------------------------------
+    # Stage E1: HTTP URL userinfo credential regression
+    #
+    # Verifies credential detection in cmdline, memory, and sendto_data,
+    # matching fingerprints, lineage evidence, and plaintext redaction.
+    #
+    # Requires a local Basic-auth registry.
+    # Return code 125 means the fixture is unavailable.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_e1_url_credentials
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_e1_url_credentials.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_e1_url_credentials PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
+
+    # -----------------------------------------------------------------------
     # Stage C: Fork/COW inherited-secret InitialInspection regression
     #
     # Verifies that a child retaining a private inherited secret
