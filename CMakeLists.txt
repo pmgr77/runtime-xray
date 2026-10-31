@@ -634,6 +634,22 @@ if(NOT SKIP_PTRACE_TESTS)
     set_tests_properties(check_e1_url_credentials PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
     # -----------------------------------------------------------------------
+    # Stage F1: credentials supplied through stdin pipe
+    #
+    # Verifies read(fd=0), matching fingerprints across read,
+    # memory and sendto_data, lineage evidence and plaintext redaction.
+    #
+    # Inherited stdin may have no resource_id.
+    # Return code 125 indicates an unavailable test environment.
+    # -----------------------------------------------------------------------
+    add_test(NAME check_f1_stdin_credentials
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_f1_stdin_credentials.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_f1_stdin_credentials PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
+
+    # -----------------------------------------------------------------------
     # Stage C: Fork/COW inherited-secret InitialInspection regression
     #
     # Verifies that a child retaining a private inherited secret
