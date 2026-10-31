@@ -121,6 +121,20 @@ private:
         std::string role;
         bool cloexec = false;
         std::string source;
+        // Identity of the underlying Linux kernel object, when known.
+        //
+        // Examples:
+        //   pipe:[123456]
+        //   socket:[789012]
+        //
+        // This is separate from RuntimeXRay's resource_id.
+        //
+        // A matching key alone does not establish data flow or
+        // prove that two observations occurred on the same
+        // descriptor lifetime.
+        //
+        // Empty when identity is unavailable or unsupported.
+        std::string kernel_object_key;
     };
 
     // RuntimeXRay-local resource allocator.
@@ -130,6 +144,30 @@ private:
     // process_instance_id -> fd -> resource
     std::unordered_map<uint64_t, std::unordered_map<int, FdResourceBinding>> fd_bindings_by_instance_;
 
+    /**
+     * @brief Initial FD discovery snapshot for each process instance.
+     *
+     * Unlike fd_bindings_by_instance_, this snapshot is immutable
+     * during normal FD operations.
+     *
+     * It records the resource identity observed when a process
+     * instance was first inspected through /proc.
+     *
+     * The snapshot survives close(), dup(), and FD-number reuse.
+     * It allows a late TaskCreate notification to reconcile
+     * historical observations without modifying the child's
+     * current FD table.
+     *
+     * Key:
+     *   process_instance_id -> fd -> initial binding
+     *
+     * This is not a complete FD lifetime history. It only preserves
+     * identities established during initial discovery.
+     *
+     * Entries are removed when the process instance terminates.
+     */
+    std::unordered_map<uint64_t, std::unordered_map<int, FdResourceBinding>> initial_fd_bindings_by_instance_;
+
     // Process instances whose initial FD table has already been inherited
     // from their parent.
     //
@@ -138,7 +176,61 @@ private:
     // overwrite FD changes already made by the child.
     std::unordered_set<uint64_t> fd_inheritance_initialized_instances_;
 
+    // Process instances whose pre-existing FD snapshot has been inspected.
+    //
+    // Discovery is attempted once, on the first observed syscall entry.
+    // A discovered descriptor must never replace an existing binding
+    // established through observed open/pipe/dup or fork inheritance.
+    //
+    // This is separate from fd_inheritance_initialized_instances_:
+    // inheritance and /proc discovery are different operations.
+    std::unordered_set<uint64_t> fd_discovery_initialized_instances_;
+
     std::unordered_map<pid_t, uint64_t> task_create_parent_instance_by_child_tid_;
+
+    /**
+     * @brief Register previously unknown descriptors for a process instance.
+     *
+     * Inspects /proc/<tgid>/fd and creates RuntimeXRay-local resource
+     * identities for descriptors not already present in the FD map.
+     *
+     * Does not overwrite observed or inherited resource identities.
+     * Does not construct DataFlow or causality edges.
+     *
+     * @param tgid Linux thread-group ID.
+     * @param instance_id RuntimeXRay process-instance identity.
+     */
+    void discover_initial_fd_bindings(pid_t tgid, uint64_t instance_id);
+
+    /**
+     * @brief Reconcile FD identities after late child discovery.
+     *
+     * TaskCreate may arrive after the child has already been observed.
+     * In that case, the child may have independently discovered FDs
+     * inherited from its parent and allocated different resource IDs.
+     *
+     * Reconciliation requires matching kernel-object identities.
+     * Unknown or conflicting identities must remain independent.
+     *
+     * Existing child FD changes must not be overwritten.
+     *
+     * @param parent_instance_id Parent process-instance identity.
+     * @param child_instance_id Child process-instance identity.
+     */
+    void reconcile_child_fd_bindings(uint64_t parent_instance_id, uint64_t child_instance_id);
+
+    /**
+     * @brief Replace one resource identity with another.
+     *
+     * Updates current FD bindings and existing observations so the
+     * lineage graph remains consistent after reconciliation.
+     *
+     * This function does not create DataFlow edges.
+     *
+     * @param old_resource_id Resource identity being replaced.
+     * @param new_resource_id Canonical resource identity.
+     */
+    void remap_resource_identity(uint64_t old_resource_id, uint64_t new_resource_id);
 
     void stamp_fd_resource(Observation& obs) const;
 

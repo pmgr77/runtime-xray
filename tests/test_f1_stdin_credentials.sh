@@ -336,6 +336,10 @@ def has_read_edge(data):
         and event.get("syscall") == "read"
         and event.get("args", [None])[0] == 0
         and event.get("return_value", 0) > 0
+        and isinstance(event.get("resource_id"), int)
+        and event["resource_id"] > 0
+        and event.get("resource_type") == "pipe"
+        and event.get("resource_role") == "read"
         and event.get("seq") == data.get("source_event_seq")
         and event.get("fingerprint") == data.get("fingerprint")
         and same_image(event, data)

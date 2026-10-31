@@ -23,6 +23,7 @@
 // limitations under the License.
 
 #include "lineage_analyzer.hpp"
+#include "inherited_fd_discovery.hpp"
 #include "syscall_names.hpp"
 #include "logger.hpp"
 #include <cstring>
@@ -237,6 +238,10 @@ void LineageAnalyzer::on_syscall_event(const SyscallEvent& ev)
     }
 
     if (ev.is_entry) {
+        // Register previously unknown FDs before stamping this syscall.
+        // This includes inherited stdin and other pre-existing descriptors.
+        discover_initial_fd_bindings((tgid > 0) ? tgid : pid,  process_instance_id);
+
         // Create syscall entry observation
         Observation obs;
         obs.type = ObservationType::Event;
@@ -526,10 +531,20 @@ void LineageAnalyzer::handle_task_create(const SyscallEvent& ev) {
     //
     auto& child_bindings = fd_bindings_by_instance_[child_instance_id];
 
-    if (parent_bindings != fd_bindings_by_instance_.end()) {
-        child_bindings = parent_bindings->second;
+    // The child may already have executed syscalls before TaskCreate
+    // was delivered. Never overwrite bindings discovered or modified
+    // during that observation period.
+    if (fd_discovery_initialized_instances_.count(child_instance_id) != 0) {
+        // Child was observed before TaskCreate.
+        // Preserve its FD table and reconcile only matching identities.
+        reconcile_child_fd_bindings(parent_instance_id, child_instance_id);
     } else {
-        child_bindings.clear();
+        // Normal ordering: child has not performed FD discovery yet
+        if (parent_bindings != fd_bindings_by_instance_.end()) {
+            child_bindings = parent_bindings->second;
+        } else {
+            child_bindings.clear();
+        }
     }
 
     add_edge(*parent_idx, child_idx, RelationType::Causality, "kernel task creation");
@@ -665,13 +680,16 @@ void LineageAnalyzer::handle_fork_exit(
     const bool first_initialization = fd_inheritance_initialized_instances_.insert(child_instance_id).second;
 
     if (first_initialization) {
-        auto bindings_it = fd_bindings_by_instance_.find(parent_instance_id);
-
-        auto& child_bindings = fd_bindings_by_instance_[child_instance_id];
-        if (bindings_it != fd_bindings_by_instance_.end()) {
-            child_bindings = bindings_it->second;
+        if (fd_discovery_initialized_instances_.count(child_instance_id) != 0) {
+            reconcile_child_fd_bindings(parent_instance_id, child_instance_id);
         } else {
-            child_bindings.clear();
+            auto bindings_it = fd_bindings_by_instance_.find(parent_instance_id);
+            auto& child_bindings = fd_bindings_by_instance_[child_instance_id];
+            if (bindings_it != fd_bindings_by_instance_.end()) {
+                child_bindings = bindings_it->second;
+            } else {
+                child_bindings.clear();
+            }
         }
 
         // Causality edge: parent process -> child process.
@@ -889,6 +907,8 @@ void LineageAnalyzer::handle_thread_exit(const SyscallEvent& ev)
     active_process_by_tgid_.erase(tgid);
     active_tids_by_instance_.erase(instance_id);
     fd_bindings_by_instance_.erase(instance_id);
+    fd_discovery_initialized_instances_.erase(instance_id);
+    initial_fd_bindings_by_instance_.erase(instance_id);
 
     Logger::log(
         LogLevel::Debug,
@@ -926,6 +946,8 @@ void LineageAnalyzer::handle_exit_group(const SyscallEvent& ev) {
     active_process_by_tgid_.erase(tgid);
     active_tids_by_instance_.erase(instance_id);
     fd_bindings_by_instance_.erase(instance_id);
+    fd_discovery_initialized_instances_.erase(instance_id);
+    initial_fd_bindings_by_instance_.erase(instance_id);
 }
 
 LineageGraph LineageAnalyzer::produce_graph() const {
@@ -938,6 +960,219 @@ LineageGraph LineageAnalyzer::produce_graph() const {
     graph.observations = observations_;
     graph.edges = edges_;
     return graph;
+}
+
+/**
+ * @brief Discover FD bindings existing before their creation was observed.
+ *
+ * Only the ptrace backend is supported here: the target is stopped
+ * while its syscall entry is being processed.
+ *
+ * Existing bindings take precedence over /proc discovery.
+ * Each unknown descriptor receives a new local resource identity.
+ * No causality or DataFlow edges are created.
+ */
+void LineageAnalyzer::discover_initial_fd_bindings(pid_t tgid, uint64_t instance_id)
+{
+    if (tgid <= 0 || instance_id == 0 ||
+        !backend_ || backend_->name() != "ptrace") {
+        return;
+    }
+
+    // Attempt discovery once per process instance.
+    if (!fd_discovery_initialized_instances_.insert(instance_id).second) {
+        return;
+    }
+
+    const auto discovered = discover_preexisting_fds(tgid);
+
+    auto& bindings = fd_bindings_by_instance_[instance_id];
+    auto& initial_bindings = initial_fd_bindings_by_instance_[instance_id];
+
+    size_t added = 0;
+
+    for (const auto& descriptor : discovered) {
+        if (descriptor.fd < 0 || bindings.find(descriptor.fd) != bindings.end()) {
+            continue;
+        }
+
+        FdResourceBinding binding;
+        binding.resource_id = next_resource_id_++;
+        binding.type = descriptor.type;
+        binding.role = descriptor.role;
+        binding.cloexec = descriptor.cloexec;
+        binding.kernel_object_key = descriptor.kernel_object_key;
+
+        // Preserve the descriptor identity discovered at process inspection.
+        // Subsequent close(), dup(), and open() operations must not change
+        // this historical snapshot.
+        initial_bindings.emplace(descriptor.fd, binding);
+
+        bindings.emplace(descriptor.fd, std::move(binding));
+        ++added;
+    }
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: initial FD discovery instance=" +
+        std::to_string(instance_id) +
+        " tgid=" + std::to_string(tgid) +
+        " discovered=" + std::to_string(discovered.size()) +
+        " added=" + std::to_string(added));
+}
+
+/**
+ * @brief Replace an independently discovered resource identity.
+ *
+ * Resource IDs are unique within one RuntimeXRay analysis.
+ *
+ * Updates current FD bindings and already recorded observations.
+ * Does not create new DataFlow edges.
+ */
+void LineageAnalyzer::remap_resource_identity(uint64_t old_resource_id, uint64_t new_resource_id)
+{
+    if (old_resource_id == 0 ||
+        new_resource_id == 0 ||
+        old_resource_id == new_resource_id) {
+        return;
+    }
+
+    // Update all live FD bindings referring to the old identity.
+    for (auto& instance_entry : fd_bindings_by_instance_) {
+        for (auto& fd_entry : instance_entry.second) {
+            FdResourceBinding& binding = fd_entry.second;
+
+            if (binding.resource_id == old_resource_id) {
+                binding.resource_id = new_resource_id;
+            }
+        }
+    }
+
+    // Update historical discovery snapshots as well.
+    //
+    // The snapshot preserves descriptor identity and kernel-object
+    // metadata, but its RuntimeXRay-local resource ID may be
+    // canonicalized after a late parent-child reconciliation.
+    for (auto& instance_entry : initial_fd_bindings_by_instance_) {
+        for (auto& fd_entry : instance_entry.second) {
+            FdResourceBinding& binding = fd_entry.second;
+
+            if (binding.resource_id == old_resource_id) {
+                binding.resource_id = new_resource_id;
+            }
+        }
+    }
+
+    // Update observations already recorded before TaskCreate.
+    for (Observation& obs : observations_) {
+        if (obs.resource_id == old_resource_id) {
+            obs.resource_id = new_resource_id;
+        }
+    }
+
+    // Keep existing DataFlow edge descriptions consistent.
+    const std::string old_details =
+        "exact fingerprint observed across pipe resource_id=" +
+        std::to_string(old_resource_id);
+
+    const std::string new_details =
+        "exact fingerprint observed across pipe resource_id=" +
+        std::to_string(new_resource_id);
+
+    for (LineageEdge& edge : edges_) {
+        if (edge.relation == RelationType::DataFlow &&
+            edge.details == old_details) {
+            edge.details = new_details;
+        }
+    }
+
+    Logger::log(
+        LogLevel::Debug,
+        "lineage: remapped resource identity old=" +
+        std::to_string(old_resource_id) +
+        " new=" +
+        std::to_string(new_resource_id));
+}
+
+/**
+ * @brief Reconcile independently discovered inherited FD identities.
+ *
+ * Uses initial discovery snapshots rather than current FD tables.
+ *
+ * This allows historical observations to be reconciled even when
+ * the child has already closed or replaced its inherited descriptor.
+ *
+ * Reconciliation requires:
+ *   - Confirmed parent-child process relationship.
+ *   - Matching FD numbers at initial discovery.
+ *   - Matching non-empty kernel-object keys.
+ *   - Matching supported resource types and descriptor roles.
+ *
+ * Current FD tables are never overwritten with parent bindings.
+ * No DataFlow edges are created.
+ */
+void LineageAnalyzer::reconcile_child_fd_bindings(uint64_t parent_instance_id, uint64_t child_instance_id)
+{
+    const auto parent_it = initial_fd_bindings_by_instance_.find(parent_instance_id);
+
+    const auto child_it = initial_fd_bindings_by_instance_.find(child_instance_id);
+
+    if (parent_it == initial_fd_bindings_by_instance_.end() ||
+        child_it == initial_fd_bindings_by_instance_.end()) {
+        return;
+    }
+
+    for (const auto& child_entry : child_it->second) {
+        const int fd = child_entry.first;
+        const FdResourceBinding& child_binding = child_entry.second;
+
+        const auto parent_fd_it = parent_it->second.find(fd);
+
+        if (parent_fd_it == parent_it->second.end()) {
+            continue;
+        }
+
+        const FdResourceBinding& parent_binding = parent_fd_it->second;
+
+        if (child_binding.resource_id == 0 ||
+            parent_binding.resource_id == 0 ||
+            child_binding.kernel_object_key.empty() ||
+            parent_binding.kernel_object_key.empty()) {
+            continue;
+        }
+
+        // Currently supported kernel-object identities.
+        if (child_binding.type != "pipe" &&
+            child_binding.type != "socket") {
+            continue;
+        }
+
+        if (child_binding.type != parent_binding.type ||
+            child_binding.role != parent_binding.role ||
+            child_binding.kernel_object_key !=
+                parent_binding.kernel_object_key) {
+            continue;
+        }
+
+        if (child_binding.resource_id == parent_binding.resource_id) {
+            continue;
+        }
+
+        Logger::log(
+            LogLevel::Debug,
+            "lineage: reconciling inherited FD=" +
+            std::to_string(fd) +
+            " parent_instance=" +
+            std::to_string(parent_instance_id) +
+            " child_instance=" +
+            std::to_string(child_instance_id) +
+            " old_resource=" +
+            std::to_string(child_binding.resource_id) +
+            " new_resource=" +
+            std::to_string(parent_binding.resource_id));
+
+        remap_resource_identity(child_binding.resource_id, parent_binding.resource_id);
+    }
 }
 
 void LineageAnalyzer::stamp_fd_resource(Observation& obs) const {
@@ -1029,8 +1264,8 @@ void LineageAnalyzer::handle_pipe_exit(const SyscallEvent& ev, size_t syscall_in
         (pipe_obs.arg1 & O_CLOEXEC) != 0;
 
     auto& fd_map = fd_bindings_by_instance_[pipe_obs.process_instance_id];
-    fd_map[fds[0]] = {resource_id, "pipe", "read", cloexec, ""};
-    fd_map[fds[1]] = {resource_id, "pipe", "write", cloexec, ""};
+    fd_map[fds[0]] = {resource_id, "pipe", "read", cloexec, "", ""};
+    fd_map[fds[1]] = {resource_id, "pipe", "write", cloexec, "", ""};
     pipe_obs.resource_id = resource_id;
     pipe_obs.resource_type = "pipe";
     Logger::log(

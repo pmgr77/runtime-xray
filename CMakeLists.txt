@@ -47,6 +47,7 @@ set(RUNTIMEXRAY_SOURCES
     src/ptrace_backend.cpp
     src/logger.cpp
     src/lineage_analyzer.cpp
+    src/inherited_fd_discovery.cpp
     src/secret_fingerprinter.cpp
     src/narrative.cpp
     src/narrative_builder.cpp
@@ -342,6 +343,7 @@ add_test(NAME check_memory_scan_coordinator COMMAND $<TARGET_FILE:test_memory_sc
 add_executable(test_process_image_identity
     tests/unit/test_process_image_identity.cpp
     src/lineage_analyzer.cpp
+    src/inherited_fd_discovery.cpp
     src/syscall_names.cpp
     src/logger.cpp
 )
@@ -354,6 +356,59 @@ target_compile_options(test_process_image_identity PRIVATE
     -Wsign-conversion
 )
 add_test(NAME check_process_image_identity COMMAND $<TARGET_FILE:test_process_image_identity>)
+
+
+# ---------------------------------------------------------------------------
+# Inherited FD discovery tests
+#
+# Creates a real pipe, forks a child and inspects its inherited FDs
+# through /proc/<pid>/fd and /proc/<pid>/fdinfo.
+#
+# Does not require ptrace or root privileges.
+# ---------------------------------------------------------------------------
+add_executable(test_inherited_fd_discovery
+    tests/unit/test_inherited_fd_discovery.cpp
+    src/inherited_fd_discovery.cpp
+)
+target_include_directories(test_inherited_fd_discovery PRIVATE include)
+target_compile_options(test_inherited_fd_discovery PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wsign-conversion
+)
+add_test(NAME check_inherited_fd_discovery COMMAND $<TARGET_FILE:test_inherited_fd_discovery>)
+set_tests_properties(check_inherited_fd_discovery PROPERTIES TIMEOUT 15)
+
+# ---------------------------------------------------------------------------
+# FD identity reconciliation across fork / late TaskCreate.
+#
+# Tests:
+#   - Normal TaskCreate ordering
+#   - Child observed before TaskCreate
+#   - FD replacement without false resource merging
+#
+# Uses real Linux pipes and fork(), with synthetic event ordering.
+# No ptrace privileges required.
+# ---------------------------------------------------------------------------
+add_executable(test_lineage_fd_discovery_order
+    tests/unit/test_lineage_fd_discovery_order.cpp
+    src/lineage_analyzer.cpp
+    src/inherited_fd_discovery.cpp
+    src/syscall_names.cpp
+    src/logger.cpp
+)
+target_include_directories(test_lineage_fd_discovery_order PRIVATE include)
+target_compile_options(test_lineage_fd_discovery_order PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wsign-conversion
+)
+add_test(NAME check_lineage_fd_discovery_order COMMAND $<TARGET_FILE:test_lineage_fd_discovery_order>)
+set_tests_properties(check_lineage_fd_discovery_order PROPERTIES TIMEOUT 15)
 
 # eBPF tests (only if enabled and not skipped)
 if(NOT SKIP_EBPF_TESTS AND BUILD_EBPF_BACKEND)
@@ -648,6 +703,22 @@ if(NOT SKIP_PTRACE_TESTS)
             $<TARGET_FILE:runtimexray>
     )
     set_tests_properties(check_f1_stdin_credentials PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
+
+    # ---------------------------------------------------------------------------
+    # F2: Pre-existing pipe inherited on fd=3.
+    #
+    # The pipe is created outside the traced process.
+    # Verify that RuntimeXRay discovers its resource identity and
+    # preserves the read role without inventing causal relationships.
+    #
+    # Does not require the Docker Registry fixture.
+    # ---------------------------------------------------------------------------
+    add_test(NAME check_f2_inherited_fd3
+            COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_f2_inherited_fd3.sh
+            $<TARGET_FILE:runtimexray>
+    )
+    set_tests_properties(check_f2_inherited_fd3 PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
     # -----------------------------------------------------------------------
     # Stage C: Fork/COW inherited-secret InitialInspection regression
