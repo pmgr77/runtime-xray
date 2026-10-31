@@ -102,6 +102,7 @@ public:
     PipeGuard& operator=(const PipeGuard&) = delete;
 
     int reader() const { return fds_[0]; }
+    int writer() const { return fds_[1]; }
 
 private:
     int fds_[2] = {-1, -1};
@@ -530,6 +531,293 @@ void test_fd_discovery_order()
     std::cout << "PASS: late TaskCreate ordering\n";
 }
 
+
+/**
+ * @brief Verify cross-process DataFlow through a pre-existing pipe.
+ *
+ * The pipe is created before the analyzer observes either process.
+ * Parent writes through one endpoint; child reads through the other.
+ *
+ * Both endpoints must share one RuntimeXRay resource identity.
+ * Matching fingerprint evidence must produce a DataFlow edge.
+ */
+void test_preexisting_pipe_cross_process_dataflow()
+{
+    PipeGuard pipe;
+
+    const pid_t parent = ::getpid();
+    const pid_t child = ::fork();
+
+    require(child >= 0, "fork() failed");
+
+    if (child == 0) {
+        if (::raise(SIGSTOP) != 0) {
+            ::_exit(1);
+        }
+
+        ::_exit(0);
+    }
+
+    ChildGuard child_guard(child);
+    wait_for_stopped_child(child);
+
+    TestBackend backend;
+    LineageAnalyzer analyzer;
+    analyzer.set_backend(&backend);
+
+    const std::string fingerprint = "test-pipe-fingerprint";
+
+    // Parent writes to a pipe that existed before tracing.
+    auto write_entry = make_read(parent, pipe.writer());
+    write_entry.syscall_number = SYS_write;
+
+    analyzer.on_syscall_event(write_entry);
+
+    analyzer.set_pending_event_fingerprint(parent, parent, fingerprint);
+
+    auto write_exit = write_entry;
+    write_exit.is_entry = false;
+    write_exit.return_value = 1;
+
+    analyzer.on_syscall_event(write_exit);
+
+    // The child inherits both endpoints.
+    analyzer.on_syscall_event(make_task_create(parent, child));
+
+    // Child reads from the same underlying pipe.
+    auto read_entry = make_read(child, pipe.reader());
+
+    analyzer.on_syscall_event(read_entry);
+
+    auto read_exit = read_entry;
+    read_exit.is_entry = false;
+    read_exit.return_value = 1;
+
+    analyzer.on_syscall_event(read_exit);
+
+    analyzer.set_last_exit_fingerprint(child, child, fingerprint);
+
+    const auto graph = analyzer.produce_graph();
+
+    const Observation* parent_write = nullptr;
+    const Observation* child_read = nullptr;
+
+    for (const auto& obs : graph.observations) {
+        if (obs.type != ObservationType::Event) {
+            continue;
+        }
+
+        if (obs.tgid == parent &&
+            obs.syscall_name == "write" &&
+            obs.arg0 == static_cast<uint64_t>(pipe.writer())) {
+            parent_write = &obs;
+        }
+
+        if (obs.tgid == child &&
+            obs.syscall_name == "read" &&
+            obs.arg0 == static_cast<uint64_t>(pipe.reader())) {
+            child_read = &obs;
+        }
+    }
+
+    require(parent_write != nullptr, "parent write missing");
+    require(child_read != nullptr, "child read missing");
+
+    require(
+        parent_write->resource_id != 0 &&
+        child_read->resource_id != 0,
+        "pipe resource identity missing"
+    );
+
+    std::cout
+        << "Pre-existing pipe: parent write resource="
+        << parent_write->resource_id
+        << " child read resource="
+        << child_read->resource_id
+        << '\n';
+
+    require(
+        parent_write->resource_id == child_read->resource_id,
+        "pre-existing pipe endpoints have different resource IDs"
+    );
+
+    bool dataflow_found = false;
+
+    for (const auto& edge : graph.edges) {
+        if (edge.relation != RelationType::DataFlow) {
+            continue;
+        }
+
+        if (edge.from_index >= graph.observations.size() ||
+            edge.to_index >= graph.observations.size()) {
+            continue;
+        }
+
+        const auto& source = graph.observations[edge.from_index];
+        const auto& destination = graph.observations[edge.to_index];
+
+        if (source.seq == parent_write->seq &&
+            destination.seq == child_read->seq) {
+            dataflow_found = true;
+            break;
+        }
+    }
+
+    require(
+        dataflow_found,
+        "missing cross-process pipe DataFlow edge"
+    );
+
+    std::cout
+        << "PASS: pre-existing pipe cross-process DataFlow\n";
+}
+
+/**
+ * @brief Verify DataFlow reconstruction after late TaskCreate.
+ *
+ * Parent write and child read finish before TaskCreate arrives.
+ * Their independently discovered resource IDs initially differ.
+ *
+ * Late reconciliation must recover the matching pipe identity
+ * and establish the previously missing DataFlow edge.
+ */
+void test_late_task_create_restores_dataflow()
+{
+    PipeGuard pipe;
+
+    const pid_t parent = ::getpid();
+    const pid_t child = ::fork();
+
+    require(child >= 0, "fork() failed");
+
+    if (child == 0) {
+        if (::raise(SIGSTOP) != 0) {
+            ::_exit(1);
+        }
+        ::_exit(0);
+    }
+
+    ChildGuard child_guard(child);
+    wait_for_stopped_child(child);
+
+    TestBackend backend;
+    LineageAnalyzer analyzer;
+    analyzer.set_backend(&backend);
+
+    const std::string fingerprint = "late-pipe-dataflow-test";
+
+    // Parent writes before the child relationship is reported.
+    auto write_entry = make_read(parent, pipe.writer());
+    write_entry.syscall_number = SYS_write;
+
+    analyzer.on_syscall_event(write_entry);
+    analyzer.set_pending_event_fingerprint(parent, parent, fingerprint);
+
+    auto write_exit = write_entry;
+    write_exit.is_entry = false;
+    write_exit.return_value = 1;
+
+    analyzer.on_syscall_event(write_exit);
+
+    // Child independently discovers the same kernel pipe.
+    auto read_entry = make_read(child, pipe.reader());
+
+    analyzer.on_syscall_event(read_entry);
+
+    auto read_exit = read_entry;
+    read_exit.is_entry = false;
+    read_exit.return_value = 1;
+
+    analyzer.on_syscall_event(read_exit);
+    analyzer.set_last_exit_fingerprint(child, child, fingerprint);
+
+    const auto before = analyzer.produce_graph();
+
+    uint64_t write_resource = 0;
+    uint64_t read_resource = 0;
+    uint64_t write_seq = 0;
+    uint64_t read_seq = 0;
+
+    for (const auto& obs : before.observations) {
+        if (obs.tgid == parent &&
+            obs.syscall_name == "write" &&
+            obs.arg0 == static_cast<uint64_t>(pipe.writer())) {
+            write_resource = obs.resource_id;
+            write_seq = obs.seq;
+        }
+
+        if (obs.tgid == child &&
+            obs.syscall_name == "read" &&
+            obs.arg0 == static_cast<uint64_t>(pipe.reader())) {
+            read_resource = obs.resource_id;
+            read_seq = obs.seq;
+        }
+    }
+
+    require(write_resource != 0, "parent write resource missing");
+    require(read_resource != 0, "child read resource missing");
+
+    require(
+        write_resource != read_resource,
+        "test did not reproduce independent FD discovery"
+    );
+
+    // No DataFlow should exist before resource reconciliation.
+    for (const auto& edge : before.edges) {
+        require(
+            !(edge.relation == RelationType::DataFlow &&
+              before.observations[edge.from_index].seq == write_seq &&
+              before.observations[edge.to_index].seq == read_seq),
+            "premature DataFlow before resource reconciliation"
+        );
+    }
+
+    // The parent-child relationship arrives after both syscalls.
+    analyzer.on_syscall_event(make_task_create(parent, child));
+
+    const auto after = analyzer.produce_graph();
+
+    uint64_t reconciled_read_resource = 0;
+    bool dataflow_found = false;
+
+    for (const auto& obs : after.observations) {
+        if (obs.seq == read_seq) {
+            reconciled_read_resource = obs.resource_id;
+        }
+    }
+
+    for (const auto& edge : after.edges) {
+        if (edge.relation != RelationType::DataFlow) {
+            continue;
+        }
+
+        if (after.observations[edge.from_index].seq == write_seq &&
+            after.observations[edge.to_index].seq == read_seq) {
+            dataflow_found = true;
+        }
+    }
+
+    std::cout
+        << "Late DataFlow: write resource=" << write_resource
+        << " original read resource=" << read_resource
+        << " reconciled read resource=" << reconciled_read_resource
+        << '\n';
+
+    require(
+        reconciled_read_resource == write_resource,
+        "late TaskCreate failed to reconcile pipe identity"
+    );
+
+    std::cout << "PASS: late pipe identity reconciliation\n";
+
+    require(
+        dataflow_found,
+        "late TaskCreate did not reconstruct missing DataFlow"
+    );
+
+    std::cout << "PASS: late TaskCreate restores DataFlow\n";
+}
+
 } // anonymous namespace
 
 int main()
@@ -538,6 +826,8 @@ int main()
         test_fd_discovery_order();
         test_fd_replacement_no_false_merge();
         test_fd_replacement_after_first_observation();
+        test_preexisting_pipe_cross_process_dataflow();
+        test_late_task_create_restores_dataflow();
 
         std::cout << "PASS: lineage FD discovery ordering tests\n";
 

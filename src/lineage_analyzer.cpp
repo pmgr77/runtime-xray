@@ -988,6 +988,23 @@ void LineageAnalyzer::discover_initial_fd_bindings(pid_t tgid, uint64_t instance
 
     auto& bindings = fd_bindings_by_instance_[instance_id];
     auto& initial_bindings = initial_fd_bindings_by_instance_[instance_id];
+    // Kernel pipe identity -> RuntimeXRay resource identity.
+    //
+    // Scope this mapping to one process-instance discovery.
+    // Do not use a global inode cache: kernel inode numbers may be reused.
+    std::unordered_map<std::string, uint64_t> pipe_resource_ids;
+
+    // Preserve identities already established through observed syscalls
+    // or parent-to-child FD inheritance.
+    for (const auto& entry : bindings) {
+        const FdResourceBinding& existing = entry.second;
+
+        if (existing.type == "pipe" &&
+            !existing.kernel_object_key.empty() &&
+            existing.resource_id != 0) {
+            pipe_resource_ids.emplace(existing.kernel_object_key, existing.resource_id);
+        }
+    }
 
     size_t added = 0;
 
@@ -997,11 +1014,27 @@ void LineageAnalyzer::discover_initial_fd_bindings(pid_t tgid, uint64_t instance
         }
 
         FdResourceBinding binding;
-        binding.resource_id = next_resource_id_++;
         binding.type = descriptor.type;
         binding.role = descriptor.role;
         binding.cloexec = descriptor.cloexec;
         binding.kernel_object_key = descriptor.kernel_object_key;
+
+        if (descriptor.type == "pipe" && !descriptor.kernel_object_key.empty()) {
+            // Both endpoints of the same live kernel pipe must share
+            // one RuntimeXRay resource identity.
+            const auto existing = pipe_resource_ids.find(descriptor.kernel_object_key);
+            if (existing != pipe_resource_ids.end()) {
+                binding.resource_id = existing->second;
+            } else {
+                binding.resource_id = next_resource_id_++;
+                pipe_resource_ids.emplace(descriptor.kernel_object_key, binding.resource_id);
+            }
+        } else {
+            // Files, unknown types and unsupported identities are
+            // kept independent. Do not infer identity from FD numbers
+            // or pathnames.
+            binding.resource_id = next_resource_id_++;
+        }
 
         // Preserve the descriptor identity discovered at process inspection.
         // Subsequent close(), dup(), and open() operations must not change
@@ -1084,6 +1117,41 @@ void LineageAnalyzer::remap_resource_identity(uint64_t old_resource_id, uint64_t
             edge.details == old_details) {
             edge.details = new_details;
         }
+    }
+
+    // Resource reconciliation may make previously unmatched pipe
+    // write/read observations eligible for DataFlow correlation.
+    //
+    // Both syscall observations may already have completed before
+    // TaskCreate arrived, so neither syscall exit will trigger
+    // correlation again.
+    //
+    // Reuse the existing evidence-based matching logic:
+    //   - same resource identity
+    //   - matching fingerprint
+    //   - correct pipe endpoint roles
+    //   - compatible syscall timing
+    //
+    // link_pipe_dataflow() also prevents duplicate DataFlow edges.
+    //
+    // Scan all completed reads for the canonical resource because
+    // either the supplying write or the receiving read may have
+    // belonged to the remapped identity.
+    for (size_t i = 0; i < observations_.size(); ++i) {
+        const Observation& obs = observations_[i];
+
+        if (obs.type != ObservationType::Event ||
+            obs.syscall_name != "read" ||
+            obs.is_entry ||
+            obs.return_value <= 0 ||
+            obs.resource_id != new_resource_id ||
+            obs.resource_type != "pipe" ||
+            obs.resource_role != "read" ||
+            obs.fingerprint.empty()) {
+            continue;
+        }
+
+        link_pipe_dataflow(i);
     }
 
     Logger::log(
@@ -1486,8 +1554,7 @@ void LineageAnalyzer::link_pipe_dataflow(size_t read_index)
             continue;
         }
 
-        if (write_obs.syscall_name != "write" &&
-            write_obs.syscall_name != "writev") {
+        if (write_obs.syscall_name != "write" && write_obs.syscall_name != "writev") {
             continue;
         }
 
