@@ -720,6 +720,31 @@ if(NOT SKIP_PTRACE_TESTS)
     )
     set_tests_properties(check_f2_inherited_fd3 PROPERTIES SKIP_RETURN_CODE 125 TIMEOUT 150)
 
+        # ---------------------------------------------------------------------------
+        # F3: Pre-existing inherited pipe -> cross-process DataFlow -> TCP.
+        #
+        # The Python launcher creates the pipe before RuntimeXRay starts.
+        # The traced parent writes a synthetic credential to the pipe.
+        # The traced child reads and forwards it to a local TCP receiver.
+        #
+        # Verifies:
+        #   - Shared pipe resource identity across processes
+        #   - Matching write/read/sendto fingerprints
+        #   - Explicit write -> read DataFlow edge
+        #   - Exact TCP delivery
+        #   - Credential redaction in JSON and text reports
+        #
+        # No Docker fixture or external network required.
+        # ---------------------------------------------------------------------------
+        add_test(
+                NAME check_f3_inherited_pipe_network
+                COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/inherited_pipe_network_lab.py
+                $<TARGET_FILE:runtimexray>
+        )
+
+        set_tests_properties(check_f3_inherited_pipe_network PROPERTIES TIMEOUT 210 )
+
     # -----------------------------------------------------------------------
     # Stage C: Fork/COW inherited-secret InitialInspection regression
     #
