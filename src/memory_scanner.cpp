@@ -24,6 +24,7 @@
 
 #include "memory_scanner.hpp"
 #include "secret_extractor.hpp"
+#include "url_credential_extractor.hpp"
 #include "memory_region_policy.hpp"
 #include "memory_reader.hpp"
 #include "logger.hpp"
@@ -112,50 +113,11 @@ std::vector<std::string> split_nul_strings(const std::string& data) {
     return parts;
 }
 
-/**
- * @brief Extract a password from HTTP(S) URL userinfo.
- *
- * Supports: http://username:password@host/path
- * Does not perform percent-decoding.
- *
- * @return true if a non-empty password was extracted.
- */
-bool extract_http_url_password(const std::string& url, std::string& password)
-{
-    size_t start = 0;
-
-    if (url.compare(0, 7, "http://") == 0) {
-        start = 7;
-    } else if (url.compare(0, 8, "https://") == 0) {
-        start = 8;
-    } else {
-        return false;
-    }
-
-    const size_t boundary = url.find_first_of("/?#", start);
-    const size_t end = ((boundary == std::string::npos) ? url.size() : boundary);
-
-    const size_t at = url.rfind('@', end - 1);
-    if (at == std::string::npos || (at < start)) {
-        return false;
-    }
-
-    const size_t colon = url.find(':', start);
-    if (colon == std::string::npos || (colon >= at)) {
-        return false;
-    }
-
-    password = url.substr(colon + 1, at - colon - 1);
-    return !password.empty();
-}
-
 const char* backend_name(MemoryReadBackend backend)
 {
     switch (backend) {
-    case MemoryReadBackend::ProcessVmReadv:
-        return "process_vm_readv";
-    case MemoryReadBackend::ProcMem:
-        return "/proc/<pid>/mem";
+        case MemoryReadBackend::ProcessVmReadv: return "process_vm_readv";
+        case MemoryReadBackend::ProcMem: return "/proc/<pid>/mem";
     }
     return "unknown";
 }

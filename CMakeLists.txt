@@ -38,6 +38,7 @@ set(RUNTIMEXRAY_SOURCES
     src/dynamic_analysis.cpp
     src/memory_reader.cpp
     src/memory_scanner.cpp
+    src/url_credential_extractor.cpp
     src/memory_region_policy.cpp
     src/memory_scan_coordinator.cpp
     src/finding_filter.cpp
@@ -198,6 +199,15 @@ target_include_directories(test_curl_config_extractor PRIVATE include)
 target_compile_options(test_curl_config_extractor PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME check_curl_config_extractor COMMAND $<TARGET_FILE:test_curl_config_extractor>)
 
+# HTTP(S) URL credential extractor unit tests
+add_executable(test_url_credential_extractor
+    tests/unit/test_url_credential_extractor.cpp
+    src/url_credential_extractor.cpp
+)
+target_include_directories(test_url_credential_extractor PRIVATE include)
+target_compile_options(test_url_credential_extractor PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME check_url_credential_extractor COMMAND $<TARGET_FILE:test_url_credential_extractor>)
+
 add_executable(test_narrative_sessions
     tests/unit/test_narrative_sessions.cpp
     src/narrative.cpp
@@ -267,6 +277,7 @@ add_executable(test_memory_scanner_self
     tests/memory_scanner/test_memory_scanner_self.cpp
     src/memory_reader.cpp
     src/memory_scanner.cpp
+    src/url_credential_extractor.cpp
     src/memory_region_policy.cpp
     src/secret_extractor.cpp
     src/netrc_extractor.cpp
